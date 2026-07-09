@@ -1,0 +1,24 @@
+{
+  "name": "td-stream-control",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Full-screen TouchDesigner WebRTC livestream with a labeled keystroke control panel that sends actions back over the data channel.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "webrtc-adapter": "^8.2.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.0",
+    "vite": "^5.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
+  }
+}

@@ -1,0 +1,10 @@
+# Render Blueprint — one-click setup via Dashboard → New → Blueprint.
+# (Or skip this file and create a Static Site manually; steps in SETUP.md.)
+# The console (index.html) is self-contained, so there's nothing to build:
+# Render just serves the repo root. Songs in audio/ deploy along with it.
+services:
+  - type: web
+    name: td-stream-control
+    runtime: static
+    buildCommand: ''
+    staticPublishPath: .

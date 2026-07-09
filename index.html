@@ -1,0 +1,2157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Transmission</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  /* ════════════════════════════════════════════════════════════════
+     COLOR SYSTEM — a warm broadcast console.
+     Resting/offline = sodium-amber accent. When the transmission goes
+     LIVE, `body.live` swaps THREE tokens (--signal/--glow/--edge) to
+     violet and the entire accent flips at once — status light, lit
+     station, active keycaps, TX highlight, enable-sound prompt. Nothing
+     hardcodes the accent; everything routes through these vars (tints
+     are derived with color-mix so they flip too). --warn is constant.
+     ════════════════════════════════════════════════════════════════ */
+  :root{
+    --bg:        #141009;                    /* warm near-black */
+    --ink:       #f3ebdd;                    /* warm white */
+    --ink-dim:   #9a8f7c;                    /* muted label */
+    --signal:    #ffb24a;                    /* amber — the accent (glows, active, selected) */
+    --signal-dim:#6f532a;                    /* unlit amber (offline / unselected) */
+    --glow:      rgba(255,178,74,.55);
+    --edge:      rgba(255,178,74,.16);
+    --panel:     rgba(18,14,8,.74);
+    --keycap:    #20190f; --keycap-hi:#2c2213;
+    --warn:      #ff7a4a;                     /* diagnostics warning — stays constant */
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --disp: 'Space Grotesk', system-ui, sans-serif;
+  }
+  /* Live override — applied to <body> the instant the connection is live. */
+  body.live{
+    --signal:#b07cff;                        /* violet — on-air accent */
+    --glow:rgba(176,124,255,.55);
+    --edge:rgba(176,124,255,.18);
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; margin:0; }
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:var(--mono);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ── Stage: the TouchDesigner stream fills the page ───────────── */
+  .stage{ position:fixed; inset:0; background:#000; display:grid; place-items:center; }
+  .stage video{ width:100%; height:100%; object-fit:contain; display:block; } /* letterbox, never crop */
+
+  .placeholder{
+    position:absolute; inset:0; display:grid; place-content:center; overflow:hidden;
+    text-align:center; color:var(--ink-dim);
+    background:
+      radial-gradient(120% 80% at 50% 35%, color-mix(in srgb, var(--signal) 6%, transparent), transparent 70%),
+      repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0 1px, transparent 1px 3px);
+  }
+  .placeholder__copy{           /* the readable copy, kept above the glyph field */
+    position:relative; z-index:1;
+    display:flex; flex-direction:column; align-items:center; gap:.6rem;
+  }
+  /* An unknown language in the background — hidden until the cursor passes over,
+     then revealed in a soft spotlight (a radial mask centered on the pointer).
+     Only lives in the placeholder, so it's gone the moment the stream is live. */
+  .glyphs{
+    position:absolute; inset:0; z-index:0; overflow:hidden;
+    font-family:var(--mono); font-size:.72rem; line-height:1.65; letter-spacing:.14em;
+    color:var(--signal); opacity:.6; white-space:pre; padding:1.4rem;
+    pointer-events:none; user-select:none;
+    -webkit-mask-image:radial-gradient(circle 60px at var(--mx,-999px) var(--my,-999px), #000 0%, rgba(0,0,0,.6) 42%, transparent 80%);
+            mask-image:radial-gradient(circle 60px at var(--mx,-999px) var(--my,-999px), #000 0%, rgba(0,0,0,.6) 42%, transparent 80%);
+  }
+  .placeholder .dotline{ font-size:.72rem; letter-spacing:.42em; text-transform:uppercase; }
+  .placeholder .big{ font-family:var(--disp); font-size:clamp(1.4rem,4vw,2.4rem); letter-spacing:.08em; color:var(--ink); font-weight:500; }
+  .placeholder .hint{ font-size:.7rem; color:var(--signal-dim); max-width:34ch; line-height:1.6; }
+
+  /* ── Status light (transmitter state) ─────────────────────────── */
+  .status{
+    position:fixed; top:max(1rem,env(safe-area-inset-top)); right:1.1rem; z-index:30;
+    display:flex; align-items:center; gap:.55rem;
+    font-size:.66rem; letter-spacing:.28em; text-transform:uppercase; color:var(--ink-dim);
+    user-select:none;
+  }
+  .status .led{ width:8px; height:8px; border-radius:50%; background:var(--signal-dim); }
+  .status.live .led{ background:var(--signal); box-shadow:0 0 10px var(--glow), 0 0 2px var(--signal); animation:breathe 2.4s ease-in-out infinite; }
+  .status.live{ color:var(--signal); }
+
+  /* ── Audio diagnostics (top-left, toggled with D — off by default) ─ */
+  .diag{
+    position:fixed; top:max(1rem,env(safe-area-inset-top)); left:1.1rem; z-index:30;
+    min-width:178px; padding:.7rem .85rem;
+    background:var(--panel); backdrop-filter:blur(14px) saturate(120%);
+    -webkit-backdrop-filter:blur(14px) saturate(120%);
+    border:1px solid var(--edge); border-radius:9px;
+    font-size:.62rem; letter-spacing:.04em; color:var(--ink-dim); user-select:none;
+  }
+  .diag[hidden]{ display:none; }
+  .diag h4{ margin:0 0 .55rem; font-family:var(--disp); font-weight:500; font-size:.6rem; letter-spacing:.26em; text-transform:uppercase; color:var(--ink); }
+  .diag-row{ display:flex; justify-content:space-between; gap:1.2rem; padding:.16rem 0; }
+  .diag-row .v{ color:var(--ink); font-weight:500; font-variant-numeric:tabular-nums; }
+  .diag-row .v.warn{ color:var(--warn); }
+  .diag .src{ margin-top:.5rem; padding-top:.45rem; border-top:1px solid var(--edge); font-size:.56rem; line-height:1.5; color:var(--signal-dim); }
+
+  /* ── Enable-sound prompt (browsers block unmuted autoplay) ────── */
+  .enable-sound{
+    position:fixed; top:max(1rem,env(safe-area-inset-top)); left:50%; transform:translateX(-50%); z-index:35;
+    display:flex; align-items:center; gap:.5rem;
+    font-family:var(--mono); font-weight:600; font-size:.66rem; letter-spacing:.2em; text-transform:uppercase;
+    color:var(--bg); background:var(--signal); border:none; border-radius:22px;
+    padding:.55rem 1.05rem; cursor:pointer; box-shadow:0 0 22px var(--glow);
+  }
+  .enable-sound[hidden]{ display:none; }
+  .enable-sound:focus-visible{ outline:2px solid var(--ink); outline-offset:2px; }
+
+  /* ── Console: the control surface, docked at the bottom ───────── */
+  .console{
+    position:fixed; left:0; right:0; bottom:0; z-index:20;
+    background:var(--panel);
+    backdrop-filter:blur(14px) saturate(120%);
+    -webkit-backdrop-filter:blur(14px) saturate(120%);
+    border-top:1px solid var(--edge);
+    box-shadow:0 -1px 0 rgba(0,0,0,.5), 0 -20px 40px rgba(0,0,0,.35);
+    padding:1rem 1.25rem calc(1rem + env(safe-area-inset-bottom));
+    display:flex; flex-direction:column; gap:1rem;
+    transition:transform .32s cubic-bezier(.2,.8,.2,1), opacity .32s;
+  }
+  .console.hidden{ transform:translateY(105%); opacity:0; pointer-events:none; }
+
+  /* Collapse tab: a small arrow riding the console's top edge. */
+  .collapse-tab{
+    position:absolute; top:-26px; left:50%; transform:translateX(-50%);
+    width:58px; height:26px; display:grid; place-items:center;
+    background:var(--panel);
+    backdrop-filter:blur(14px) saturate(120%); -webkit-backdrop-filter:blur(14px) saturate(120%);
+    border:1px solid var(--edge); border-bottom:none; border-radius:10px 10px 0 0;
+    color:var(--ink-dim); font-size:.72rem; line-height:1; cursor:pointer;
+    transition:color .15s, border-color .15s;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .collapse-tab:hover{ color:var(--signal); border-color:color-mix(in srgb, var(--signal) 40%, transparent); }
+  .collapse-tab:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
+
+  .zone{ display:flex; flex-direction:column; gap:.55rem; }
+  .eyebrow{
+    display:flex; align-items:center; gap:.7rem;
+    font-size:.62rem; letter-spacing:.34em; text-transform:uppercase; color:var(--ink-dim);
+  }
+  .eyebrow::after{ content:""; flex:1; height:1px; background:linear-gradient(90deg,var(--edge),transparent); }
+
+  /* ── Stations: radio group styled as a tuner preset bank ──────── */
+  .stations{ display:flex; flex-wrap:wrap; gap:.55rem; }
+  .station{ position:relative; }
+  .station input{ position:absolute; opacity:0; width:0; height:0; }
+  .station label{
+    display:flex; align-items:center; gap:.6rem; cursor:pointer;
+    padding:.55rem .8rem .55rem .7rem;
+    border:1px solid var(--edge); border-radius:7px; background:rgba(255,255,255,.015);
+    transition:border-color .18s, background .18s, color .18s;
+  }
+  .station .tuner{
+    width:9px; height:9px; border-radius:50%;
+    border:1.5px solid var(--signal-dim); background:transparent; flex:none;
+    transition:all .18s;
+  }
+  .station .meta{ display:flex; flex-direction:column; line-height:1.15; }
+  .station .name{ font-family:var(--disp); font-weight:500; font-size:.92rem; letter-spacing:.01em; }
+  .station .note{ font-size:.62rem; color:var(--ink-dim); letter-spacing:.02em; }
+  .station label:hover{ border-color:color-mix(in srgb, var(--signal) 38%, transparent); }
+  .station input:focus-visible + label{ outline:2px solid var(--signal); outline-offset:2px; }
+  .station input:checked + label{
+    border-color:var(--signal); background:color-mix(in srgb, var(--signal) 8%, transparent);
+    box-shadow:0 0 16px color-mix(in srgb, var(--signal) 14%, transparent) inset;
+  }
+  .station input:checked + label .tuner{
+    border-color:var(--signal); background:var(--signal);
+    box-shadow:0 0 10px var(--glow); animation:breathe 2.4s ease-in-out infinite;
+  }
+  .station input:checked + label .name{ color:var(--signal); }
+
+  /* ── Controls: discrete keys, function label ABOVE each cap ───── */
+  .keys{ display:flex; flex-wrap:wrap; gap:.7rem; }
+  .key-slot{ display:flex; flex-direction:column; align-items:center; gap:.4rem; }
+  .key-label{ font-size:.6rem; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-dim); white-space:nowrap; }
+  .keycap{
+    font-family:var(--mono); font-weight:600; font-size:.9rem; color:var(--ink);
+    min-width:3.1rem; height:3.1rem; padding:0 .7rem;
+    display:grid; place-items:center; cursor:pointer;
+    background:linear-gradient(180deg,var(--keycap-hi),var(--keycap));
+    border:1px solid var(--edge); border-bottom-width:3px; border-radius:9px;
+    box-shadow:0 2px 0 rgba(0,0,0,.4);
+    transition:transform .06s, box-shadow .12s, border-color .12s, color .12s, background .12s;
+    user-select:none; -webkit-tap-highlight-color:transparent;
+  }
+  .keycap:hover{ border-color:color-mix(in srgb, var(--signal) 42%, transparent); }
+  .keycap:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
+  .keycap.active{
+    color:var(--signal);
+    background:linear-gradient(180deg, color-mix(in srgb, var(--signal) 24%, transparent), color-mix(in srgb, var(--signal) 10%, transparent));
+    border-color:var(--signal);
+    box-shadow:0 0 18px var(--glow), 0 0 4px var(--signal);
+    transform:translateY(2px); border-bottom-width:1px;
+  }
+  /* Latched ON (Blackout toggle): solid fill, pressed-in, steady glow — stays
+     lit until pressed again, clearly distinct from the momentary .active flash. */
+  .keycap.on{
+    color:var(--bg);
+    background:linear-gradient(180deg, var(--signal), color-mix(in srgb, var(--signal) 72%, #000));
+    border-color:var(--signal);
+    box-shadow:0 0 22px var(--glow), 0 0 6px var(--signal);
+    transform:translateY(2px); border-bottom-width:1px;
+  }
+
+  /* ── Blackout: a true cut-to-black over the stage, with an intentional marker.
+     Sits above the video/placeholder but BELOW the console/status, so the
+     operator can always toggle it back off. ─────────────────────────────── */
+  .blackout{
+    position:fixed; inset:0; z-index:15;
+    background:#000; opacity:0; pointer-events:none;
+    display:grid; place-items:center;
+    transition:opacity .22s ease;
+  }
+  .blackout.show{ opacity:1; }
+  .blackout span{
+    font-family:var(--mono); font-size:.7rem; letter-spacing:.42em; text-transform:uppercase;
+    color:var(--signal); opacity:.5;
+    animation:breathe 2.4s ease-in-out infinite;   /* gentle pulse = intentional, not a dead feed */
+  }
+
+  /* ── Transport: play / pause / skip the music ────────────────── */
+  .transport{ display:flex; flex-wrap:wrap; gap:.55rem; }
+  .tbtn{
+    display:flex; align-items:center; gap:.5rem;
+    font-family:var(--mono); font-weight:500; font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:var(--ink);
+    padding:.55rem .9rem; cursor:pointer;
+    background:linear-gradient(180deg,var(--keycap-hi),var(--keycap));
+    border:1px solid var(--edge); border-radius:7px;
+    transition:border-color .14s, color .14s, background .14s, box-shadow .14s, transform .06s;
+    user-select:none; -webkit-tap-highlight-color:transparent;
+  }
+  .tbtn .ico{ font-size:1rem; line-height:1; }
+  .tbtn:hover{ border-color:color-mix(in srgb, var(--signal) 42%, transparent); }
+  .tbtn:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
+  .tbtn:active{ transform:translateY(1px); }
+  .tbtn.active,
+  .tbtn[aria-pressed="true"]{                          /* lit (current play/pause state, or skip pulse) */
+    color:var(--signal); border-color:var(--signal);
+    background:linear-gradient(180deg, color-mix(in srgb, var(--signal) 22%, transparent), color-mix(in srgb, var(--signal) 9%, transparent));
+    box-shadow:0 0 16px var(--glow);
+  }
+
+  /* ── TX readout + console footer ──────────────────────────────── */
+  .footer{ display:flex; align-items:center; justify-content:space-between; gap:1rem; padding-top:.2rem; }
+  .foot-left{ display:flex; align-items:center; gap:.7rem; min-width:0; }
+  .tx{ font-size:.66rem; letter-spacing:.06em; color:var(--ink-dim); min-height:1em; }
+  .tx b{ color:var(--signal); font-weight:600; }
+  .foot-btns{ display:flex; gap:.5rem; flex:none; }
+
+  /* Footer icon links (Home → freelance site, Store → shop) with a hover/focus tooltip */
+  .icon-link{
+    position:relative; display:inline-grid; place-items:center; flex:none;
+    width:2rem; height:2rem; color:var(--ink-dim);
+    border:1px solid var(--edge); border-radius:6px;
+    transition:color .15s, border-color .15s;
+  }
+  .icon-link:hover{ color:var(--signal); border-color:color-mix(in srgb, var(--signal) 40%, transparent); }
+  .icon-link:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
+  .icon-link svg{ width:1rem; height:1rem; }
+  .icon-tip{
+    position:absolute; bottom:calc(100% + .55rem); left:0; white-space:nowrap;
+    padding:.4rem .6rem; border-radius:6px;
+    background:var(--panel); border:1px solid var(--edge); color:var(--ink);
+    font-family:var(--mono); font-size:.62rem; letter-spacing:.06em; text-transform:none;
+    box-shadow:0 8px 24px rgba(0,0,0,.5);
+    opacity:0; transform:translateY(4px); pointer-events:none;
+    transition:opacity .15s, transform .15s;
+  }
+  .icon-link:hover .icon-tip, .icon-link:focus-visible .icon-tip{ opacity:1; transform:translateY(0); }
+  .ctl-btn{
+    font-family:var(--mono); font-size:.6rem; letter-spacing:.2em; text-transform:uppercase;
+    color:var(--ink-dim); background:none; border:1px solid var(--edge); border-radius:6px;
+    padding:.35rem .6rem; cursor:pointer; transition:color .15s, border-color .15s;
+  }
+  .ctl-btn:hover{ color:var(--signal); border-color:color-mix(in srgb, var(--signal) 38%, transparent); }
+  .ctl-btn:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
+  .ctl-btn[aria-pressed="true"]{ color:var(--signal); border-color:var(--signal); }
+
+  /* re-show tab when console is hidden */
+  .reshow{
+    position:fixed; bottom:1rem; left:50%; transform:translateX(-50%); z-index:21;
+    font-family:var(--mono); font-size:.6rem; letter-spacing:.24em; text-transform:uppercase;
+    color:var(--bg); background:var(--signal); border:none; border-radius:20px;
+    padding:.5rem 1rem; cursor:pointer; box-shadow:0 0 18px var(--glow);
+    opacity:0; pointer-events:none; transition:opacity .25s;
+  }
+  .reshow.show{ opacity:1; pointer-events:auto; }
+  .reshow:focus-visible{ outline:2px solid var(--ink); outline-offset:2px; }
+
+  /* ── Contact CTA + commission modal ("custom transmissions") ──── */
+  .placeholder__contact{
+    margin-top:.5rem; font-size:.7rem; letter-spacing:.04em; color:var(--signal-dim);
+  }
+  .link{
+    font:inherit; color:var(--signal); background:none; border:none; padding:0; cursor:pointer;
+    letter-spacing:.04em; border-bottom:1px solid color-mix(in srgb, var(--signal) 40%, transparent);
+    transition:opacity .15s;
+  }
+  .link:hover{ opacity:.8; }
+  .link:focus-visible{ outline:2px solid var(--signal); outline-offset:3px; }
+
+  .modal{ position:fixed; inset:0; z-index:50; display:grid; place-items:center; padding:1.25rem; }
+  .modal[hidden]{ display:none; }
+  .modal__backdrop{ position:absolute; inset:0; background:rgba(8,6,3,.72); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); }
+  .modal__panel{
+    position:relative; width:min(30rem,100%); max-height:90vh; overflow:auto;
+    background:var(--panel); border:1px solid var(--edge); border-radius:12px;
+    box-shadow:0 24px 60px rgba(0,0,0,.6), 0 0 40px color-mix(in srgb, var(--signal) 10%, transparent);
+    padding:1.6rem 1.5rem; color:var(--ink);
+  }
+  .modal__close{
+    position:absolute; top:.7rem; right:.8rem; width:2rem; height:2rem; line-height:1;
+    background:none; border:1px solid var(--edge); border-radius:6px; color:var(--ink-dim); cursor:pointer;
+    font-size:.8rem; transition:color .15s, border-color .15s;
+  }
+  .modal__close:hover{ color:var(--signal); border-color:color-mix(in srgb, var(--signal) 40%, transparent); }
+  .modal__close:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
+  .modal__title{ font-family:var(--disp); font-weight:500; font-size:1.5rem; letter-spacing:.01em; margin:.5rem 0 .4rem; color:var(--ink); }
+  .modal__blurb{ font-size:.8rem; line-height:1.6; color:var(--ink-dim); margin:0 0 1.1rem; max-width:30ch; }
+  .modal__form{ display:flex; flex-direction:column; gap:.7rem; }
+  .modal__form label{ display:flex; flex-direction:column; gap:.3rem; font-size:.6rem; letter-spacing:.22em; text-transform:uppercase; color:var(--ink-dim); }
+  .modal__form input, .modal__form textarea{
+    font-family:var(--mono); font-size:.85rem; color:var(--ink); text-transform:none; letter-spacing:normal;
+    background:rgba(0,0,0,.28); border:1px solid var(--edge); border-radius:6px; padding:.55rem .65rem; resize:vertical;
+    transition:border-color .15s;
+  }
+  .modal__form input:focus, .modal__form textarea:focus{ outline:none; border-color:var(--signal); }
+  .modal__form input::placeholder, .modal__form textarea::placeholder{ color:var(--signal-dim); }
+  .modal__send{
+    margin-top:.3rem; font-family:var(--mono); font-weight:600; font-size:.7rem; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--bg); background:var(--signal); border:none; border-radius:7px; padding:.7rem 1rem; cursor:pointer;
+    box-shadow:0 0 18px var(--glow); transition:opacity .15s;
+  }
+  .modal__send:hover{ opacity:.9; }
+  .modal__send:focus-visible{ outline:2px solid var(--ink); outline-offset:2px; }
+  .modal__alt{ margin-top:1rem; font-size:.66rem; letter-spacing:.04em; color:var(--ink-dim); }
+  .modal__alt a{ color:var(--signal); }
+
+  /* ── Preset visuals: the full-screen reactive canvas ──────────── */
+  .stage canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; }
+  .stage canvas[hidden]{ display:none; }
+
+  /* ── Macro mode toggle: PRESETS ↔ LIVE STATION ────────────────── */
+  .macro{ display:flex; flex-wrap:wrap; gap:.55rem; }
+  .mbtn{
+    display:flex; align-items:center; gap:.6rem; cursor:pointer;
+    font-family:var(--disp); font-weight:500; font-size:.95rem; letter-spacing:.12em; text-transform:uppercase;
+    color:var(--ink-dim); padding:.6rem 1.15rem;
+    background:rgba(255,255,255,.015); border:1px solid var(--edge); border-radius:7px;
+    transition:border-color .18s, background .18s, color .18s, box-shadow .18s;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .mbtn .tuner{
+    width:9px; height:9px; border-radius:50%;
+    border:1.5px solid var(--signal-dim); background:transparent; flex:none;
+    transition:all .18s;
+  }
+  .mbtn:hover{ border-color:color-mix(in srgb, var(--signal) 38%, transparent); }
+  .mbtn:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
+  .mbtn[aria-pressed="true"]{
+    color:var(--signal); border-color:var(--signal);
+    background:color-mix(in srgb, var(--signal) 8%, transparent);
+    box-shadow:0 0 16px color-mix(in srgb, var(--signal) 14%, transparent) inset;
+  }
+  .mbtn[aria-pressed="true"] .tuner{
+    border-color:var(--signal); background:var(--signal);
+    box-shadow:0 0 10px var(--glow); animation:breathe 2.4s ease-in-out infinite;
+  }
+
+  /* ── Station cards: track chip + upload/clear actions ─────────── */
+  .station .track{
+    font-size:.56rem; color:var(--signal-dim); letter-spacing:.02em;
+    max-width:17ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .station .track.loaded{ color:var(--ink-dim); }
+  .st-actions{ display:flex; gap:.3rem; margin-left:.5rem; }
+  .st-icon{
+    width:1.55rem; height:1.55rem; display:grid; place-items:center; flex:none;
+    background:none; border:1px solid var(--edge); border-radius:5px; color:var(--ink-dim);
+    font-size:.72rem; line-height:1; cursor:pointer; transition:color .15s, border-color .15s;
+  }
+  .st-icon:hover{ color:var(--signal); border-color:color-mix(in srgb, var(--signal) 40%, transparent); }
+  .st-icon:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
+  .st-icon[hidden]{ display:none; }
+
+  /* ── Signal VU (bass / snare / treble) in the footer ──────────── */
+  .vu{ display:flex; gap:.5rem; align-items:flex-end; flex:none; }
+  .vu .ch{ display:flex; flex-direction:column; align-items:center; gap:.2rem; }
+  .vu .bar{
+    width:8px; height:1.15rem; border:1px solid var(--edge); border-radius:2px;
+    position:relative; overflow:hidden; background:rgba(0,0,0,.3);
+  }
+  .vu .bar i{
+    position:absolute; left:0; right:0; bottom:0; height:0%;
+    background:var(--signal); box-shadow:0 0 8px var(--glow);
+  }
+  .vu .lb{ font-size:.48rem; letter-spacing:.14em; color:var(--signal-dim); }
+
+  /* ── Preset volume ─────────────────────────────────────────────── */
+  .vol{ display:flex; align-items:center; gap:.55rem; padding:.35rem .2rem; }
+  .vol .lb{ font-size:.6rem; letter-spacing:.22em; text-transform:uppercase; color:var(--ink-dim); }
+  .vol input[type="range"]{ width:96px; accent-color:var(--signal); background:transparent; cursor:pointer; }
+
+  /* ── Idle auto-hide: after 4s without input the whole chrome fades
+       for a clean full-screen visual; any movement brings it back. ── */
+  body.idle{ cursor:none; }
+  body.idle .console:not(.hidden), body.idle .status, body.idle .reshow{ opacity:0; pointer-events:none; }
+  .status{ transition:opacity .5s ease; }
+
+  /* ── Drag-drop overlay: drop an audio file onto the page ───────── */
+  .dropzone{
+    position:fixed; inset:.8rem; z-index:60; display:grid; place-items:center;
+    background:rgba(8,6,3,.7); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px);
+    border:2px dashed var(--signal); border-radius:14px;
+    pointer-events:none; opacity:0; transition:opacity .18s;
+  }
+  .dropzone.show{ opacity:1; }
+  .dropzone span{ font-size:.72rem; letter-spacing:.3em; text-transform:uppercase; color:var(--signal); }
+
+  @keyframes breathe{ 0%,100%{ opacity:1; } 50%{ opacity:.55; } }
+
+  @media (max-width:560px){
+    .keycap{ min-width:2.7rem; height:2.7rem; }
+    .console{ padding:.85rem .9rem calc(.85rem + env(safe-area-inset-bottom)); gap:.85rem; }
+    .diag{ left:.7rem; min-width:160px; }
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{ animation:none !important; transition:none !important; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- The TouchDesigner stream fills the screen -->
+  <div class="stage">
+    <canvas id="vis" aria-hidden="true"></canvas>
+    <video id="stream" autoplay muted playsinline></video>
+    <div class="placeholder" id="placeholder">
+      <div class="glyphs" id="glyphs" aria-hidden="true"></div>
+      <div class="placeholder__copy">
+        <div class="dotline">· · ·  awaiting signal  · · ·</div>
+        <div class="big">TRANSMISSION</div>
+        <div class="hint" id="placeholderHint">Stream will appear here once the WebRTC connection to TouchDesigner is live.</div>
+        <div class="placeholder__contact">
+          Custom transmissions —
+          <button type="button" class="link" data-contact-open>get in touch →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Blackout overlay (toggled by the Blackout control) -->
+  <div class="blackout" id="blackout" aria-hidden="true"><span>◼ Blackout</span></div>
+
+  <div class="status" id="status"><span class="led"></span><span id="statusText">Offline</span></div>
+
+  <!-- Audio-health diagnostics (D) — off by default -->
+  <div class="diag" id="diag" hidden aria-live="polite">
+    <h4>Audio diagnostics</h4>
+    <div class="diag-row"><span>packet loss</span><span class="v" id="dLoss">—</span></div>
+    <div class="diag-row"><span>jitter</span><span class="v" id="dJitter">—</span></div>
+    <div class="diag-row"><span>buffer</span><span class="v" id="dBuffer">—</span></div>
+    <div class="diag-row"><span>conceal</span><span class="v" id="dConceal">—</span></div>
+    <div class="src" id="diagVerdict">awaiting audio stream…</div>
+  </div>
+
+  <!-- Enable-sound gate (shown when live but still muted) -->
+  <button class="enable-sound" id="enableSound" hidden>♪ Enable sound</button>
+
+  <!-- Control surface -->
+  <section class="console" id="console" aria-label="Stream controls">
+    <button class="collapse-tab" id="collapseTab" type="button" title="Collapse controls (H)" aria-label="Collapse controls (H)">▾</button>
+
+    <div class="zone">
+      <div class="eyebrow">Mode</div>
+      <div class="macro" id="macro" role="group" aria-label="Console mode">
+        <button class="mbtn" type="button" data-mode="presets" aria-pressed="true"><span class="tuner" aria-hidden="true"></span>Presets</button>
+        <button class="mbtn" type="button" data-mode="live" aria-pressed="false"><span class="tuner" aria-hidden="true"></span>Live Station</button>
+      </div>
+    </div>
+
+    <div class="zone">
+      <div class="eyebrow">Stations</div>
+      <div class="stations" id="stations" role="radiogroup" aria-label="Choose a station"></div>
+    </div>
+
+    <div class="zone">
+      <div class="eyebrow">Transport</div>
+      <div class="transport" id="transport">
+        <button class="tbtn" type="button" data-transport="play"  aria-label="Play"  aria-pressed="false"><span class="ico" aria-hidden="true">▶</span>Play</button>
+        <button class="tbtn" type="button" data-transport="pause" aria-label="Pause" aria-pressed="false"><span class="ico" aria-hidden="true">⏸</span>Pause</button>
+        <button class="tbtn" type="button" data-transport="skip"  aria-label="Skip"><span class="ico" aria-hidden="true">⏭</span>Skip</button>
+        <div class="vol"><span class="lb">Vol</span><input type="range" id="vol" min="0" max="100" value="80" aria-label="Preset volume"></div>
+      </div>
+    </div>
+
+    <div class="zone">
+      <div class="eyebrow">Controls</div>
+      <div class="keys" id="keys"></div>
+    </div>
+
+    <div class="footer">
+      <div class="foot-left">
+        <a class="icon-link" id="homeBtn" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9h5v-5h4v5h5v-9"/>
+          </svg>
+          <span class="icon-tip" id="homeTip">Visit my freelance portfolio ↗</span>
+        </a>
+        <a class="icon-link" id="storeBtn" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6 7h12l-1 12.5H7L6 7Z"/><path d="M9 7V6a3 3 0 0 1 6 0v1"/>
+          </svg>
+          <span class="icon-tip" id="storeTip">Store — coming soon</span>
+        </a>
+        <div class="tx" id="tx">TX idle</div>
+        <div class="vu" id="vu" aria-hidden="true" title="Signal — bass / snare / treble">
+          <span class="ch"><span class="bar"><i id="vuBass"></i></span><span class="lb">BAS</span></span>
+          <span class="ch"><span class="bar"><i id="vuSnr"></i></span><span class="lb">SNR</span></span>
+          <span class="ch"><span class="bar"><i id="vuTrb"></i></span><span class="lb">TRB</span></span>
+        </div>
+      </div>
+      <div class="foot-btns">
+        <button class="ctl-btn" data-contact-open title="Contact us for custom transmissions">Contact</button>
+        <button class="ctl-btn" id="diagBtn" aria-pressed="false" title="Audio diagnostics (D)">Diag · D</button>
+        <button class="ctl-btn" id="hideBtn" title="Hide controls (H)">Hide · H</button>
+      </div>
+    </div>
+  </section>
+
+  <button class="reshow" id="reshow">▴ Controls · H</button>
+
+  <!-- Contact / commission modal ("custom transmissions") -->
+  <div class="modal" id="contact" hidden>
+    <div class="modal__backdrop" data-contact-close></div>
+    <div class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="contactTitle">
+      <button class="modal__close" type="button" data-contact-close aria-label="Close">✕</button>
+      <div class="eyebrow">Custom transmissions</div>
+      <h2 class="modal__title" id="contactTitle">Commission a transmission</h2>
+      <p class="modal__blurb" id="contactBlurb"></p>
+      <form class="modal__form" id="contactForm" novalidate>
+        <label>Name<input name="name" type="text" autocomplete="name" required></label>
+        <label>Email<input name="email" type="email" autocomplete="email" required></label>
+        <label>Project<textarea name="brief" rows="3" placeholder="What are you building?"></textarea></label>
+        <button class="modal__send" type="submit">Send transmission →</button>
+      </form>
+      <div class="modal__alt">or email <a id="contactMailto" href="#">—</a></div>
+    </div>
+  </div>
+
+<input type="file" id="fileIn" accept="audio/*" hidden>
+<div class="dropzone" id="dropzone" aria-hidden="true"><span id="dropLabel">Drop audio → assign to station</span></div>
+
+<script>
+/* ════════════════════════════════════════════════════════════════
+   CONFIG — edit these to define your controls.
+   ════════════════════════════════════════════════════════════════ */
+
+// Each key: the physical key, the label shown ABOVE the cap, and the
+// `action` string sent to TouchDesigner. Use ' ' for the spacebar.
+const KEY_MAP = [
+  { key: '1', label: 'Scene 1',  action: 'scene_1'  },
+  { key: '2', label: 'Scene 2',  action: 'scene_2'  },
+  { key: '3', label: 'Scene 3',  action: 'scene_3'  },
+  { key: '4', label: 'Scene 4',  action: 'scene_4'  },
+  { key: 'q', label: 'Action 1', action: 'action_1' },
+  { key: 'w', label: 'Action 2', action: 'action_2' },
+  { key: 'e', label: 'Action 3', action: 'action_3' },
+  { key: 'b', label: 'Blackout', action: 'blackout' },
+  { key: ' ', label: 'Trigger',  action: 'trigger'  },
+];
+
+// Each station: an `id` sent to TouchDesigner, a display `name`, and a
+// short `note`. Picking one sends { type:'station', station:id }.
+// In PRESETS mode each station also has a built-in audio-reactive visual
+// (see the PRESET VISUALS section): ambient → lofi bedroom, pulse → Tokyo
+// neon, static → broadcast noise, drift → open water.
+const STATIONS = [
+  { id: 'ambient', name: 'Ambient', note: 'lofi bedroom'       },
+  { id: 'pulse',   name: 'Pulse',   note: 'tokyo · 124 bpm'    },
+  { id: 'static',  name: 'Static',  note: 'soft noise'         },
+  { id: 'drift',   name: 'Drift',   note: 'water / spacious'   },
+];
+
+/* ── Preset music ─────────────────────────────────────────────────
+   Two ways to give a station its song (uploads override defaults):
+
+   1. DEFAULT TRACKS (everyone hears these): put audio files in an
+      `audio/` folder next to this page and reference them here. They
+      deploy with the site (e.g. on Render) and load for every visitor.
+        e.g.  ambient: 'audio/ambient.mp3',
+   2. BROWSER UPLOADS (operator-side): the ↥ button on a station card
+      — or dragging a file onto the page — assigns a song to a station.
+      Stored in THIS browser (IndexedDB), persists across reloads, and
+      overrides the default until cleared with ✕.                      */
+const PRESET_TRACKS = {
+  ambient: '',   // e.g. 'audio/ambient.mp3'
+  pulse:   '',
+  static:  '',
+  drift:   '',
+};
+
+// NOTE: 'h' (hide console) and 'd' (diagnostics) are handled directly in the
+// keydown listener below — keep them OUT of KEY_MAP so they don't clash.
+
+/* ── Audio robustness config ──────────────────────────────────────
+   jitterBufferMs: receive-side buffer that smooths NETWORK jitter/loss
+     into continuous audio instead of clicks/gaps. 200 ms is a solid
+     default; 400–800 for a rock-solid music feed (max 4000). It delays
+     ONLY the displayed stream — the keyboard/station controls ride the
+     data channel and stay instant at any buffer size. If A/V are synced,
+     the larger buffer pulls video along too, keeping reactive visuals
+     locked to the sound.
+   startMuted: start muted so the video can autoplay; the user clicks
+     "Enable sound" to unmute (browsers block unmuted autoplay). */
+const AUDIO = { jitterBufferMs: 200, startMuted: true };
+
+// Where your TouchDesigner signalingServer lives. Leave the placeholder
+// in to run this file standalone (controls work, nothing connects).
+const CONNECTION = {
+  signalingUrl: 'wss://[SIGNALING_SERVER_URL]:[PORT]',     // ← EDIT to enable WebRTC, e.g. 'wss://192.168.1.50:443'
+  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],  // add a TURN server for remote viewers
+  peerAddressFilter: '',            // only auto-call a signaling peer whose address contains this ('' = first peer)
+  dataChannelLabel: 'ControlData',  // WebRTC data channel label TD listens on
+  reconnectMinMs: 1000,             // signaling WebSocket reconnect backoff
+  reconnectMaxMs: 10000,
+  // Envelope stamped on every signaling message (TD Signaling API schema).
+  metadata: { apiVersion: '1.0.1', compVersion: '1.0.1', compOrigin: 'WebRTC', projectName: 'TDStreamControl' },
+};
+
+// "Contact us for custom transmissions" — the commission CTA. The form has no
+// backend; submitting composes a pre-filled email via the visitor's mail client.
+const CONTACT = {
+  email:   'hello@[YOUR_STUDIO].com',   // ← EDIT to your address
+  subject: 'Custom transmission enquiry',
+  blurb:   'Bespoke visuals, installations, and live shows. Tell us what you’re building and we’ll be in touch.',
+};
+
+// Home button → your personal freelance site (opens in a new tab). The tooltip
+// text describes where it goes.
+const HOME = {
+  url: 'https://[YOUR_FREELANCE_SITE]',   // ← EDIT to your site
+  tip: 'Visit my freelance portfolio ↗',
+};
+
+// Store button → your shop (link to be added later). Until `url` is filled in,
+// the button shows but doesn't navigate; update the tip when it goes live.
+const STORE = {
+  url: '',                                // ← ADD your store link later
+  tip: 'Store — coming soon',
+};
+
+/* ════════════════════════════════════════════════════════════════
+   Messages sent to TouchDesigner over the data channel:
+     keys      → { "type": "key",       "action": "<action>" }
+     stations  → { "type": "station",   "station": "<id>" }
+     transport → { "type": "transport", "action": "play" | "pause" | "skip" }
+   Blackout is a latching toggle, so its key message also carries state:
+     blackout  → { "type": "key", "action": "blackout", "state": "on" | "off" }
+   In TD these arrive on the WebRTC DAT; switch on `type` and route.
+
+   TouchDesigner-side AUDIO fixes (the client can't repair audio that
+   was already glitchy before it hit the stream):
+     • Raise the Audio Device Out / Audio Stream Out CHOP buffer size.
+     • Keep the whole project at 48 kHz to match WebRTC/Opus.
+     • Keep per-frame cook time well under the audio buffer duration so
+       CPU/GPU spikes don't starve the audio and crackle at the source.
+   ════════════════════════════════════════════════════════════════ */
+
+const videoEl   = document.getElementById('stream');
+const placeEl   = document.getElementById('placeholder');
+const statusEl  = document.getElementById('status');
+const statusTxt = document.getElementById('statusText');
+const txEl      = document.getElementById('tx');
+const consoleEl = document.getElementById('console');
+const reshowEl  = document.getElementById('reshow');
+const enableEl  = document.getElementById('enableSound');
+const diagEl    = document.getElementById('diag');
+const diagBtn   = document.getElementById('diagBtn');
+const blackoutEl = document.getElementById('blackout');
+
+let pc = null;
+let dataChannel = null;
+let currentStation = STATIONS[0]?.id ?? null;
+let isLive = false;
+let blackoutOn = false;
+const lastFire = {};   // per-action lockout (debounce repeats + click/keydown dedupe)
+
+videoEl.muted = AUDIO.startMuted;
+
+/* ── Send: uses the data channel if open, always echoes to the TX readout ── */
+function sendToTD(payload){
+  const msg = JSON.stringify(payload);
+  if (dataChannel && dataChannel.readyState === 'open') dataChannel.send(msg);
+  const label = payload.station || payload.mode ||
+    ((payload.action || '') + (payload.state ? ' ' + payload.state : ''));
+  txEl.innerHTML = `TX → <b>${payload.type}</b> · ${label}`;
+}
+
+/* ── Build the keycaps (label above, key on the cap) ── */
+const keysEl = document.getElementById('keys');
+KEY_MAP.forEach(item => {
+  const slot = document.createElement('div'); slot.className = 'key-slot';
+
+  const lbl = document.createElement('div'); lbl.className = 'key-label';
+  lbl.textContent = item.label;
+
+  const cap = document.createElement('button');
+  cap.type = 'button'; cap.className = 'keycap';
+  cap.dataset.key = item.key.toLowerCase();
+  cap.dataset.action = item.action;
+  cap.textContent = item.key === ' ' ? 'SPACE' : item.key.toUpperCase();
+  cap.setAttribute('aria-label', `${item.label} (${item.key === ' ' ? 'space' : item.key} key)`);
+  cap.addEventListener('click', () => fireKey(item.action));
+
+  slot.append(lbl, cap);
+  keysEl.appendChild(slot);
+});
+
+function fireKey(action){
+  const now = performance.now();
+  if (lastFire[action] && now - lastFire[action] < 70) return;  // dedupe click/keydown + repeats
+  lastFire[action] = now;
+
+  // Blackout is a latching toggle, not a momentary trigger.
+  if (action === 'blackout'){
+    blackoutOn = !blackoutOn;
+    sendToTD({ type: 'key', action: 'blackout', state: blackoutOn ? 'on' : 'off' });
+    applyBlackout();
+    return;
+  }
+
+  sendToTD({ type: 'key', action });
+  const cap = keysEl.querySelector(`.keycap[data-action="${action}"]`);
+  if (cap){ cap.classList.add('active'); setTimeout(() => cap.classList.remove('active'), 140); }
+
+  // PRESETS mode conveniences: 1–4 also tune the matching station locally,
+  // Space (Trigger) toggles the local player. (TD still receives the key.)
+  if (mode === 'presets'){
+    const m = /^scene_([1-4])$/.exec(action);
+    if (m){
+      const st = STATIONS[+m[1] - 1];
+      if (st){
+        const input = document.getElementById(`st-${st.id}`);
+        if (input) input.checked = true;
+        selectStation(st.id);
+      }
+    }
+    if (action === 'trigger') presetToggle();
+  }
+}
+
+// Reflect the blackout toggle: latch the cap "on" and cut the stage to black.
+function applyBlackout(){
+  const cap = keysEl.querySelector('.keycap[data-action="blackout"]');
+  if (cap){ cap.classList.toggle('on', blackoutOn); cap.setAttribute('aria-pressed', String(blackoutOn)); }
+  blackoutEl.classList.toggle('show', blackoutOn);
+}
+applyBlackout();   // initialise the off-state (also sets aria-pressed)
+
+/* ── Build the station radio group ── */
+const stationsEl = document.getElementById('stations');
+STATIONS.forEach((s, i) => {
+  const wrap = document.createElement('div'); wrap.className = 'station';
+  const input = document.createElement('input');
+  input.type = 'radio'; input.name = 'station'; input.id = `st-${s.id}`; input.value = s.id;
+  input.checked = i === 0;
+  input.addEventListener('change', () => selectStation(s.id));
+
+  const label = document.createElement('label'); label.setAttribute('for', `st-${s.id}`);
+  label.innerHTML =
+    `<span class="tuner" aria-hidden="true"></span>` +
+    `<span class="meta"><span class="name">${s.name}</span><span class="note">${s.note}</span>` +
+    `<span class="track" id="trk-${s.id}">no track — upload ↥</span></span>` +
+    `<span class="st-actions">` +
+    `<button type="button" class="st-icon" data-upload="${s.id}" title="Upload a song to ${s.name} (this browser)">↥</button>` +
+    `<button type="button" class="st-icon" data-clear="${s.id}" title="Clear uploaded song" hidden>✕</button>` +
+    `</span>`;
+
+  wrap.append(input, label);
+  stationsEl.appendChild(wrap);
+});
+
+function selectStation(id){
+  currentStation = id;
+  sendToTD({ type: 'station', station: id });
+  presetTune(id);                 // presets: swap the visual + cue that station's song
+}
+
+/* ── Transport: play / pause / skip the music ──
+   Play and Pause are a lit pair reflecting the last command (Play lit while
+   playing); Skip is a momentary pulse. Each sends { type:'transport', action }. */
+const transportEl = document.getElementById('transport');
+let transportState = 'playing';   // assume the feed is playing until told otherwise
+
+function setTransport(action){
+  const btn = transportEl.querySelector(`[data-transport="${action}"]`);
+  const pulse = () => { if (btn){ btn.classList.add('active'); setTimeout(() => btn.classList.remove('active'), 140); } };
+
+  // PRESETS mode: transport drives the LOCAL player (uploaded/default songs).
+  if (mode === 'presets'){
+    if (action === 'skip'){
+      const i = STATIONS.findIndex(s => s.id === currentStation);
+      const next = STATIONS[(i + 1) % STATIONS.length].id;
+      const input = document.getElementById(`st-${next}`);
+      if (input) input.checked = true;
+      selectStation(next);
+      pulse();
+      return;
+    }
+    if (action === 'play') presetPlay(); else presetPause();
+    return;                                   // player events sync the lit pair
+  }
+
+  // LIVE mode: transport messages ride the data channel to TouchDesigner.
+  sendToTD({ type: 'transport', action });
+  if (action === 'skip'){ pulse(); return; }
+  transportState = action === 'play' ? 'playing' : 'paused';
+  syncTransport();
+}
+
+function syncTransport(){
+  transportEl.querySelectorAll('[data-transport="play"], [data-transport="pause"]').forEach(b => {
+    const on = (transportState === 'playing') === (b.dataset.transport === 'play');
+    b.setAttribute('aria-pressed', String(on));
+  });
+}
+
+transportEl.querySelectorAll('.tbtn').forEach(b =>
+  b.addEventListener('click', () => setTransport(b.dataset.transport))
+);
+syncTransport();
+
+/* ════════════════════════════════════════════════════════════════
+   PRESET ENGINE — local music + audio-reactive visuals.
+
+   MODES (the macro toggle):
+     presets → the reactive canvas + local songs. Each station has its
+               own scene, driven by live analysis of the playing song:
+                 bass   = 30–150 Hz energy (smoothed)
+                 snare  = onset detection on 150–600 Hz body + 2–5.2 kHz
+                          crack (an impulse that decays, not a level)
+                 treble = 4–12 kHz energy (smoothed)
+                 kick   = onset detection on the bass band
+     live    → the TouchDesigner WebRTC feed. Until TD connects, the
+               "awaiting signal / TRANSMISSION" placeholder holds —
+               and stays held no matter how often it's clicked.
+   Extra message sent to TD:  { "type": "mode", "mode": "presets"|"live" }
+   ════════════════════════════════════════════════════════════════ */
+const visEl  = document.getElementById('vis');
+const vctx   = visEl.getContext('2d');
+const fileIn = document.getElementById('fileIn');
+const dropEl = document.getElementById('dropzone');
+const dropLb = document.getElementById('dropLabel');
+const volEl  = document.getElementById('vol');
+const vuB = document.getElementById('vuBass'), vuS = document.getElementById('vuSnr'), vuT = document.getElementById('vuTrb');
+
+let mode = 'presets';            // 'presets' | 'live'
+
+function setMode(m){
+  if (mode === m && m === 'live'){ applyStage(); return; }  // re-click: keep holding "awaiting transmission"
+  mode = m;
+  document.querySelectorAll('#macro .mbtn').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+  sendToTD({ type: 'mode', mode: m });
+  if (m === 'live') presetPause();               // cut local music for the real feed
+  applyStage();
+}
+document.querySelectorAll('#macro .mbtn').forEach(b =>
+  b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+/* One place decides what the stage shows:
+     presets            → reactive canvas
+     live + TD offline  → "awaiting signal / TRANSMISSION" placeholder (held)
+     live + TD live     → the WebRTC video                                  */
+function applyStage(){
+  const presets = mode === 'presets';
+  visEl.hidden = !presets;
+  videoEl.style.display = presets ? 'none' : '';
+  placeEl.style.display = (!presets && !isLive) ? '' : 'none';
+}
+
+/* ── Local player + Web Audio analysis chain ── */
+const player = new Audio();
+player.loop = true; player.preload = 'auto'; player.crossOrigin = 'anonymous';
+
+let actx = null, analyser = null, masterGain = null;
+function ensureAudio(){
+  if (actx){ if (actx.state === 'suspended') actx.resume().catch(()=>{}); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  actx = new AC();
+  analyser = actx.createAnalyser();
+  analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.45;
+  masterGain = actx.createGain();
+  masterGain.gain.value = volEl.value / 100;
+  actx.createMediaElementSource(player).connect(analyser);
+  analyser.connect(masterGain); masterGain.connect(actx.destination);
+}
+
+const FQ = new Uint8Array(1024);       // frequency bins
+const WV = new Uint8Array(1024);       // time-domain wave
+const SIG = { bass:0, mid:0, treb:0, level:0, kick:0, snare:0, playing:false, wave:WV, bars:barsFn };
+
+function band(lo, hi){                 // avg energy 0..1 across a Hz range
+  if (!actx) return 0;
+  const nyq = actx.sampleRate / 2, n = FQ.length;
+  let i0 = Math.max(0, Math.floor(lo / nyq * n));
+  let i1 = Math.min(n - 1, Math.ceil(hi / nyq * n));
+  if (i1 < i0) i1 = i0;
+  let s = 0; for (let i = i0; i <= i1; i++) s += FQ[i];
+  return s / ((i1 - i0 + 1) * 255);
+}
+
+function barsFn(n){                    // log-spaced mini-spectrum for in-scene EQ displays
+  const out = new Float32Array(n);
+  if (!SIG.playing || !analyser){
+    for (let i = 0; i < n; i++) out[i] = .10 + .09 * Math.abs(Math.sin(perfT * .9 + i * .8));
+    return out;
+  }
+  for (let i = 0; i < n; i++){
+    const f0 = 40 * Math.pow(300, i / n), f1 = 40 * Math.pow(300, (i + 1) / n);  // 40 Hz → 12 kHz
+    out[i] = Math.min(1, band(f0, f1) * 1.5);
+  }
+  return out;
+}
+
+/* Onset detector: a hit fires when the band's energy spikes above its own
+   rolling average — so visuals snap on the actual drum, not sustained tone. */
+function makeOnset(thresh, refractoryMs){
+  const hist = new Float32Array(43);   // ~0.7 s of frames
+  let idx = 0, filled = 0, lastHit = -1e9, env = 0;
+  return function feed(v, nowMs){
+    let avg = 0;
+    for (let k = 0; k < filled; k++) avg += hist[k];
+    avg = filled ? avg / filled : 0;
+    if (filled >= 10 && v > Math.max(.06, avg * thresh) && nowMs - lastHit > refractoryMs){
+      lastHit = nowMs; env = 1;
+    }
+    hist[idx] = v; idx = (idx + 1) % hist.length; if (filled < hist.length) filled++;
+    const out = env; env *= .88;       // fast decay = punchy impulse
+    return out;
+  };
+}
+const kickOnset  = makeOnset(1.55, 150);
+const snareOnset = makeOnset(1.42, 110);
+
+function smoothTo(key, v){ SIG[key] += (v - SIG[key]) * (v > SIG[key] ? .5 : .12); }  // fast attack, slow release
+
+function updateSignal(t){
+  if (SIG.playing && analyser){
+    analyser.getByteFrequencyData(FQ);
+    analyser.getByteTimeDomainData(WV);
+    smoothTo('bass',  band(30, 150));
+    smoothTo('mid',   band(300, 2000));
+    smoothTo('treb',  band(4000, 12000));
+    smoothTo('level', band(30, 14000));
+    const snareBand = band(150, 600) * .6 + band(2000, 5200) * .4;
+    SIG.kick  = kickOnset(band(30, 150), t * 1000);
+    SIG.snare = snareOnset(snareBand,    t * 1000);
+  } else {
+    // Idle: a slow breathing signal so scenes stay alive before play.
+    SIG.bass  = .11 + .07 * Math.sin(t * .7);
+    SIG.mid   = .09 + .05 * Math.sin(t * .53 + 2);
+    SIG.treb  = .08 + .05 * Math.sin(t * .91 + 4);
+    SIG.level = .10 + .05 * Math.sin(t * .61 + 1);
+    SIG.kick *= .9; SIG.snare *= .9;
+    for (let i = 0; i < WV.length; i++) WV[i] = 128 + Math.sin(t * 2.2 + i * .02) * 10;
+  }
+}
+
+function updateVU(){
+  const on = mode === 'presets' && SIG.playing;
+  vuB.style.height = (on ? SIG.bass  * 100 : 0) + '%';
+  vuS.style.height = (on ? SIG.snare * 100 : 0) + '%';
+  vuT.style.height = (on ? SIG.treb  * 100 : 0) + '%';
+}
+
+/* ── Preset music library ──
+   tracks[id] = { name, url } — url is a blob: URL (browser upload) or a
+   path from PRESET_TRACKS (deployed default). Uploads persist in THIS
+   browser via IndexedDB and override the deployed default until cleared. */
+const tracks = {};
+let uploadTarget = null;
+let presetDb = null;
+
+try {
+  const rq = indexedDB.open('td-preset-audio', 1);
+  rq.onupgradeneeded = e => e.target.result.createObjectStore('tracks');
+  rq.onsuccess = e => { presetDb = e.target.result; restoreUploads(); };
+} catch (_) { /* private mode etc. — uploads just won't persist */ }
+
+function restoreUploads(){
+  try {
+    const store = presetDb.transaction('tracks').objectStore('tracks');
+    STATIONS.forEach(s => {
+      const g = store.get(s.id);
+      g.onsuccess = () => {
+        const r = g.result;
+        if (r && r.blob) setTrack(s.id, URL.createObjectURL(r.blob), r.name, { persistBlob: null });
+      };
+    });
+  } catch (_) {}
+}
+function persistUpload(id, file){
+  try { presetDb && presetDb.transaction('tracks', 'readwrite').objectStore('tracks').put({ name: file.name, blob: file }, id); } catch (_) {}
+}
+function removeUpload(id){
+  try { presetDb && presetDb.transaction('tracks', 'readwrite').objectStore('tracks').delete(id); } catch (_) {}
+}
+
+// Deployed defaults from PRESET_TRACKS (uploads restored above win later).
+STATIONS.forEach(s => {
+  const url = (PRESET_TRACKS[s.id] || '').trim();
+  if (url) tracks[s.id] = { name: url.split('/').pop(), url, isDefault: true };
+});
+
+function setTrack(id, url, name, opts = {}){
+  if (tracks[id] && tracks[id].url.startsWith('blob:')) URL.revokeObjectURL(tracks[id].url);
+  tracks[id] = { name, url };
+  if (opts.persistBlob) persistUpload(id, opts.persistBlob);
+  updateStationCard(id);
+  if (mode === 'presets' && currentStation === id) presetTune(id, { autoplay: !!opts.persistBlob });
+}
+function clearTrack(id){
+  if (tracks[id] && tracks[id].url.startsWith('blob:')) URL.revokeObjectURL(tracks[id].url);
+  delete tracks[id];
+  removeUpload(id);
+  const def = (PRESET_TRACKS[id] || '').trim();                 // fall back to the deployed default
+  if (def) tracks[id] = { name: def.split('/').pop(), url: def, isDefault: true };
+  updateStationCard(id);
+  if (currentStation === id) presetTune(id);
+}
+function updateStationCard(id){
+  const chip = document.getElementById('trk-' + id);
+  const clr  = stationsEl.querySelector(`[data-clear="${id}"]`);
+  const tr = tracks[id];
+  if (chip){
+    chip.textContent = tr ? '♪ ' + tr.name : 'no track — upload ↥';
+    chip.classList.toggle('loaded', !!tr);
+  }
+  if (clr) clr.hidden = !(tr && !tr.isDefault);                 // ✕ only for browser uploads
+}
+STATIONS.forEach(s => updateStationCard(s.id));
+
+/* Upload / clear buttons live inside the station <label>: preventDefault
+   stops the click from also re-tuning the radio underneath. */
+stationsEl.addEventListener('click', (e) => {
+  const up = e.target.closest('[data-upload]');
+  const cl = e.target.closest('[data-clear]');
+  if (!up && !cl) return;
+  e.preventDefault();
+  if (up){ uploadTarget = up.dataset.upload; fileIn.click(); }
+  if (cl) clearTrack(cl.dataset.clear);
+});
+fileIn.addEventListener('change', () => {
+  const f = fileIn.files && fileIn.files[0];
+  if (f && uploadTarget) setTrack(uploadTarget, URL.createObjectURL(f), f.name, { persistBlob: f });
+  fileIn.value = ''; uploadTarget = null;
+});
+
+/* Drag-drop anywhere on the page → assign to the current station. */
+let dragDepth = 0;
+window.addEventListener('dragenter', (e) => {
+  if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
+  e.preventDefault(); dragDepth++;
+  const st = STATIONS.find(s => s.id === currentStation);
+  dropLb.textContent = `Drop audio → ${st ? st.name : 'station'}`;
+  dropEl.classList.add('show');
+});
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('dragleave', () => { if (--dragDepth <= 0){ dragDepth = 0; dropEl.classList.remove('show'); } });
+window.addEventListener('drop', (e) => {
+  e.preventDefault(); dragDepth = 0; dropEl.classList.remove('show');
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f && f.type.startsWith('audio')) setTrack(currentStation, URL.createObjectURL(f), f.name, { persistBlob: f });
+});
+
+/* ── Local playback (PRESETS mode transport) ── */
+function presetTune(id, opts = {}){
+  if (typeof SCENES !== 'undefined') currentScene = SCENES[id] || currentScene;
+  if (mode !== 'presets') return;
+  const tr = tracks[id];
+  const wasPlaying = !player.paused && player.src;
+  if (tr){
+    ensureAudio();
+    if (player.dataset.tid !== id){ player.src = tr.url; player.dataset.tid = id; }
+    if (wasPlaying || opts.autoplay) player.play().catch(() => {});
+  } else {
+    player.pause(); player.removeAttribute('src'); player.dataset.tid = '';
+  }
+}
+function presetPlay(){
+  const tr = tracks[currentStation];
+  if (!tr){ txEl.innerHTML = `PRESET → <b>no track</b> · upload a song to ${currentStation}`; return; }
+  ensureAudio();
+  if (player.dataset.tid !== currentStation){ player.src = tr.url; player.dataset.tid = currentStation; }
+  player.play().catch(() => {});
+  txEl.innerHTML = `PRESET → <b>play</b> · ${currentStation}`;
+}
+function presetPause(){ player.pause(); }
+function presetToggle(){ (player.paused || !player.src) ? presetPlay() : presetPause(); }
+
+player.addEventListener('play',  () => { if (mode === 'presets'){ transportState = 'playing'; syncTransport(); } });
+player.addEventListener('pause', () => { if (mode === 'presets'){ transportState = 'paused';  syncTransport(); } });
+player.addEventListener('error', () => { txEl.innerHTML = 'PRESET → <b>error</b> · could not decode that file'; });
+
+volEl.addEventListener('input', () => { if (masterGain) masterGain.gain.value = volEl.value / 100; });
+
+/* ── Idle auto-hide: 4 s without input fades the whole chrome ── */
+let idleTimer = null;
+function bumpIdle(){
+  document.body.classList.remove('idle');
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => document.body.classList.add('idle'), 4000);
+}
+['mousemove', 'mousedown', 'keydown', 'touchstart'].forEach(ev =>
+  window.addEventListener(ev, bumpIdle, { passive: true }));
+bumpIdle();
+
+/* ════════════════════════════════════════════════════════════════
+   PRESET VISUALS — one scene per station, drawn in a virtual
+   1280×720 space and cover-fitted to the screen. Every scene reads
+   the same signal: S.bass / S.mid / S.treb (smoothed levels 0..1),
+   S.kick / S.snare (onset impulses that decay), S.bars(n), S.wave.
+   ════════════════════════════════════════════════════════════════ */
+const TAU = Math.PI * 2;
+let perfT = 0, currentScene = null;
+const rnd = (a = 1, b) => (b === undefined ? Math.random() * a : a + Math.random() * (b - a));
+
+const grainTile = (() => {                    // pre-baked film-grain tile
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d'), d = x.createImageData(128, 128);
+  for (let i = 0; i < d.data.length; i += 4){
+    const v = (Math.random() * 255) | 0;
+    d.data[i] = d.data[i+1] = d.data[i+2] = v; d.data[i+3] = 24;
+  }
+  x.putImageData(d, 0, 0); return c;
+})();
+let grainPat = null;
+function drawGrain(g, a){
+  if (!grainPat) grainPat = g.createPattern(grainTile, 'repeat');
+  g.save(); g.globalAlpha = a;
+  g.translate((Math.random() * 128) | 0, (Math.random() * 128) | 0);
+  g.fillStyle = grainPat; g.fillRect(-256, -256, 1792, 1232);
+  g.restore();
+}
+let vigGrad = null;
+function vignette(g, a){
+  if (!vigGrad){
+    vigGrad = g.createRadialGradient(640, 360, 300, 640, 360, 800);
+    vigGrad.addColorStop(0, 'rgba(0,0,0,0)'); vigGrad.addColorStop(1, 'rgba(0,0,0,.55)');
+  }
+  g.save(); g.globalAlpha = a; g.fillStyle = vigGrad; g.fillRect(0, 0, 1280, 720); g.restore();
+}
+
+/* ── AMBIENT · a lofi bedroom at night ──
+   Lamp glow swells with BASS · monitor EQ + city windows ride MIDS ·
+   rain speed + dust motes ride TREBLE · a string-light flashes and the
+   cat's tail flicks on the SNARE · vinyl spins with overall level.   */
+function makeAmbient(){
+  const stars = [...Array(46)].map(() => ({ x: rnd(154, 458), y: rnd(104, 290), r: rnd(.6, 1.5), p: rnd(TAU) }));
+  const rain  = [...Array(44)].map(() => ({ x: rnd(152, 460), y: rnd(100, 410), s: rnd(150, 270), l: rnd(8, 17) }));
+  const motes = [...Array(20)].map(() => ({ x: rnd(980, 1170), y: rnd(0, 330), s: rnd(14, 30), p: rnd(TAU) }));
+  const BULB = ['#ffd27f', '#ff8fa3', '#8fd0ff', '#b5ff9e'];
+  const qpt = (u, a, b, c) => (1-u)*(1-u)*a + 2*(1-u)*u*b + u*u*c;
+  let discA = 0, flashI = 2, lastSn = 0, tailKick = 0;
+  return { draw(g, t, dt, S){
+    let gr = g.createLinearGradient(0, 0, 0, 720);
+    gr.addColorStop(0, '#251b31'); gr.addColorStop(.75, '#1b1322'); gr.addColorStop(1, '#130d19');
+    g.fillStyle = gr; g.fillRect(0, 0, 1280, 720);
+    gr = g.createLinearGradient(0, 560, 0, 720);
+    gr.addColorStop(0, '#191019'); gr.addColorStop(1, '#0d080f');
+    g.fillStyle = gr; g.fillRect(0, 560, 1280, 160);
+    g.fillStyle = '#221629'; g.beginPath(); g.ellipse(400, 652, 235, 44, 0, 0, TAU); g.fill();
+    g.strokeStyle = '#2e1e3a'; g.lineWidth = 3; g.beginPath(); g.ellipse(400, 652, 182, 32, 0, 0, TAU); g.stroke();
+
+    // window: frame, night sky, moon (bass halo), stars, skyline, rain
+    g.fillStyle = '#33264366'; g.fillRect(130, 80, 352, 352);
+    g.fillStyle = '#332643'; g.fillRect(138, 88, 336, 336);
+    gr = g.createLinearGradient(0, 100, 0, 412);
+    gr.addColorStop(0, '#0b1d3a'); gr.addColorStop(1, '#142a40');
+    g.fillStyle = gr; g.fillRect(150, 100, 312, 312);
+    g.save(); g.globalCompositeOperation = 'lighter';
+    const mg = g.createRadialGradient(228, 168, 4, 228, 168, 62 + S.bass * 55);
+    mg.addColorStop(0, 'rgba(255,238,200,.85)'); mg.addColorStop(.3, 'rgba(255,238,200,.25)'); mg.addColorStop(1, 'rgba(255,238,200,0)');
+    g.fillStyle = mg; g.fillRect(150, 100, 312, 312); g.restore();
+    g.fillStyle = '#ffeecb'; g.beginPath(); g.arc(228, 168, 17, 0, TAU); g.fill();
+    for (const st of stars){
+      g.globalAlpha = (.35 + .65 * Math.abs(Math.sin(t * 1.6 + st.p))) * (.35 + S.treb * .9);
+      g.fillStyle = '#cfe4ff'; g.fillRect(st.x, st.y, st.r, st.r);
+    }
+    g.globalAlpha = 1;
+    g.fillStyle = '#0a1526';
+    for (let i = 0; i < 8; i++){ const bh = 42 + ((i * 53) % 72); g.fillRect(152 + i * 39, 412 - bh, 33, bh); }
+    for (let i = 0; i < 18; i++){
+      g.globalAlpha = (.25 + .75 * Math.abs(Math.sin(i * 2.7 + t * .4))) * (.3 + S.mid * .9);
+      g.fillStyle = '#ffcf8a'; g.fillRect(158 + (i * 67) % 290, 404 - ((i * 37) % 58), 3, 3);
+    }
+    g.globalAlpha = 1;
+    g.save(); g.beginPath(); g.rect(150, 100, 312, 312); g.clip();
+    g.strokeStyle = 'rgba(170,200,255,.38)'; g.lineWidth = 1; g.lineCap = 'butt';
+    for (const d of rain){
+      d.y += d.s * (0.45 + S.treb * 2.4) * dt;
+      if (d.y > 414){ d.y = 92; d.x = rnd(152, 460); }
+      g.beginPath(); g.moveTo(d.x, d.y); g.lineTo(d.x - 2, d.y + d.l); g.stroke();
+    }
+    g.restore();
+    g.fillStyle = '#332643'; g.fillRect(298, 100, 14, 312); g.fillRect(150, 248, 312, 14);
+    g.fillStyle = '#3d2e50'; g.fillRect(124, 424, 364, 14);
+    g.fillStyle = '#2c5a3f'; g.beginPath(); g.ellipse(160, 414, 13, 20, .3, 0, TAU); g.fill();
+    g.beginPath(); g.ellipse(174, 412, 11, 18, -.4, 0, TAU); g.fill();
+    g.fillStyle = '#7a4a3a'; g.fillRect(154, 424, 26, 14);
+
+    // string lights — SNARE picks a bulb and flashes it
+    if (S.snare > .9 && t - lastSn > .2){ flashI = (Math.random() * 10) | 0; lastSn = t; tailKick = 1; }
+    tailKick *= Math.pow(.5, dt * 6);
+    g.strokeStyle = 'rgba(255,255,255,.16)'; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(60, 40); g.quadraticCurveTo(640, 118, 1220, 36); g.stroke();
+    for (let i = 0; i < 10; i++){
+      const u = (i + .5) / 10;
+      const bx = qpt(u, 60, 640, 1220), by = qpt(u, 40, 118, 36) + 8;
+      const col = BULB[i % 4];
+      const tw = .45 + .55 * Math.sin(t * 2 + i * 1.7);
+      const boost = i === flashI ? S.snare * 1.3 : 0;
+      g.save(); g.globalCompositeOperation = 'lighter';
+      const bg2 = g.createRadialGradient(bx, by, 1, bx, by, 11 + 9 * (tw + boost));
+      bg2.addColorStop(0, col); bg2.addColorStop(1, 'rgba(0,0,0,0)');
+      g.globalAlpha = .4 * tw + boost * .55; g.fillStyle = bg2;
+      g.beginPath(); g.arc(bx, by, 11 + 9 * (tw + boost), 0, TAU); g.fill(); g.restore();
+      g.globalAlpha = .7 + .3 * tw; g.fillStyle = col;
+      g.beginPath(); g.arc(bx, by, 3.2, 0, TAU); g.fill(); g.globalAlpha = 1;
+    }
+
+    // desk, monitor with a REAL mini-spectrum, keyboard, mug + steam
+    g.fillStyle = '#3a2a20'; g.fillRect(600, 470, 620, 16);
+    g.fillStyle = '#2b1e17'; g.fillRect(622, 486, 20, 190); g.fillRect(1170, 486, 20, 190);
+    g.fillStyle = '#191521'; g.fillRect(790, 268, 300, 186);
+    g.fillStyle = '#0e1420'; g.fillRect(800, 278, 280, 158);
+    const bars = S.bars(14);
+    for (let i = 0; i < 14; i++){
+      const bh = 6 + bars[i] * 118;
+      g.fillStyle = `rgba(127,216,200,${.32 + bars[i] * .68})`;
+      g.fillRect(808 + i * 19.5, 432 - bh, 12, bh);
+    }
+    g.fillStyle = 'rgba(255,255,255,.045)';
+    for (let y = 280; y < 436; y += 4) g.fillRect(800, y, 280, 1);
+    g.fillStyle = '#191521'; g.fillRect(925, 454, 30, 16); g.fillRect(880, 468, 120, 6);
+    g.fillStyle = '#241b2b'; g.fillRect(830, 500, 200, 18);
+    g.fillStyle = '#7a4a3a'; g.fillRect(700, 478, 34, 30); g.fillRect(732, 486, 10, 12);
+    g.strokeStyle = 'rgba(255,255,255,.22)'; g.lineWidth = 2; g.lineCap = 'round';
+    g.beginPath();
+    for (let i = 0; i <= 14; i++){
+      const sy = 474 - i * 3.4, sx = 717 + Math.sin(t * 2.4 + i * .8) * (2 + S.mid * 8) * (i / 14);
+      i ? g.lineTo(sx, sy) : g.moveTo(sx, sy);
+    }
+    g.stroke(); g.lineCap = 'butt';
+
+    // turntable — spins with the music's level
+    g.fillStyle = '#241b2b'; g.fillRect(636, 436, 120, 34);
+    discA += dt * (1.2 + S.level * 7);
+    g.save(); g.translate(686, 452);
+    g.fillStyle = '#101018'; g.beginPath(); g.arc(0, 0, 26, 0, TAU); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.12)'; g.lineWidth = 1;
+    g.beginPath(); g.arc(0, 0, 19, 0, TAU); g.stroke();
+    g.beginPath(); g.arc(0, 0, 12, 0, TAU); g.stroke();
+    g.rotate(discA);
+    g.fillStyle = '#c94f6d'; g.beginPath(); g.arc(0, 0, 6, 0, TAU); g.fill();
+    g.fillStyle = '#f3ebdd'; g.fillRect(6, -1, 6, 2);
+    g.restore();
+    g.strokeStyle = '#4a3a5a'; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(742, 440); g.lineTo(714, 452); g.stroke();
+
+    // desk lamp — the room breathes with the BASS
+    g.strokeStyle = '#4a3a5a'; g.lineWidth = 5;
+    g.beginPath(); g.moveTo(1120, 470); g.lineTo(1120, 392); g.lineTo(1078, 354); g.stroke();
+    g.fillStyle = '#5a4670';
+    g.beginPath(); g.moveTo(1058, 338); g.lineTo(1096, 338); g.lineTo(1106, 370); g.lineTo(1048, 370); g.closePath(); g.fill();
+    g.save(); g.globalCompositeOperation = 'lighter';
+    const lr = 150 * (1 + S.bass * .85);
+    const lg = g.createRadialGradient(1077, 382, 6, 1077, 382, lr);
+    lg.addColorStop(0, 'rgba(255,179,122,.5)'); lg.addColorStop(1, 'rgba(255,179,122,0)');
+    g.fillStyle = lg; g.beginPath(); g.arc(1077, 382, lr, 0, TAU); g.fill();
+    for (const m of motes){                     // dust drifting in the lamp light
+      const my = 470 - ((t * m.s + m.y) % 330);
+      g.globalAlpha = (.10 + S.treb * .35) * (.5 + .5 * Math.sin(m.p + t));
+      g.fillStyle = '#ffd9ad'; g.fillRect(m.x + Math.sin(t + m.p) * 9, my, 1.8, 1.8);
+    }
+    g.restore(); g.globalAlpha = 1;
+
+    // the cat — tail sways with time, flicks on the snare
+    g.fillStyle = '#15121c';
+    g.beginPath(); g.ellipse(400, 610, 46, 26, 0, 0, TAU); g.fill();
+    g.beginPath(); g.arc(360, 576, 20, 0, TAU); g.fill();
+    g.beginPath(); g.moveTo(348, 562); g.lineTo(343, 541); g.lineTo(358, 552); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(366, 560); g.lineTo(372, 539); g.lineTo(379, 554); g.closePath(); g.fill();
+    g.strokeStyle = '#15121c'; g.lineWidth = 7; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(444, 612);
+    g.quadraticCurveTo(488, 596 + Math.sin(t * 2) * 14 - tailKick * 26, 470, 564 + Math.sin(t * 2.3) * 10 - tailKick * 18);
+    g.stroke(); g.lineCap = 'butt';
+    const blink = (t % 5) < .12;
+    g.fillStyle = '#ffd27f';
+    if (!blink){ g.fillRect(352, 572, 4, 5); g.fillRect(362, 572, 4, 5); }
+    else { g.fillRect(352, 575, 4, 1.5); g.fillRect(362, 575, 4, 1.5); }
+
+    // poster
+    g.fillStyle = '#3a2a4d'; g.fillRect(560, 180, 110, 150);
+    g.fillStyle = '#1d1430'; g.fillRect(568, 188, 94, 134);
+    g.fillStyle = '#c94f6d'; g.beginPath(); g.arc(615, 240, 24 + S.bass * 10, 0, TAU); g.fill();
+    g.fillStyle = '#ffd27f'; g.fillRect(576, 288, 78, 4); g.fillRect(576, 298, 52, 4);
+
+    drawGrain(g, .55); vignette(g, .8);
+  }};
+}
+
+/* ── PULSE · Tokyo at night ──
+   Skyline blooms + streaks thicken with BASS · window grids ride MIDS ·
+   neon flicker rides TREBLE · a sign flashes white (and may re-letter)
+   on the SNARE · the frame shakes on the KICK · traffic with level.  */
+function makePulse(){
+  const KATA = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワンパルス東京';
+  const kchar = () => KATA[(Math.random() * KATA.length) | 0];
+  function layer(yBase, hMin, hMax, wMin, wMax){
+    const arr = []; let x = -40;
+    while (x < 1330){ const w = rnd(wMin, wMax); arr.push({ x, w, h: rnd(hMin, hMax) }); x += w + rnd(8, 26); }
+    return arr;
+  }
+  const back = layer(540, 120, 300, 50, 90);
+  const midl = layer(600, 180, 430, 70, 130);
+  function windows(arr, yBase, cw, ch, prob){
+    const out = [];
+    for (const b of arr){
+      const cols = Math.max(1, (b.w / cw) | 0), rows = Math.max(1, (b.h / ch) | 0);
+      for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++)
+        if (Math.random() < prob) out.push({ x: b.x + 4 + c * cw, y: yBase - b.h + 5 + r * ch, p: rnd(TAU) });
+    }
+    return out;
+  }
+  const winBack = windows(back, 540, 12, 16, .34);
+  const winMid  = windows(midl, 600, 14, 18, .28);
+  const signs = [...Array(9)].map((_, i) => ({
+    x: rnd(70, 1190), y: rnd(130, 420), n: 2 + ((Math.random() * 4) | 0),
+    col: ['#ff4fd8', '#4fd8ff', '#ffe14f', '#7dff6a'][i % 4],
+    ch: [...Array(6)].map(kchar), ph: rnd(TAU), vert: Math.random() < .78,
+  }));
+  const ants = [2, 7, 12].map(i => midl[Math.min(i, midl.length - 1)]);
+  const cars = [];
+  let flashI = 0, lastSn = 0, scroll = 0;
+  return { draw(g, t, dt, S){
+    g.save();
+    if (S.kick > .05) g.translate(rnd(-1, 1) * 7 * S.kick, rnd(-1, 1) * 4 * S.kick);
+    let gr = g.createLinearGradient(0, 0, 0, 720);
+    gr.addColorStop(0, '#07031a'); gr.addColorStop(.6, '#140636'); gr.addColorStop(1, '#1c0a3e');
+    g.fillStyle = gr; g.fillRect(-20, -20, 1320, 760);
+    g.fillStyle = 'rgba(200,210,255,.6)';
+    for (let i = 0; i < 40; i++){
+      g.globalAlpha = .15 + .4 * Math.abs(Math.sin(t + i * 1.3));
+      g.fillRect((i * 331) % 1280, (i * 173) % 300, 1.5, 1.5);
+    }
+    g.globalAlpha = 1;
+
+    g.fillStyle = '#120a2e';
+    for (const b of back) g.fillRect(b.x, 540 - b.h, b.w, b.h + 60);
+    g.fillStyle = '#8c78ff';
+    for (const w of winBack){
+      g.globalAlpha = (.06 + S.mid * .32) * (.55 + .45 * Math.sin(t * .6 + w.p));
+      g.fillRect(w.x, w.y, 6, 8);
+    }
+    g.fillStyle = '#0c0620'; g.globalAlpha = 1;
+    for (const b of midl) g.fillRect(b.x, 600 - b.h, b.w, b.h + 60);
+    g.fillStyle = '#ffc878';
+    for (const w of winMid){
+      g.globalAlpha = (.09 + S.mid * .5) * (.55 + .45 * Math.sin(t * .7 + w.p));
+      g.fillRect(w.x, w.y, 7, 10);
+    }
+    g.globalAlpha = 1;
+    g.strokeStyle = '#0c0620'; g.lineWidth = 3;
+    ants.forEach((b, i) => {
+      const cx = b.x + b.w / 2, topY = 600 - b.h;
+      g.beginPath(); g.moveTo(cx, topY); g.lineTo(cx, topY - 46); g.stroke();
+      if ((t + i * .5) % 1.4 < .7){
+        g.fillStyle = '#ff3b5c'; g.beginPath(); g.arc(cx, topY - 48, 3 + S.bass * 3.5, 0, TAU); g.fill();
+      }
+    });
+
+    // neon signs
+    if (S.snare > .9 && t - lastSn > .18){
+      flashI = (Math.random() * signs.length) | 0; lastSn = t;
+      if (Math.random() < .35) signs[flashI].ch = signs[flashI].ch.map(kchar);
+    }
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = '700 26px "IBM Plex Mono", monospace';
+    signs.forEach((sg, i) => {
+      const flick = .62 + .38 * Math.sin(t * 11 + sg.ph);
+      const hot = i === flashI ? S.snare : 0;
+      const a = Math.min(1, (.35 + .65 * flick) * (.45 + S.treb * 1.1) + hot);
+      g.save();
+      if (sg.vert){ g.fillStyle = 'rgba(4,2,12,.55)'; g.fillRect(sg.x - 19, sg.y - 20, 38, sg.n * 30 + 12); }
+      g.shadowColor = sg.col; g.shadowBlur = 10 + S.treb * 24 + hot * 26;
+      g.fillStyle = hot > .5 ? '#ffffff' : sg.col; g.globalAlpha = a;
+      if (sg.vert) for (let k = 0; k < sg.n; k++) g.fillText(sg.ch[k], sg.x, sg.y + k * 30);
+      else g.fillText(sg.ch.slice(0, 4).join(''), sg.x, sg.y);
+      g.restore();
+    });
+    g.globalAlpha = 1;
+
+    // billboard: live spectrum + scrolling marquee
+    g.fillStyle = '#05030f'; g.fillRect(880, 150, 240, 130);
+    g.save(); g.strokeStyle = '#4fd8ff'; g.lineWidth = 2;
+    g.shadowColor = '#4fd8ff'; g.shadowBlur = 12 + S.bass * 22;
+    g.strokeRect(880, 150, 240, 130); g.restore();
+    const bars = S.bars(12);
+    for (let i = 0; i < 12; i++){
+      const bh = 4 + bars[i] * 96;
+      g.fillStyle = `hsl(${190 + i * 11},100%,${52 + bars[i] * 22}%)`;
+      g.fillRect(888 + i * 19, 272 - bh, 13, bh);
+    }
+    scroll = (scroll + dt * 90) % 640;
+    g.save(); g.beginPath(); g.rect(880, 150, 240, 24); g.clip();
+    g.font = '600 15px "IBM Plex Mono", monospace'; g.textAlign = 'left';
+    g.fillStyle = '#ffe14f';
+    g.fillText('パルス STATION ▶ TOKYO 東京 LIVE ▶ 124 BPM ▶', 1130 - scroll, 164);
+    g.restore();
+
+    // road + neon puddle smears + light streaks
+    g.fillStyle = '#050310'; g.fillRect(-20, 640, 1320, 100);
+    signs.forEach((sg, i) => {
+      g.save(); g.globalAlpha = .05 + S.bass * .14; g.fillStyle = sg.col;
+      g.fillRect(sg.x - 10 + Math.sin(t * 3 + i) * 6, 642, 20, 76); g.restore();
+    });
+    g.strokeStyle = 'rgba(255,255,255,.14)'; g.lineWidth = 2;
+    g.setLineDash([26, 22]); g.beginPath(); g.moveTo(-20, 688); g.lineTo(1300, 688); g.stroke(); g.setLineDash([]);
+    if (Math.random() < dt * (1.6 + S.level * 6)){
+      const east = Math.random() < .5;
+      cars.push({ x: east ? -70 : 1350, y: rnd(650, 706), v: east ? rnd(240, 430) : -rnd(240, 430), col: east ? '#fff' : '#ff5a4f' });
+    }
+    for (let i = cars.length - 1; i >= 0; i--){
+      const c = cars[i]; c.x += c.v * dt * (1 + S.level * .8);
+      g.save(); g.globalCompositeOperation = 'lighter';
+      g.shadowColor = c.col; g.shadowBlur = 8 + S.bass * 16;
+      g.globalAlpha = .85; g.fillStyle = c.col;
+      g.fillRect(c.x, c.y, 34 + S.bass * 30, 3); g.restore();
+      if (c.x < -140 || c.x > 1420) cars.splice(i, 1);
+    }
+
+    // bass bloom over the whole skyline
+    g.save(); g.globalCompositeOperation = 'lighter';
+    const bl = g.createRadialGradient(640, 660, 50, 640, 660, 620);
+    bl.addColorStop(0, `rgba(255,79,216,${S.bass * .16})`); bl.addColorStop(1, 'rgba(255,79,216,0)');
+    g.fillStyle = bl; g.fillRect(-20, -20, 1320, 760); g.restore();
+    g.restore();
+    vignette(g, .6);
+  }};
+}
+
+/* ── STATIC · soft analog fuzz ──
+   A mellow, low-contrast static bed. Density rides TREBLE gently ·
+   subtle glitch slices with BASS and the KICK · a soft chromatic
+   shimmer + faint blocks on the SNARE · the oscilloscope trace is
+   the actual wave. No hard flashes — late-night dead-channel calm. */
+function makeStatic(){
+  const nz = document.createElement('canvas'); nz.width = 192; nz.height = 108;
+  const nx = nz.getContext('2d');
+  const img = nx.createImageData(192, 108);
+  const rC = document.createElement('canvas'); rC.width = 192; rC.height = 108;
+  const cC = document.createElement('canvas'); cC.width = 192; cC.height = 108;
+  const rx = rC.getContext('2d'), cx = cC.getContext('2d');
+  const blocks = [];
+  let lastSn = 0;
+  return { draw(g, t, dt, S){
+    // low-contrast noise: soft grays, breathing gently with treble
+    const d = img.data, gate = .30 + S.treb * .28;
+    for (let i = 0; i < d.length; i += 4){
+      const v = Math.random() < gate ? 55 + Math.random() * 85 : Math.random() * 34;
+      d[i] = d[i+1] = d[i+2] = v; d[i+3] = 255;
+    }
+    nx.putImageData(img, 0, 0);
+    for (const [c2, tint] of [[rx, '#e09b9b'], [cx, '#9bd8d8']]){   // muted rose / muted cyan
+      c2.globalCompositeOperation = 'source-over'; c2.drawImage(nz, 0, 0);
+      c2.globalCompositeOperation = 'multiply'; c2.fillStyle = tint; c2.fillRect(0, 0, 192, 108);
+    }
+
+    g.fillStyle = '#000'; g.fillRect(0, 0, 1280, 720);
+    g.imageSmoothingEnabled = false;
+    const off = 1.5 + S.snare * 13 + S.bass * 4;                     // soft chromatic shimmer
+    g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = .6;
+    g.drawImage(rC, -off, 0, 1280, 720);
+    g.drawImage(cC,  off, 0, 1280, 720);
+    g.restore();
+    g.globalAlpha = .5; g.drawImage(nz, 0, 0, 1280, 720); g.globalAlpha = 1;
+
+    // gentle glitch slices: narrow bands eased sideways
+    const slices = (S.kick * 5 + S.bass * 2) | 0;
+    for (let i = 0; i < slices; i++){
+      const sy = (Math.random() * 104) | 0, sh = 2 + ((Math.random() * 10) | 0);
+      const dx = rnd(-1, 1) * (16 + S.kick * 64);
+      g.drawImage(nz, 0, sy, 192, sh, dx, sy * (720 / 108), 1280, sh * (720 / 108));
+    }
+
+    // scanlines + a slow rolling bar
+    g.fillStyle = 'rgba(0,0,0,.2)';
+    for (let y = 0; y < 720; y += 3) g.fillRect(0, y, 1280, 1);
+    const roll = (t * (34 + S.mid * 130)) % 920 - 100;
+    const rg = g.createLinearGradient(0, roll, 0, roll + 140);
+    rg.addColorStop(0, 'rgba(255,255,255,0)');
+    rg.addColorStop(.5, `rgba(255,255,255,${.03 + S.mid * .055})`);
+    rg.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = rg; g.fillRect(0, roll, 1280, 140);
+
+    // oscilloscope — the song's actual waveform, glowing softly
+    g.save(); g.strokeStyle = '#dceef5'; g.lineWidth = 2;
+    g.shadowColor = '#7fdcff'; g.shadowBlur = 8 + S.level * 13; g.globalAlpha = .68;
+    g.beginPath();
+    for (let i = 0; i < WV.length; i += 8){
+      const x = i / WV.length * 1280;
+      const y = 360 + ((WV[i] - 128) / 128) * (70 + S.level * 185);
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    }
+    g.stroke(); g.restore();
+
+    // faint drifting blocks on the snare — no hard colors, no inverts
+    if (S.snare > .9 && t - lastSn > .18){
+      lastSn = t;
+      const n = 1 + ((Math.random() * 2) | 0);
+      for (let i = 0; i < n; i++) blocks.push({
+        x: Math.random() * 1180, y: Math.random() * 640,
+        w: rnd(50, 170), h: rnd(16, 70), life: 1, lum: Math.random() < .6,
+      });
+    }
+    for (let i = blocks.length - 1; i >= 0; i--){
+      const b = blocks[i]; b.life -= dt * 3.2;
+      if (b.life <= 0){ blocks.splice(i, 1); continue; }
+      g.fillStyle = b.lum
+        ? `rgba(205,220,230,${b.life * .16})`
+        : `rgba(20,28,38,${b.life * .3})`;
+      g.fillRect(b.x, b.y, b.w, b.h);
+    }
+
+    // VHS chrome, kept quiet
+    g.font = '600 20px "IBM Plex Mono", monospace'; g.textBaseline = 'alphabetic';
+    g.fillStyle = 'rgba(255,255,255,.55)'; g.textAlign = 'left';
+    if ((t % 1.4) < .9) g.fillText('▶ PLAY', 40, 54);
+    g.fillText('CH 03 · STATIC', 40, 690);
+    g.textAlign = 'right';
+    g.fillText(new Date().toTimeString().slice(0, 8), 1240, 54);
+    if (S.bass > .62){
+      g.textAlign = 'center'; g.globalAlpha = .4;
+      g.fillText('— TRACKING —', 640, 660); g.globalAlpha = 1;
+    }
+    g.imageSmoothingEnabled = true;
+
+    // cool it down: slate wash + vignette
+    g.fillStyle = 'rgba(26,36,50,.2)'; g.fillRect(0, 0, 1280, 720);
+    vignette(g, .55);
+  }};
+}
+
+/* ── DRIFT · open water under a low moon ──
+   The whole swell surges with BASS · moon-path shimmer + drift speed
+   ride MIDS · crest sparkles ride TREBLE · SNARE drops a ripple ring
+   out on the water, KICK a quick one near the bow.                   */
+function makeDrift(){
+  const rowY = []; for (let r = 0; r <= 26; r++) rowY.push(384 + Math.pow(r / 26, 1.6) * 330);
+  const sparks = [...Array(70)].map(() => ({ r: 4 + ((Math.random() * 22) | 0), u: Math.random(), p: rnd(TAU) }));
+  const ripples = [];
+  let lastSn = 0, lastKk = 0;
+  return { draw(g, t, dt, S){
+    let gr = g.createLinearGradient(0, 0, 0, 720);
+    gr.addColorStop(0, '#050d1f'); gr.addColorStop(.52, '#0a2233');
+    gr.addColorStop(.55, '#093041'); gr.addColorStop(1, '#041520');
+    g.fillStyle = gr; g.fillRect(0, 0, 1280, 720);
+    g.fillStyle = '#bfe0ff';
+    for (let i = 0; i < 60; i++){
+      g.globalAlpha = .2 + .5 * Math.abs(Math.sin(t * .8 + i * 2.1));
+      g.fillRect((i * 197) % 1280, (i * 89) % 330, 1.4, 1.4);
+    }
+    g.globalAlpha = 1;
+
+    // moon + bass halo
+    g.save(); g.globalCompositeOperation = 'lighter';
+    const mg = g.createRadialGradient(900, 170, 10, 900, 170, 150 * (1 + S.bass * .75));
+    mg.addColorStop(0, 'rgba(255,233,196,.5)'); mg.addColorStop(1, 'rgba(255,233,196,0)');
+    g.fillStyle = mg; g.fillRect(0, 0, 1280, 420); g.restore();
+    g.fillStyle = '#ffe9c4'; g.beginPath(); g.arc(900, 170, 44, 0, TAU); g.fill();
+    g.fillStyle = 'rgba(216,186,140,.45)';
+    g.beginPath(); g.arc(886, 158, 9, 0, TAU); g.fill();
+    g.beginPath(); g.arc(914, 182, 6, 0, TAU); g.fill();
+    gr = g.createLinearGradient(0, 358, 0, 410);
+    gr.addColorStop(0, 'rgba(160,220,255,0)'); gr.addColorStop(.5, 'rgba(160,220,255,.09)'); gr.addColorStop(1, 'rgba(160,220,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 358, 1280, 52);
+
+    // the wave field — amplitude surges with bass
+    const amp = .55 + S.bass * 1.7;
+    const waveY = (x, r, u) =>
+      rowY[r] + Math.sin(x * .006 / (.35 + u) + t * (.55 + u * 1.25) + r * 1.35) * (1.5 + u * 13) * amp
+              + Math.sin(x * .021 + t * (1.1 + u * 2.2) + r * .7) * (1.5 + u * 13) * amp * .4;
+    for (let r = 0; r <= 26; r++){
+      const u = r / 26;
+      g.strokeStyle = `rgba(${(40 + u * 90) | 0},${(140 + u * 90) | 0},${(170 + u * 70) | 0},${.25 + u * .5})`;
+      g.lineWidth = .8 + u * 2.6;
+      g.beginPath();
+      for (let x = -20; x <= 1300; x += 18){
+        const yy = waveY(x, r, u);
+        x > -20 ? g.lineTo(x, yy) : g.moveTo(x, yy);
+      }
+      g.stroke();
+      // moon path shimmer — jitter widens with mids
+      const jit = Math.sin(t * 2.6 + r * 2.2) * (5 + S.mid * 36) * u;
+      const wid = (10 + u * 74) * (.7 + S.mid * .6);
+      const sy = waveY(900, r, u);
+      g.save(); g.globalCompositeOperation = 'lighter';
+      g.globalAlpha = (.10 + .28 * Math.abs(Math.sin(t * 1.7 + r))) * (.4 + S.mid * .9);
+      g.strokeStyle = '#ffdfae'; g.lineWidth = 1.4 + u * 3;
+      g.beginPath(); g.moveTo(900 + jit - wid / 2, sy); g.lineTo(900 + jit + wid / 2, sy); g.stroke();
+      g.restore();
+    }
+
+    // crest sparkles — treble glints
+    g.save(); g.globalCompositeOperation = 'lighter';
+    for (const sp of sparks){
+      const tw = Math.pow(Math.max(0, Math.sin(t * 2.2 + sp.p)), 3) * (.2 + S.treb * 1.7);
+      if (tw < .04) continue;
+      const u = sp.r / 26, x = sp.u * 1280, y = waveY(x, sp.r, u);
+      g.globalAlpha = Math.min(1, tw); g.fillStyle = '#dffaff';
+      g.fillRect(x - 1.3, y - 1.3, 2.6, 2.6); g.fillRect(x - 4, y - .5, 8, 1);
+    }
+    g.restore(); g.globalAlpha = 1;
+
+    // ripple rings on the hits
+    if (S.snare > .9 && t - lastSn > .16){ lastSn = t; ripples.push({ x: rnd(140, 1140), row: 8 + ((Math.random() * 15) | 0), life: 1, big: true }); }
+    if (S.kick  > .9 && t - lastKk > .2 ){ lastKk = t; ripples.push({ x: rnd(300, 980),  row: 21 + ((Math.random() * 5) | 0), life: 1, big: false }); }
+    for (let i = ripples.length - 1; i >= 0; i--){
+      const rp = ripples[i]; rp.life -= dt * (rp.big ? .55 : .95);
+      if (rp.life <= 0){ ripples.splice(i, 1); continue; }
+      const u = rp.row / 26, y = rowY[rp.row], grow = 1 - rp.life;
+      const rx2 = grow * (rp.big ? 200 : 90) * (.3 + u), ry2 = rx2 * .26;
+      g.save(); g.globalCompositeOperation = 'lighter';
+      g.strokeStyle = '#bfffff'; g.lineWidth = 1.4 + u * 1.8;
+      g.globalAlpha = rp.life * .7;
+      g.beginPath(); g.ellipse(rp.x, y, rx2, ry2, 0, 0, TAU); g.stroke();
+      g.globalAlpha = rp.life * .32;
+      g.beginPath(); g.ellipse(rp.x, y, rx2 * .55, ry2 * .55, 0, 0, TAU); g.stroke();
+      g.restore();
+    }
+    vignette(g, .7);
+  }};
+}
+
+/* ── Scene registry + render loop ── */
+const SCENES = {
+  ambient: makeAmbient(),
+  pulse:   makePulse(),
+  static:  makeStatic(),
+  drift:   makeDrift(),
+};
+currentScene = SCENES[currentStation] || SCENES.ambient;
+
+function fitCanvas(){
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  visEl.width  = Math.round(innerWidth  * dpr);
+  visEl.height = Math.round(innerHeight * dpr);
+  vctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', fitCanvas);
+fitCanvas();
+
+let lastT = 0;
+function renderLoop(now){
+  requestAnimationFrame(renderLoop);
+  const t = now / 1000;
+  const dt = Math.min(.05, t - lastT || .016);
+  lastT = t; perfT = t;
+  SIG.playing = !!(player.src && !player.paused && !player.ended);
+  updateSignal(t);
+  updateVU();
+  if (visEl.hidden || !currentScene) return;
+  const w = innerWidth, h = innerHeight;
+  vctx.save();
+  const s = Math.max(w / 1280, h / 720);          // cover-fit the 1280×720 scene
+  vctx.translate((w - 1280 * s) / 2, (h - 720 * s) / 2);
+  vctx.scale(s, s);
+  currentScene.draw(vctx, t, dt, SIG);
+  vctx.restore();
+}
+requestAnimationFrame(renderLoop);
+applyStage();
+transportState = 'paused'; syncTransport();   // presets start cued, not playing
+
+/* ── Physical keyboard ── */
+window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;                                  // ignore auto-repeat
+  if (e.target instanceof Element && e.target.closest('input, textarea, [contenteditable]')) return;
+  const k = e.key.toLowerCase();
+
+  if (k === 'h'){ e.preventDefault(); toggleConsole(); return; }
+  if (k === 'd'){ e.preventDefault(); toggleDiagnostics(); return; }
+
+  const match = KEY_MAP.find(m => m.key.toLowerCase() === k);
+  if (match){ e.preventDefault(); fireKey(match.action); } // preventDefault stops scroll + native cap re-fire
+});
+
+/* ── Hide / show the console ──
+   The ▾ tab on the console's top edge (or H) collapses it; while collapsed
+   the "▴ Controls" pill sits at the bottom to bring it back. The idle
+   auto-hide still fades the pill away after 4 s without input, so a
+   collapsed console still leaves a truly clean stream. */
+let consoleHidden = false;
+
+function updateReshow(){
+  reshowEl.classList.toggle('show', consoleHidden);
+}
+
+function toggleConsole(){
+  consoleHidden = !consoleHidden;
+  consoleEl.classList.toggle('hidden', consoleHidden);
+  updateReshow();
+}
+
+document.getElementById('hideBtn').addEventListener('click', toggleConsole);
+document.getElementById('collapseTab').addEventListener('click', toggleConsole);
+reshowEl.addEventListener('click', toggleConsole);
+
+/* ── "Awaiting signal": an unknown language hidden in the background ──
+   A field of small alien glyphs in sentence-like lines, invisible until the
+   cursor passes over — a radial mask reveals it in a soft spotlight that
+   follows the pointer. (Only rendered in the placeholder, so it's gone once
+   the stream is live.) */
+const glyphsEl = document.getElementById('glyphs');
+const GLYPHS = [...'ᐁᐃᐅᐊᐳᐵᐸᑊᑎᑕᑫᒋᒪᒷᓇᓂᔑᔭᕊᕘᕐᕕᙆᙇᘔᘙᘜᙱᙲᐰᐱᐲᘛᘞᣗ⌖⎔⏃⌬⌁'];
+
+function buildGlyphs(){
+  if (!glyphsEl) return;
+  const cols = Math.ceil(window.innerWidth / 8.2) + 8;   // chars to overfill width
+  const rows = Math.ceil(window.innerHeight / 19) + 4;   // lines to overfill height
+  const g = () => GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
+  const word = () => { let n = 2 + Math.floor(Math.random() * 5), s = ''; while (n--) s += g(); return s; };
+  const line = () => { let s = '', n = 0; while (n < cols){ const w = word(); s += w + ' '; n += w.length + 1; } return s; };
+  let out = ''; for (let r = 0; r < rows; r++) out += line() + '\n';
+  glyphsEl.textContent = out;
+}
+buildGlyphs();
+let glyphResizeT;
+window.addEventListener('resize', () => { clearTimeout(glyphResizeT); glyphResizeT = setTimeout(buildGlyphs, 200); });
+
+// Move the reveal spotlight with the pointer (rAF-throttled).
+let glyphRaf = false, gx = -999, gy = -999;
+function applyGlyphPos(){
+  glyphRaf = false;
+  if (glyphsEl){ glyphsEl.style.setProperty('--mx', gx + 'px'); glyphsEl.style.setProperty('--my', gy + 'px'); }
+}
+function moveGlyph(x, y){ gx = x; gy = y; if (!glyphRaf){ glyphRaf = true; requestAnimationFrame(applyGlyphPos); } }
+window.addEventListener('mousemove', (e) => moveGlyph(e.clientX, e.clientY));
+window.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (t) moveGlyph(t.clientX, t.clientY); }, { passive: true });
+
+/* ── Footer icon links (Home → freelance site, Store → shop) ──
+   If a link's URL hasn't been filled in yet, the button shows but doesn't
+   navigate (no broken click) until you add it. */
+function initIconLink(btnId, tipId, cfg){
+  const btn = document.getElementById(btnId);
+  const pending = !cfg.url || cfg.url.includes('[');   // empty or still a placeholder
+  btn.href = pending ? '#' : cfg.url;
+  btn.setAttribute('aria-label', cfg.tip);
+  document.getElementById(tipId).textContent = cfg.tip;
+  if (pending){
+    btn.setAttribute('aria-disabled', 'true');
+    btn.addEventListener('click', (e) => e.preventDefault());
+  }
+}
+initIconLink('homeBtn',  'homeTip',  HOME);
+initIconLink('storeBtn', 'storeTip', STORE);
+
+/* ── Contact / commission modal ("custom transmissions") ──
+   No backend: the form composes a pre-filled mailto: so it works standalone. */
+const contactModal = document.getElementById('contact');
+const contactForm  = document.getElementById('contactForm');
+let contactReturnFocus = null;
+
+document.getElementById('contactBlurb').textContent = CONTACT.blurb;
+const mailtoLink = document.getElementById('contactMailto');
+mailtoLink.textContent = CONTACT.email;
+mailtoLink.href = `mailto:${CONTACT.email}?subject=${encodeURIComponent(CONTACT.subject)}`;
+
+function openContact(trigger){
+  contactReturnFocus = trigger || null;
+  contactModal.hidden = false;
+  const first = contactForm.querySelector('input, textarea');
+  if (first) first.focus();
+}
+function closeContact(){
+  contactModal.hidden = true;
+  if (contactReturnFocus && contactReturnFocus.focus) contactReturnFocus.focus();
+}
+
+// Any element marked data-contact-open opens it; data-contact-close (and the
+// backdrop) closes it.
+document.querySelectorAll('[data-contact-open]').forEach((el) =>
+  el.addEventListener('click', () => openContact(el))
+);
+contactModal.querySelectorAll('[data-contact-close]').forEach((el) =>
+  el.addEventListener('click', closeContact)
+);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !contactModal.hidden){ e.preventDefault(); closeContact(); }
+});
+
+contactForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const data = new FormData(contactForm);
+  const name = (data.get('name') || '').trim();
+  const email = (data.get('email') || '').trim();
+  const brief = (data.get('brief') || '').trim();
+  const body = `Name: ${name}\nEmail: ${email}\n\nProject:\n${brief}\n`;
+  // Hand off to the visitor's mail client with everything pre-filled.
+  window.location.href =
+    `mailto:${CONTACT.email}?subject=${encodeURIComponent(CONTACT.subject)}&body=${encodeURIComponent(body)}`;
+  closeContact();
+});
+
+/* ── Enable-sound gate ── */
+function updateEnableSound(){
+  enableEl.hidden = !(isLive && videoEl.muted && AUDIO.startMuted);
+}
+enableEl.addEventListener('click', () => {
+  videoEl.muted = false;
+  videoEl.play().catch(() => {});
+  updateEnableSound();
+});
+
+/* ── Connection status helpers ── */
+function setStatus(state){           // 'live' | 'offline'
+  const live = state === 'live';
+  isLive = live;
+  statusEl.classList.toggle('live', live);
+  document.body.classList.toggle('live', live);  // ← single class swaps the whole accent amber↔violet
+  statusTxt.textContent = live ? 'Live' : 'Offline';
+  applyStage();                   // placeholder/video/canvas visibility is mode-aware
+  updateEnableSound();
+  if (live && diagOn) startDiagPolling();
+  if (!live) stopDiagPolling();
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Audio-health diagnostics — poll getStats() ~1/s for the inbound
+   audio report. This tells you WHICH breakup you have:
+     high loss / jitter / concealment → NETWORK (raise jitterBufferMs)
+     clean numbers but still glitchy   → upstream in TouchDesigner,
+                                          no client setting fixes it.
+   ════════════════════════════════════════════════════════════════ */
+let diagOn = false, diagTimer = null, prevAudio = null;
+
+function toggleDiagnostics(){
+  diagOn = !diagOn;
+  diagEl.hidden = !diagOn;
+  diagBtn.setAttribute('aria-pressed', String(diagOn));
+  if (diagOn){ prevAudio = null; resetDiag(); startDiagPolling(); }
+  else stopDiagPolling();
+}
+diagBtn.addEventListener('click', toggleDiagnostics);
+
+function startDiagPolling(){
+  stopDiagPolling();
+  if (!pc || !diagOn) return;
+  diagTimer = setInterval(sampleAudio, 1000);
+  sampleAudio();
+}
+function stopDiagPolling(){ if (diagTimer){ clearInterval(diagTimer); diagTimer = null; } }
+
+function resetDiag(){
+  ['dLoss','dJitter','dBuffer','dConceal'].forEach(id => {
+    const el = document.getElementById(id); el.textContent = '—'; el.classList.remove('warn');
+  });
+  document.getElementById('diagVerdict').textContent =
+    pc ? 'sampling…' : 'awaiting audio stream…';
+}
+
+function setMetric(id, text, warn){
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.classList.toggle('warn', !!warn);
+}
+
+async function sampleAudio(){
+  if (!pc) return;
+  let report = null;
+  try {
+    const stats = await pc.getStats();
+    stats.forEach(r => {
+      if (r.type === 'inbound-rtp' && (r.kind === 'audio' || r.mediaType === 'audio')) report = r;
+    });
+  } catch { return; }
+  if (!report){ document.getElementById('diagVerdict').textContent = 'no inbound audio'; return; }
+
+  if (prevAudio){
+    const dt    = ((report.timestamp - prevAudio.timestamp) / 1000) || 1;       // seconds
+    const dRecv = (report.packetsReceived || 0) - (prevAudio.packetsReceived || 0);
+    const dLost = (report.packetsLost     || 0) - (prevAudio.packetsLost     || 0);
+    const loss  = (dRecv + dLost) > 0 ? (dLost / (dRecv + dLost)) * 100 : 0;
+    const jitMs = (report.jitter || 0) * 1000;                                   // jitter is seconds
+    const dDel  = (report.jitterBufferDelay        || 0) - (prevAudio.jitterBufferDelay        || 0);
+    const dEmit = (report.jitterBufferEmittedCount || 0) - (prevAudio.jitterBufferEmittedCount || 0);
+    const bufMs = dEmit > 0 ? (dDel / dEmit) * 1000 : 0;                         // effective buffer
+    const dConc = (report.concealmentEvents || 0) - (prevAudio.concealmentEvents || 0);
+    const concPerSec = dConc / dt;
+
+    // Warn thresholds: loss > 1%, jitter > 30 ms, any concealment.
+    setMetric('dLoss',    loss.toFixed(2) + ' %',  loss > 1);
+    setMetric('dJitter',  jitMs.toFixed(0) + ' ms', jitMs > 30);
+    setMetric('dBuffer',  bufMs.toFixed(0) + ' ms', false);
+    setMetric('dConceal', concPerSec.toFixed(1) + '/s', dConc > 0);
+
+    const networky = loss > 1 || jitMs > 30 || dConc > 0;
+    document.getElementById('diagVerdict').textContent = networky
+      ? 'network: raising jitterBufferMs should help'
+      : 'clean: any glitch is upstream in TD';
+  }
+  prevAudio = report;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   WebRTC connection to TouchDesigner — fully implemented.
+   Ported from src/webrtc/ (SignalingClient + WebRTCConnection): talks
+   the TD Signaling API over a WebSocket to your signalingServer COMP,
+   auto-calls the first TD peer it sees (recv-only video + audio),
+   handles offer glare via perfect negotiation, applies the jitter
+   buffer, auto-reconnects with backoff, and restarts ICE on failure.
+   ════════════════════════════════════════════════════════════════ */
+let signalWS = null, wsDelay = 1000, wsTimer = null, wsWanted = false;
+let selfRecord = null, roster = [], peerTarget = null;
+let polite = false, makingOffer = false, settingRemoteAnswer = false;
+let remoteStream = null;
+const hintEl = document.getElementById('placeholderHint');
+const setHint = (s) => { hintEl.textContent = s; };
+
+function connectToTouchDesigner(){
+  wsWanted = true; wsDelay = CONNECTION.reconnectMinMs;
+  openSignaling();
+}
+
+function openSignaling(){
+  clearTimeout(wsTimer);
+  setHint('Connecting to the signaling server…');
+  try { signalWS = new WebSocket(CONNECTION.signalingUrl); }
+  catch (err) { console.error('[SIGNALING] bad URL', err); scheduleSignaling(); return; }
+
+  signalWS.onopen = () => {
+    wsDelay = CONNECTION.reconnectMinMs;
+    setHint('Signaling connected — waiting for the TouchDesigner peer…');
+  };
+  signalWS.onmessage = (ev) => {
+    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+    routeSignal(msg);
+  };
+  signalWS.onclose = () => {
+    selfRecord = null; roster = []; teardownPeer();
+    if (wsWanted) scheduleSignaling();
+  };
+  signalWS.onerror = () => { /* onclose follows and drives the reconnect */ };
+}
+function scheduleSignaling(){
+  setHint(`Signaling dropped — reconnecting in ${Math.round(wsDelay / 1000)}s…`);
+  clearTimeout(wsTimer);
+  wsTimer = setTimeout(openSignaling, wsDelay);
+  wsDelay = Math.min(wsDelay * 2, CONNECTION.reconnectMaxMs);
+}
+function sendSignal(signalingType, target, content){
+  if (!signalWS || signalWS.readyState !== WebSocket.OPEN) return false;
+  signalWS.send(JSON.stringify({ metadata: { ...CONNECTION.metadata }, signalingType, sender: null, target, content }));
+  return true;
+}
+
+/* Roster + negotiation routing (TD Signaling API message shapes). */
+function routeSignal(msg){
+  switch (msg.signalingType){
+    case 'Clients': {
+      const selfId = selfRecord?.id;
+      roster = (msg.content?.clients || []).filter(c => c.id !== selfId);
+      maybeCallPeer(); break;
+    }
+    case 'ClientEnter': {
+      const c = msg.content?.client;
+      if (c && c.id !== selfRecord?.id && !roster.some(r => r.id === c.id)) roster.push(c);
+      maybeCallPeer(); break;
+    }
+    case 'ClientEntered': {
+      selfRecord = msg.content?.self || null;
+      roster = roster.filter(c => c.id !== selfRecord?.id);
+      maybeCallPeer(); break;
+    }
+    case 'ClientExit': {
+      const goneId = msg.content?.client?.id ?? msg.content?.id;
+      const gone = roster.find(c => c.id === goneId);
+      roster = roster.filter(c => c.id !== goneId);
+      if (gone && (gone.address === peerTarget || gone.id === peerTarget)){
+        teardownPeer(); maybeCallPeer();       // our TD peer left — reset and wait for it to return
+      }
+      break;
+    }
+    case 'Offer':  onOfferMsg(msg);  break;
+    case 'Answer': onAnswerMsg(msg); break;
+    case 'Ice':    onIceMsg(msg);    break;
+    default: break;
+  }
+}
+
+function maybeCallPeer(){
+  if (pc || !roster.length) return;
+  const filter = CONNECTION.peerAddressFilter || '';
+  const peer = roster.find(c => String(c.address || '').includes(filter)) || (filter ? null : roster[0]);
+  if (!peer) return;
+  setHint('TouchDesigner peer found — negotiating the stream…');
+  peerTarget = peer.address;
+  const selfJoined = selfRecord?.properties?.timeJoined ?? 0;
+  const peerJoined = peer.properties?.timeJoined ?? 0;
+  polite = selfJoined < peerJoined;            // later joiner is polite
+  createPeer();
+  pc.addTransceiver('video', { direction: 'recvonly' });
+  pc.addTransceiver('audio', { direction: 'recvonly' });   // TD music feed
+  dataChannel = pc.createDataChannel(CONNECTION.dataChannelLabel);
+  wireDataChannel(dataChannel);
+}
+
+function createPeer(){
+  pc = new RTCPeerConnection({ iceServers: CONNECTION.iceServers });
+  remoteStream = new MediaStream();
+  videoEl.srcObject = remoteStream;
+
+  pc.ontrack = (event) => {
+    remoteStream.addTrack(event.track);
+    applyJitterBuffer();
+    setStatus('live');
+  };
+  pc.ondatachannel = (event) => {
+    if (!dataChannel || dataChannel.readyState !== 'open'){
+      dataChannel = event.channel; wireDataChannel(dataChannel);
+    }
+  };
+  pc.onicecandidate = (event) => {
+    if (event.candidate) sendSignal('Ice', peerTarget, {
+      sdpCandidate: event.candidate.candidate,
+      sdpMLineIndex: event.candidate.sdpMLineIndex,
+      sdpMid: event.candidate.sdpMid,
+    });
+  };
+  pc.onnegotiationneeded = async () => {
+    try {
+      makingOffer = true;
+      await pc.setLocalDescription();
+      sendSignal('Offer', peerTarget, { sdp: pc.localDescription.sdp });
+    } catch (err) { console.error('[WEBRTC] negotiationneeded', err); }
+    finally { makingOffer = false; }
+  };
+  pc.onconnectionstatechange = () => {
+    const st = pc.connectionState;
+    if (st === 'connected') setStatus('live');
+    if (st === 'failed'){ try { pc.restartIce(); } catch {} }
+    if (st === 'disconnected' || st === 'closed') setStatus('offline');
+  };
+  pc.oniceconnectionstatechange = () => {
+    if (pc.iceConnectionState === 'failed'){ try { pc.restartIce(); } catch {} }
+  };
+}
+
+function teardownPeer(){
+  if (dataChannel){ try { dataChannel.close(); } catch {} dataChannel = null; }
+  if (pc){
+    pc.ontrack = pc.ondatachannel = pc.onicecandidate = null;
+    pc.onnegotiationneeded = pc.onconnectionstatechange = pc.oniceconnectionstatechange = null;
+    try { pc.close(); } catch {}
+    pc = null;
+  }
+  if (remoteStream){ remoteStream.getTracks().forEach(t => t.stop()); remoteStream = null; }
+  videoEl.srcObject = null;
+  makingOffer = false; settingRemoteAnswer = false; peerTarget = null;
+  setStatus('offline');
+  if (signalWS && signalWS.readyState === WebSocket.OPEN)
+    setHint('Signaling connected — waiting for the TouchDesigner peer…');
+}
+
+/* Perfect negotiation (offer glare handled by politeness). */
+async function onOfferMsg(msg){
+  if (!pc){
+    const sender = roster.find(c => c.id === msg.sender || c.address === msg.sender);
+    peerTarget = sender?.address ?? msg.sender;
+    const selfJoined = selfRecord?.properties?.timeJoined ?? 0;
+    const peerJoined = sender?.properties?.timeJoined ?? 0;
+    polite = selfJoined < peerJoined;
+    createPeer();
+  }
+  const readyForOffer = !makingOffer && (pc.signalingState === 'stable' || settingRemoteAnswer);
+  if (!polite && !readyForOffer) return;       // impolite side ignores colliding offers
+  peerTarget = msg.sender;
+  try {
+    await pc.setRemoteDescription({ type: 'offer', sdp: msg.content.sdp });
+    await pc.setLocalDescription();            // creates the answer
+    sendSignal('Answer', msg.sender, { sdp: pc.localDescription.sdp });
+  } catch (err) { console.error('[WEBRTC] offer handling', err); }
+}
+async function onAnswerMsg(msg){
+  if (!pc) return;
+  try {
+    settingRemoteAnswer = true;
+    await pc.setRemoteDescription({ type: 'answer', sdp: msg.content.sdp });
+  } catch (err) { console.error('[WEBRTC] answer handling', err); }
+  finally { settingRemoteAnswer = false; }
+}
+async function onIceMsg(msg){
+  if (!pc) return;
+  try {
+    await pc.addIceCandidate(new RTCIceCandidate({
+      candidate: msg.content.sdpCandidate,
+      sdpMLineIndex: msg.content.sdpMLineIndex,
+      sdpMid: msg.content.sdpMid,
+    }));
+  } catch (err) { if (!polite) console.warn('[WEBRTC] addIceCandidate', err); }
+}
+
+/* Receive-side jitter buffer — the anti-breakup lever for NETWORK jitter.
+   Delays only the displayed stream; data-channel controls stay instant. */
+function applyJitterBuffer(){
+  if (!pc) return;
+  const target = Math.min(AUDIO.jitterBufferMs, 4000);
+  pc.getReceivers().forEach(receiver => {
+    try { receiver.jitterBufferTarget = target; } catch {}          // standard
+    try { receiver.playoutDelayHint   = target / 1000; } catch {}  // Chromium fallback (s)
+  });
+}
+
+function wireDataChannel(ch){
+  ch.onopen  = () => {
+    setStatus('live');
+    sendToTD({ type: 'mode', mode });                                            // sync TD to console state
+    if (currentStation) sendToTD({ type: 'station', station: currentStation });
+  };
+  ch.onclose = () => setStatus('offline');
+}
+
+/* Start only if the signaling URL has been set; otherwise run standalone. */
+if (CONNECTION.signalingUrl.includes('[SIGNALING_SERVER_URL]')){
+  setStatus('offline');
+  document.getElementById('placeholderHint').textContent =
+    'Standalone preview — controls are live and the TX readout shows what each one sends. Set CONNECTION.signalingUrl to connect to TouchDesigner.';
+} else {
+  connectToTouchDesigner().catch(() => setStatus('offline'));
+}
+</script>
+</body>
+</html>

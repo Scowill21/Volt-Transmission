@@ -1,0 +1,434 @@
+/* ===========================================================================
+   TD Stream Control — styled to match VOLTAGE DROP
+   ---------------------------------------------------------------------------
+   One governing idea, borrowed from voltage-drop: a restrained monochrome
+   field with exactly one live wire — `voltage`. The page is a conductor, the
+   control strip is a powered bus-bar, each key cap is a node tapped off it, an
+   activation flash is a packet of current discharging through a cap, and the
+   status dot is a solder-point that energizes when connected.
+
+   Rules: ground is warm void (#0b0b0d, never #000). Elevation is a value-step
+   (void -> carbon -> graphite), never a black drop-shadow. Edges are
+   translucent-bone hairlines. The ONLY glow is a soft-voltage node glow. One
+   easing curve everywhere. Voltage is absent at rest; it only ever appears to
+   move, fill, or glow on the live/active state.
+   =========================================================================== */
+
+:root {
+  /* Palette — monochrome field + one live wire */
+  --vd-void:         #0b0b0d; /* page + video-stage ground; letterbox bars   */
+  --vd-carbon:       #141417; /* control-strip fill; empty video well        */
+  --vd-graphite:     #1e1e23; /* key-cap fill                                */
+  --vd-ash:          #9a9aa3; /* labels, status text, eyebrows (secondary)   */
+  --vd-fog:          #c9c9ce; /* body / default text                         */
+  --vd-bone:         #f2efe9; /* key chars, primary text                     */
+  --vd-voltage:      #5b52ff; /* the live wire — fills, active borders, trace*/
+  --vd-voltage-soft: #8a83ff; /* lifted hue — small text, leading edge, glow */
+
+  /* Translucent-bone hairlines (edges read as faint light, not drawn lines)  */
+  --vd-hairline:        rgba(242, 239, 233, 0.10);
+  --vd-hairline-strong: rgba(242, 239, 233, 0.15);
+
+  /* Strip surface */
+  --vd-strip-fill: rgba(20, 20, 23, 0.72); /* carbon @72% over backdrop-blur */
+  --vd-strip-blur: 12px;
+
+  /* The one sanctioned glow + its activation scale-ups */
+  --vd-glow-node: 0 0 8px rgba(138, 131, 255, 0.70);  /* node dot            */
+  --vd-glow-fire: 0 0 16px rgba(138, 131, 255, 0.55); /* the node glow, scaled up for cap activation */
+  --vd-wash-fire: rgba(91, 82, 255, 0.25);            /* cap fire fill       */
+
+  /* Type */
+  --vd-font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --vd-font-display: "Fraunces", Georgia, serif; /* reserved for parity      */
+
+  /* Eyebrow / label rhythm */
+  --vd-track:       0.28em; /* 11px labels                                    */
+  --vd-track-tight: 0.24em; /* 10px labels (avoids over-spacing)              */
+
+  /* Motion — one weighted curve, a few speeds */
+  --vd-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --vd-dur-fast: 300ms;   /* small color recolors                            */
+  --vd-dur-struct: 500ms; /* structural state changes                        */
+  --vd-dur-reveal: 900ms; /* entrance / fade-out                             */
+
+  /* Geometry — voltage-drop frames are square; round is reserved for nodes/dots */
+  --vd-cap-size: 58px;
+  --vd-cap-radius: 2px;
+
+  /* Focus ring */
+  --vd-focus: 2px solid var(--vd-voltage-soft);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--vd-void);
+  color: var(--vd-fog);
+  font-family: var(--vd-font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden; /* fixed display surface, no scroll */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* On-brand selection + focus, everywhere */
+::selection {
+  background: var(--vd-voltage);
+  color: var(--vd-bone);
+}
+
+:focus-visible {
+  outline: var(--vd-focus);
+  outline-offset: 3px;
+  border-radius: 1px;
+}
+
+.app {
+  position: fixed;
+  inset: 0;
+  background: var(--vd-void);
+}
+
+/* --- Shared primitive: the eyebrow label -------------------------------- */
+.vd-eyebrow {
+  font-family: var(--vd-font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--vd-track);
+  color: var(--vd-ash);
+}
+
+/* --- Video stage -------------------------------------------------------- */
+.video-stage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--vd-void); /* warm near-black ground; letterbox = ground  */
+  display: block;
+  /* object-fit set inline from config (contain | cover); no radius/shadow   */
+}
+
+/* --- Status indicator (top-right): a live solder-point node ------------- */
+.status {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 14px;
+  background: rgba(11, 11, 13, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--vd-hairline);
+  border-radius: 2px;
+  transition: opacity var(--vd-dur-reveal) var(--vd-ease);
+  pointer-events: none;
+}
+
+.status--faded {
+  opacity: 0; /* fades out a beat after Connected, like a reveal in reverse  */
+}
+
+.status__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--vd-ash);
+  flex: none;
+  transition: background var(--vd-dur-fast) var(--vd-ease),
+    box-shadow var(--vd-dur-fast) var(--vd-ease);
+}
+
+/* .status__label composes .vd-eyebrow in the markup; only its color changes
+   per connection state (below). */
+
+/* Connecting — cold, charging: ash dot, slow breathing glow */
+.status--connecting .status__dot {
+  animation: vd-breathe 2.6s var(--vd-ease) infinite;
+}
+
+/* Reconnecting — the same breath, but in voltage (distinguishes from cold) */
+.status--reconnecting .status__dot {
+  background: var(--vd-voltage);
+  animation: vd-breathe-v 2.6s var(--vd-ease) infinite;
+}
+
+/* Connected — current present: the canonical glowing soft-voltage node */
+.status--connected .status__dot {
+  background: var(--vd-voltage-soft);
+  box-shadow: var(--vd-glow-node);
+}
+.status--connected .status__label {
+  color: var(--vd-voltage-soft);
+}
+
+/* Disconnected — no current: a dim, glowless dot */
+.status--disconnected .status__dot {
+  background: rgba(154, 154, 163, 0.4);
+}
+
+@keyframes vd-breathe {
+  0%, 100% { box-shadow: 0 0 3px rgba(154, 154, 163, 0.35); }
+  50%      { box-shadow: 0 0 9px rgba(154, 154, 163, 0.70); }
+}
+@keyframes vd-breathe-v {
+  0%, 100% { box-shadow: 0 0 4px rgba(91, 82, 255, 0.40); }
+  50%      { box-shadow: 0 0 11px rgba(91, 82, 255, 0.85); }
+}
+
+/* --- Control strip dock (centers the bus-bar without claiming its transform) */
+.key-panel-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: max(26px, env(safe-area-inset-bottom));
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  padding: 0 14px;
+  pointer-events: none; /* let clicks fall to the video except on the panel  */
+}
+
+/* --- The powered bus-bar ------------------------------------------------ */
+.key-panel {
+  position: relative;
+  pointer-events: auto;
+  max-width: 100%;
+  padding: 15px 22px 19px;
+  background: var(--vd-strip-fill);
+  backdrop-filter: blur(var(--vd-strip-blur));
+  -webkit-backdrop-filter: blur(var(--vd-strip-blur));
+  border: 1px solid var(--vd-hairline);
+  border-radius: 2px; /* near-sharp, schematic; depth comes from value+hairline */
+  box-shadow: none;
+  /* Entrance: reveal-style rise (no fill, so the hide/show transition is free) */
+  animation: vd-reveal-up var(--vd-dur-reveal) var(--vd-ease);
+  transition: opacity var(--vd-dur-struct) var(--vd-ease),
+    transform var(--vd-dur-struct) var(--vd-ease);
+}
+
+/* One-time packet of current sweeping the top edge as the bus powers up */
+.key-panel::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 0;
+  height: 1px;
+  width: 45%;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--vd-voltage),
+    var(--vd-voltage-soft),
+    transparent
+  );
+  opacity: 0;
+  animation: vd-bus-sweep 1.1s var(--vd-ease) 0.25s 1 both;
+  pointer-events: none;
+}
+
+.key-panel--hidden {
+  opacity: 0;
+  transform: translateY(18px);
+  pointer-events: none;
+}
+
+@keyframes vd-reveal-up {
+  from { opacity: 0; transform: translateY(28px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes vd-bus-sweep {
+  0%   { transform: translateX(-100%); opacity: 0; }
+  18%  { opacity: 1; }
+  100% { transform: translateX(240%); opacity: 0; }
+}
+
+/* Schematic panel header — a dim node + an eyebrow, divided by a hairline */
+.key-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--vd-hairline);
+}
+.key-panel__node {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(242, 239, 233, 0.22); /* dim — only the status node glows  */
+  flex: none;
+}
+.key-panel__title {
+  font-size: 10px;
+  letter-spacing: var(--vd-track-tight);
+}
+
+/* --- The cap row -------------------------------------------------------- */
+.key-panel__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+/* --- A single labeled key cap: a graphite node on the bus --------------- */
+.keycap-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+}
+
+/* Composes .vd-eyebrow in the markup; overrides only size + tracking for the
+   narrow cap, mirroring how .key-panel__title narrows the eyebrow. */
+.keycap-label {
+  font-size: 10px;
+  letter-spacing: var(--vd-track-tight);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.keycap {
+  position: relative;
+  overflow: hidden; /* clips the activation packet to the cap face          */
+  min-width: var(--vd-cap-size);
+  height: var(--vd-cap-size);
+  padding: 0 14px;
+  background: var(--vd-graphite);
+  border: 1px solid var(--vd-hairline-strong);
+  border-radius: var(--vd-cap-radius);
+  color: var(--vd-bone);
+  font-family: var(--vd-font-sans);
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color var(--vd-dur-fast) var(--vd-ease),
+    color var(--vd-dur-fast) var(--vd-ease),
+    background var(--vd-dur-fast) var(--vd-ease);
+}
+
+.keycap--wide {
+  min-width: 150px;
+}
+
+/* Hover/focus: recolor border -> voltage and char -> voltage-soft (no scale) */
+.keycap:hover {
+  border-color: var(--vd-voltage);
+  color: var(--vd-voltage-soft);
+}
+
+.keycap:active {
+  transform: translateY(1px);
+}
+
+/* The current packet that runs UP through the cap on activation */
+.keycap::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 65%;
+  background: linear-gradient(
+    to top,
+    transparent,
+    var(--vd-voltage),
+    var(--vd-voltage-soft)
+  );
+  opacity: 0;
+  transform: translateY(115%);
+  pointer-events: none;
+}
+
+/* Fired (physical key OR click): voltage snaps in, then decays back to rest.
+   The keyframe bakes the fast attack + ~450ms release so it can't smear. */
+.keycap--active {
+  animation: vd-cap-fire 450ms var(--vd-ease) 1 both;
+}
+.keycap--active::after {
+  animation: vd-cap-packet 450ms var(--vd-ease) 1 both;
+}
+
+@keyframes vd-cap-fire {
+  0% {
+    border-color: var(--vd-voltage);
+    background: var(--vd-wash-fire);
+    box-shadow: var(--vd-glow-fire);
+    color: var(--vd-bone);
+  }
+  100% {
+    border-color: var(--vd-hairline-strong);
+    background: var(--vd-graphite);
+    box-shadow: 0 0 0 rgba(91, 82, 255, 0);
+    color: var(--vd-bone);
+  }
+}
+@keyframes vd-cap-packet {
+  0%   { transform: translateY(115%); opacity: 0.9; }
+  100% { transform: translateY(-165%); opacity: 0; }
+}
+
+/* --- Small screens / tablets -------------------------------------------- */
+@media (max-width: 560px) {
+  .key-panel {
+    padding: 12px 16px 16px;
+  }
+  .key-panel__row {
+    gap: 11px;
+  }
+  .keycap {
+    min-width: 50px;
+    height: 50px;
+    font-size: 17px;
+  }
+  .keycap--wide {
+    min-width: 112px;
+  }
+}
+
+/* --- Reduced motion: everything lands instantly, nothing drifts/breathes - */
+@media (prefers-reduced-motion: reduce) {
+  .key-panel,
+  .key-panel::before,
+  .keycap--active,
+  .keycap--active::after {
+    animation: none !important;
+  }
+  /* Activation collapses to an instant border flip, no animated glow */
+  .keycap--active {
+    border-color: var(--vd-voltage);
+    background: var(--vd-wash-fire);
+    box-shadow: none;
+  }
+  .status--connecting .status__dot,
+  .status--reconnecting .status__dot {
+    animation: none !important;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+  }
+}

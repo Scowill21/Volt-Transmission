@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+
+# Local dev TLS certs — never commit private keys
+*.crt
+*.key
+*.pem
