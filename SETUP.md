@@ -20,7 +20,7 @@ The four standard stations and their visuals:
 | --- | --- | --- |
 | **Ambient** | Lofi bedroom at night | Lamp glow breathes with **bass** · monitor EQ + city windows ride **mids** · rain + dust ride **treble** · a string-light flashes and the cat's tail flicks on the **snare** |
 | **Pulse** | Tokyo neon skyline | Skyline bloom + light streaks with **bass** · window grids with **mids** · neon flicker with **treble** · a sign flashes white on the **snare** · frame shakes on the **kick** |
-| **Static** | Soft analog fuzz / VHS | Low-contrast static breathes with **treble** · gentle glitch slices with **bass/kick** · a soft chromatic shimmer + faint blocks on the **snare** · the oscilloscope line is the actual waveform |
+| **Static** | Flowing analog haze | Drifting color blobs + aurora ribbons swell and speed up with **bass/kick** · drift steers with **mids** · fine motes shimmer with **treble** · a soft ring ripples through on the **snare** · the oscilloscope line is the actual waveform |
 | **Drift** | Open water under a low moon | The swell surges with **bass** · moon-path shimmer with **mids** · crest sparkles with **treble** · **snare** drops a ripple ring out on the water, **kick** a quick one up close |
 
 Bass/snare/treble are read live from whatever song is playing (snare and kick
@@ -88,8 +88,12 @@ picks). One song per station; the player loops it.
 - **Play / Pause / Skip** drive the local player in Presets mode
   (Skip advances to the next station). In Live mode the same buttons send
   `{type:'transport'}` messages to TouchDesigner instead.
-- **Vol** slider sets preset volume. Keys: **1–4** tune stations,
-  **Space** play/pause, **H** hides the console, **D** audio diagnostics.
+- **Vol** slider sets preset volume. Keys: **1–4** tune stations, **P**
+  play/pause, **H** hides the console, **D** audio diagnostics.
+- **Action keys drive the graphics too**: Q = accent flash, W = punch
+  zoom + shake, E = spark burst, Space = shock ring — instantly in the
+  default scenes, and the same key message reaches TouchDesigner in
+  parallel, stamped with who pressed it.
 - The whole UI auto-fades after ~4 s idle for a clean capture; move the
   mouse to bring it back.
 
@@ -130,18 +134,51 @@ Leave the `[SIGNALING_SERVER_URL]` placeholder in place to run standalone
   and the status dot goes **Live** — the whole accent flips amber → violet.
 - If the link drops it reconnects with backoff and restarts ICE; the
   placeholder shows exactly what it's waiting on.
-- Every control reaches TD as JSON on the `ControlData` data channel:
+- Every control reaches TD as JSON on the `ControlData` data channel,
+  and **every message is stamped with the user who sent it** plus a
+  millisecond timestamp:
 
   ```jsonc
-  { "type": "key",       "action": "<action>" }              // keycaps ("blackout" adds "state")
-  { "type": "station",   "station": "<id>" }                 // station picks
-  { "type": "transport", "action": "play"|"pause"|"skip" }   // transport (Live mode)
-  { "type": "mode",      "mode": "presets"|"live" }          // macro toggle
+  { "type": "key",       "action": "<action>", "user": {…}, "ts": … }   // keycaps ("blackout" adds "state")
+  { "type": "station",   "station": "<id>",    "user": {…}, "ts": … }   // station picks
+  { "type": "transport", "action": "play"|"pause"|"skip", "user": {…}, "ts": … }
+  { "type": "mode",      "mode": "presets"|"live",         "user": {…}, "ts": … }
   ```
 
   Parse these on the WebRTC DAT callback — routing sketch in
   [README → Receiving it in TouchDesigner](README.md#receiving-it-in-touchdesigner).
   When the channel opens, the current mode + station are re-sent so TD syncs.
+
+### Knowing who pressed the key (paid users)
+
+Until real accounts exist, identity rides on the URL. Hand an approved
+user a link like:
+
+```
+https://your-site.onrender.com/?name=Ada&role=listener&uid=cus_123
+```
+
+and when they hit **E**, TouchDesigner receives:
+
+```json
+{ "type": "key", "action": "action_3", "ts": 1767975421042,
+  "user": { "id": "cus_123", "name": "Ada", "role": "listener", "sid": "9f2c11ab" } }
+```
+
+`sid` is fresh per page load (tells two tabs apart); no URL params means
+`role: "operator"`. In your WebRTC DAT callback:
+
+```python
+msg = json.loads(contents)
+who = msg.get('user', {})
+if msg.get('type') == 'key' and who.get('role') == 'listener':
+    # who.get('id') is the paying account — route/limit/score by it
+    fire(msg['action'], who.get('name'))
+```
+
+When the account system lands (ROADMAP Tier 2), the backend will set
+these fields from the real session instead of the URL — the TD-side
+schema won't change.
 
 ### Audio breakup?
 

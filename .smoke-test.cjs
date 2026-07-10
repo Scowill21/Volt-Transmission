@@ -84,7 +84,12 @@ w.addEventListener('error', (e) => errors.push('window.onerror: ' + e.message));
 const script = html.match(/<script>([\s\S]*)<\/script>/)[1] +
   `;window.__dbg = () => ({ mode, currentStation, transportState, playing: SIG.playing,
      scenes: Object.keys(SCENES).join(','), paused: player.paused,
-     chip: (id) => document.getElementById('trk-' + id).textContent });`;
+     fxCount: FX.sparks.length + FX.shocks.length + (FX.flash > .5 ? 1 : 0),
+     lastSent: window.__lastSent,
+     chip: (id) => document.getElementById('trk-' + id).textContent });
+   const __origSend = sendToTD;
+   window.__lastSent = null;
+   sendToTD = (p) => { window.__lastSent = { ...p, user: IDENTITY, ts: Date.now() }; return __origSend(p); };`;
 try { w.eval(script); console.log('EVAL OK'); }
 catch (e) { errors.push('EVAL FAIL: ' + e.stack.split('\n').slice(0, 3).join(' | ')); }
 const dbg = () => w.__dbg();
@@ -152,6 +157,14 @@ step('keys 1-4 tune stations in presets', () => {
   w.eval(`fireKey('scene_3')`);
   if (dbg().currentStation !== 'static') throw new Error('got: ' + dbg().currentStation);
   pump(5, 5000);
+});
+step('action keys fire scene FX + messages carry user/ts', () => {
+  w.eval(`fireKey('action_1'); fireKey('action_2'); fireKey('action_3'); fireKey('trigger')`);
+  pump(6, 5500);
+  if (dbg().fxCount < 5) throw new Error('fxCount: ' + dbg().fxCount);
+  const sent = dbg().lastSent;
+  if (!sent || !sent.user || !sent.user.id || !sent.ts) throw new Error('missing user/ts: ' + JSON.stringify(sent));
+  pump(60, 6000);   // let FX decay across frames without error
 });
 step('VU + station cards present', () => {
   for (const id of ['vuBass', 'vuSnr', 'vuTrb', 'macro', 'dropzone', 'fileIn']) {

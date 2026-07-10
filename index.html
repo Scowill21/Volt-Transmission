@@ -589,7 +589,7 @@ const KEY_MAP = [
 const STATIONS = [
   { id: 'ambient', name: 'Ambient', note: 'lofi bedroom'       },
   { id: 'pulse',   name: 'Pulse',   note: 'tokyo · 124 bpm'    },
-  { id: 'static',  name: 'Static',  note: 'soft noise'         },
+  { id: 'static',  name: 'Static',  note: 'analog haze / flow' },
   { id: 'drift',   name: 'Drift',   note: 'water / spacious'   },
 ];
 
@@ -611,8 +611,31 @@ const PRESET_TRACKS = {
   drift:   '',
 };
 
-// NOTE: 'h' (hide console) and 'd' (diagnostics) are handled directly in the
-// keydown listener below — keep them OUT of KEY_MAP so they don't clash.
+// NOTE: 'h' (hide console), 'd' (diagnostics), and 'p' (preset play/pause)
+// are handled directly in the keydown listener below — keep them OUT of
+// KEY_MAP so they don't clash.
+
+/* ── Who is pressing the keys ─────────────────────────────────────
+   EVERY message to TouchDesigner carries a `user` object + `ts`, so
+   the TD side can route, rank, or rate-limit by person once paying
+   users are in play. Until real accounts exist, identity comes from
+   URL params — hand a viewer a link like:
+       https://your-site/?name=Ada&role=listener&uid=cus_123
+   and their key presses arrive attributed. No params = anonymous
+   operator. `sid` is fresh per page load so TD can tell two tabs
+   with the same name apart.                                        */
+const IDENTITY = (() => {
+  const p = new URLSearchParams(location.search);
+  const sid = (window.crypto && crypto.randomUUID)
+    ? crypto.randomUUID().slice(0, 8)
+    : Math.random().toString(36).slice(2, 10);
+  return {
+    id:   p.get('uid')  || 'anon-' + sid,
+    name: p.get('name') || 'operator',
+    role: p.get('role') || 'operator',   // future: listener | vj | radio | admin
+    sid,
+  };
+})();
 
 /* ── Audio robustness config ──────────────────────────────────────
    jitterBufferMs: receive-side buffer that smooths NETWORK jitter/loss
@@ -662,13 +685,20 @@ const STORE = {
 };
 
 /* ════════════════════════════════════════════════════════════════
-   Messages sent to TouchDesigner over the data channel:
-     keys      → { "type": "key",       "action": "<action>" }
-     stations  → { "type": "station",   "station": "<id>" }
-     transport → { "type": "transport", "action": "play" | "pause" | "skip" }
+   Messages sent to TouchDesigner over the data channel. Every payload
+   is stamped with `user` (see IDENTITY above) and `ts` (ms epoch):
+     keys      → { "type": "key",       "action": "<action>",  user, ts }
+     stations  → { "type": "station",   "station": "<id>",     user, ts }
+     transport → { "type": "transport", "action": "play|pause|skip", user, ts }
+     mode      → { "type": "mode",      "mode": "presets|live", user, ts }
    Blackout is a latching toggle, so its key message also carries state:
-     blackout  → { "type": "key", "action": "blackout", "state": "on" | "off" }
-   In TD these arrive on the WebRTC DAT; switch on `type` and route.
+     blackout  → { "type": "key", "action": "blackout", "state": "on"|"off" }
+   Full example of what TD receives when a paying viewer hits E:
+     { "type":"key", "action":"action_3", "ts":1767975421042,
+       "user":{ "id":"cus_123", "name":"Ada", "role":"listener", "sid":"9f2c11ab" } }
+   In TD these arrive on the WebRTC DAT; switch on `type`, then use
+   msg['user'] to decide whose input counts:
+     who = msg.get('user', {});  who.get('id'), who.get('role')
 
    TouchDesigner-side AUDIO fixes (the client can't repair audio that
    was already glitchy before it hit the stream):
@@ -701,7 +731,7 @@ videoEl.muted = AUDIO.startMuted;
 
 /* ── Send: uses the data channel if open, always echoes to the TX readout ── */
 function sendToTD(payload){
-  const msg = JSON.stringify(payload);
+  const msg = JSON.stringify({ ...payload, user: IDENTITY, ts: Date.now() });
   if (dataChannel && dataChannel.readyState === 'open') dataChannel.send(msg);
   const label = payload.station || payload.mode ||
     ((payload.action || '') + (payload.state ? ' ' + payload.state : ''));
@@ -745,8 +775,10 @@ function fireKey(action){
   const cap = keysEl.querySelector(`.keycap[data-action="${action}"]`);
   if (cap){ cap.classList.add('active'); setTimeout(() => cap.classList.remove('active'), 140); }
 
-  // PRESETS mode conveniences: 1–4 also tune the matching station locally,
-  // Space (Trigger) toggles the local player. (TD still receives the key.)
+  // PRESETS mode: 1–4 tune the matching station locally; every other
+  // action key fires its visual effect in the default graphics (Q flash,
+  // W punch, E burst, Space shock ring). TD receives the key in parallel
+  // either way — same message, stamped with the user who pressed it.
   if (mode === 'presets'){
     const m = /^scene_([1-4])$/.exec(action);
     if (m){
@@ -756,8 +788,9 @@ function fireKey(action){
         if (input) input.checked = true;
         selectStation(st.id);
       }
+    } else {
+      sceneFX(action);
     }
-    if (action === 'trigger') presetToggle();
   }
 }
 
@@ -1164,6 +1197,63 @@ function vignette(g, a){
   g.save(); g.globalAlpha = a; g.fillStyle = vigGrad; g.fillRect(0, 0, 1280, 720); g.restore();
 }
 
+/* ── Action-key FX: the default graphics react to the action keys ──
+   Fired locally in fireKey() the instant a key lands (TD receives the
+   same message in parallel). Each effect tints to the active station:
+     Q  action_1 → accent flash over the whole scene
+     W  action_2 → punch zoom + shake
+     E  action_3 → spark burst from center
+     ␣  trigger  → shock ring rippling outward                       */
+const SCENE_ACCENT = { ambient: '#ffb37a', pulse: '#ff4fd8', static: '#7fd0e0', drift: '#4fd8ff' };
+const FX = { flash: 0, punch: 0, sparks: [], shocks: [] };
+
+function sceneFX(action){
+  if (action === 'action_1') FX.flash = 1;
+  else if (action === 'action_2') FX.punch = 1;
+  else if (action === 'action_3'){
+    for (let i = 0; i < 30; i++){
+      const a = rnd(TAU), v = rnd(130, 620);
+      FX.sparks.push({ x: 640, y: 360, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1 });
+    }
+  }
+  else if (action === 'trigger') FX.shocks.push({ r: 0, life: 1 });
+}
+
+function drawFX(g, dt){
+  const accent = SCENE_ACCENT[currentStation] || '#ffffff';
+  if (FX.flash > .01){
+    g.save(); g.globalCompositeOperation = 'lighter';
+    g.globalAlpha = FX.flash * .32; g.fillStyle = accent; g.fillRect(0, 0, 1280, 720);
+    g.globalAlpha = FX.flash * .12; g.fillStyle = '#ffffff'; g.fillRect(0, 0, 1280, 720);
+    g.restore();
+  }
+  for (let i = FX.sparks.length - 1; i >= 0; i--){
+    const p = FX.sparks[i];
+    p.life -= dt * 1.5;
+    if (p.life <= 0){ FX.sparks.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vx *= (1 - 1.6 * dt); p.vy *= (1 - 1.6 * dt);
+    g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = p.life;
+    g.fillStyle = accent; g.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+    g.fillStyle = '#ffffff'; g.fillRect(p.x - .5, p.y - .5, 1.4, 1.4);
+    g.restore();
+  }
+  for (let i = FX.shocks.length - 1; i >= 0; i--){
+    const s = FX.shocks[i];
+    s.life -= dt * 1.15; s.r += 820 * dt;
+    if (s.life <= 0){ FX.shocks.splice(i, 1); continue; }
+    g.save(); g.globalCompositeOperation = 'lighter';
+    g.strokeStyle = accent; g.globalAlpha = s.life * .7;
+    g.lineWidth = 2.5 + 11 * s.life;
+    g.shadowColor = accent; g.shadowBlur = 18;
+    g.beginPath(); g.arc(640, 360, s.r, 0, TAU); g.stroke();
+    g.globalAlpha = s.life * .28; g.lineWidth = 1.5;
+    g.beginPath(); g.arc(640, 360, s.r * .8, 0, TAU); g.stroke();
+    g.restore();
+  }
+  g.globalAlpha = 1;
+}
+
 /* ── AMBIENT · a lofi bedroom at night ──
    Lamp glow swells with BASS · monitor EQ + city windows ride MIDS ·
    rain speed + dust motes ride TREBLE · a string-light flashes and the
@@ -1463,63 +1553,95 @@ function makePulse(){
   }};
 }
 
-/* ── STATIC · soft analog fuzz ──
-   A mellow, low-contrast static bed. Density rides TREBLE gently ·
-   subtle glitch slices with BASS and the KICK · a soft chromatic
-   shimmer + faint blocks on the SNARE · the oscilloscope trace is
-   the actual wave. No hard flashes — late-night dead-channel calm. */
+/* ── STATIC · analog haze ──
+   No more black-and-white snow: a slow, flowing color field — drifting
+   lava-lamp blobs under soft aurora ribbons, with only a whisper of the
+   old grain. BASS swells the blobs and pushes the flow · MIDS steer the
+   drift · TREBLE shimmers fine motes · SNARE sends a soft ring through
+   the haze · KICK nudges the current. The oscilloscope is the wave.   */
 function makeStatic(){
-  const nz = document.createElement('canvas'); nz.width = 192; nz.height = 108;
-  const nx = nz.getContext('2d');
-  const img = nx.createImageData(192, 108);
-  const rC = document.createElement('canvas'); rC.width = 192; rC.height = 108;
-  const cC = document.createElement('canvas'); cC.width = 192; cC.height = 108;
-  const rx = rC.getContext('2d'), cx = cC.getContext('2d');
-  const blocks = [];
-  let lastSn = 0;
+  const TONES = [[127,208,224], [155,127,224], [224,143,176], [127,224,190]];  // cyan · violet · rose · teal
+  const blobs = [...Array(8)].map((_, i) => ({
+    tone: TONES[i % 4],
+    ax: rnd(.35, .95), ay: rnd(.3, .9),
+    px: rnd(TAU), py: rnd(TAU),
+    sx: rnd(.05, .15), sy: rnd(.04, .12),
+    r: rnd(170, 300),
+  }));
+  const motes = [...Array(50)].map(() => ({ x: rnd(1280), y: rnd(720), p: rnd(TAU), v: rnd(5, 16) }));
+  const rings = [];
+  let lastSn = 0, flow = 0;
   return { draw(g, t, dt, S){
-    // low-contrast noise: soft grays, breathing gently with treble
-    const d = img.data, gate = .30 + S.treb * .28;
-    for (let i = 0; i < d.length; i += 4){
-      const v = Math.random() < gate ? 55 + Math.random() * 85 : Math.random() * 34;
-      d[i] = d[i+1] = d[i+2] = v; d[i+3] = 255;
-    }
-    nx.putImageData(img, 0, 0);
-    for (const [c2, tint] of [[rx, '#e09b9b'], [cx, '#9bd8d8']]){   // muted rose / muted cyan
-      c2.globalCompositeOperation = 'source-over'; c2.drawImage(nz, 0, 0);
-      c2.globalCompositeOperation = 'multiply'; c2.fillStyle = tint; c2.fillRect(0, 0, 192, 108);
-    }
+    flow += dt * (.5 + S.kick * 2 + S.bass * .7);          // the current — kicks push it
+    let gr = g.createLinearGradient(0, 0, 0, 720);
+    gr.addColorStop(0, '#0a0e1c'); gr.addColorStop(.6, '#101426'); gr.addColorStop(1, '#0a0d18');
+    g.fillStyle = gr; g.fillRect(0, 0, 1280, 720);
 
-    g.fillStyle = '#000'; g.fillRect(0, 0, 1280, 720);
-    g.imageSmoothingEnabled = false;
-    const off = 1.5 + S.snare * 13 + S.bass * 4;                     // soft chromatic shimmer
-    g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = .6;
-    g.drawImage(rC, -off, 0, 1280, 720);
-    g.drawImage(cC,  off, 0, 1280, 720);
-    g.restore();
-    g.globalAlpha = .5; g.drawImage(nz, 0, 0, 1280, 720); g.globalAlpha = 1;
-
-    // gentle glitch slices: narrow bands eased sideways
-    const slices = (S.kick * 5 + S.bass * 2) | 0;
-    for (let i = 0; i < slices; i++){
-      const sy = (Math.random() * 104) | 0, sh = 2 + ((Math.random() * 10) | 0);
-      const dx = rnd(-1, 1) * (16 + S.kick * 64);
-      g.drawImage(nz, 0, sy, 192, sh, dx, sy * (720 / 108), 1280, sh * (720 / 108));
+    // drifting color blobs (Lissajous paths, breathing with bass)
+    g.save(); g.globalCompositeOperation = 'lighter';
+    for (const b of blobs){
+      const wander = Math.sin(t * .07 + b.py) * (30 + S.mid * 90);
+      const x = 640 + Math.sin(flow * b.sx * TAU + b.px) * 520 * b.ax + wander;
+      const y = 360 + Math.sin(flow * b.sy * TAU + b.py) * 300 * b.ay;
+      const r = b.r * (1 + S.bass * .5);
+      const [cr, cg, cb] = b.tone;
+      const bg2 = g.createRadialGradient(x, y, 0, x, y, r);
+      bg2.addColorStop(0, `rgba(${cr},${cg},${cb},${.17 + S.bass * .13})`);
+      bg2.addColorStop(.55, `rgba(${cr},${cg},${cb},${.06 + S.bass * .05})`);
+      bg2.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = bg2;
+      g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
     }
 
-    // scanlines + a slow rolling bar
-    g.fillStyle = 'rgba(0,0,0,.2)';
-    for (let y = 0; y < 720; y += 3) g.fillRect(0, y, 1280, 1);
-    const roll = (t * (34 + S.mid * 130)) % 920 - 100;
-    const rg = g.createLinearGradient(0, roll, 0, roll + 140);
-    rg.addColorStop(0, 'rgba(255,255,255,0)');
-    rg.addColorStop(.5, `rgba(255,255,255,${.03 + S.mid * .055})`);
-    rg.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = rg; g.fillRect(0, roll, 1280, 140);
+    // aurora ribbons flowing across the field
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    for (let k = 0; k < 3; k++){
+      const [cr, cg, cb] = TONES[k];
+      g.strokeStyle = `rgba(${cr},${cg},${cb},${.045 + S.bass * .045})`;
+      g.lineWidth = 58 + k * 16;
+      g.beginPath();
+      const yb = 190 + k * 175;
+      for (let x = -40; x <= 1320; x += 26){
+        const y = yb + Math.sin(x * .004 + flow * (.7 + k * .28) + k * 2.1) * (58 + S.bass * 72)
+                     + Math.sin(x * .011 - flow * .9 + k) * (22 + S.mid * 38);
+        x > -40 ? g.lineTo(x, y) : g.moveTo(x, y);
+      }
+      g.stroke();
+    }
+    g.restore(); g.lineCap = 'butt';
+
+    // fine motes shimmering with treble, riding the current
+    g.save(); g.globalCompositeOperation = 'lighter';
+    for (const m of motes){
+      const tw = Math.pow(.5 + .5 * Math.sin(t * 1.8 + m.p), 2) * (.14 + S.treb * .55);
+      if (tw < .03) continue;
+      const mx = (m.x + flow * m.v * 6) % 1320 - 20;
+      const my = m.y + Math.sin(flow * .8 + m.p) * 26;
+      g.globalAlpha = Math.min(.8, tw);
+      g.fillStyle = '#d8ecf5';
+      g.fillRect(mx, my, 2, 2);
+    }
+    g.restore(); g.globalAlpha = 1;
+
+    // soft rings ripple through the haze on the snare
+    if (S.snare > .9 && t - lastSn > .18){
+      lastSn = t;
+      rings.push({ x: rnd(220, 1060), y: rnd(160, 560), life: 1 });
+    }
+    for (let i = rings.length - 1; i >= 0; i--){
+      const rp = rings[i]; rp.life -= dt * .8;
+      if (rp.life <= 0){ rings.splice(i, 1); continue; }
+      g.save(); g.globalCompositeOperation = 'lighter';
+      g.strokeStyle = '#cfe8f2'; g.globalAlpha = rp.life * .3;
+      g.lineWidth = 14 * rp.life + 2;
+      g.shadowColor = '#9bd8e8'; g.shadowBlur = 16;
+      g.beginPath(); g.arc(rp.x, rp.y, (1 - rp.life) * 280, 0, TAU); g.stroke();
+      g.restore();
+    }
 
     // oscilloscope — the song's actual waveform, glowing softly
     g.save(); g.strokeStyle = '#dceef5'; g.lineWidth = 2;
-    g.shadowColor = '#7fdcff'; g.shadowBlur = 8 + S.level * 13; g.globalAlpha = .68;
+    g.shadowColor = '#7fdcff'; g.shadowBlur = 8 + S.level * 13; g.globalAlpha = .6;
     g.beginPath();
     for (let i = 0; i < WV.length; i += 8){
       const x = i / WV.length * 1280;
@@ -1528,40 +1650,19 @@ function makeStatic(){
     }
     g.stroke(); g.restore();
 
-    // faint drifting blocks on the snare — no hard colors, no inverts
-    if (S.snare > .9 && t - lastSn > .18){
-      lastSn = t;
-      const n = 1 + ((Math.random() * 2) | 0);
-      for (let i = 0; i < n; i++) blocks.push({
-        x: Math.random() * 1180, y: Math.random() * 640,
-        w: rnd(50, 170), h: rnd(16, 70), life: 1, lum: Math.random() < .6,
-      });
-    }
-    for (let i = blocks.length - 1; i >= 0; i--){
-      const b = blocks[i]; b.life -= dt * 3.2;
-      if (b.life <= 0){ blocks.splice(i, 1); continue; }
-      g.fillStyle = b.lum
-        ? `rgba(205,220,230,${b.life * .16})`
-        : `rgba(20,28,38,${b.life * .3})`;
-      g.fillRect(b.x, b.y, b.w, b.h);
-    }
-
-    // VHS chrome, kept quiet
+    // chrome, kept quiet
     g.font = '600 20px "IBM Plex Mono", monospace'; g.textBaseline = 'alphabetic';
-    g.fillStyle = 'rgba(255,255,255,.55)'; g.textAlign = 'left';
+    g.fillStyle = 'rgba(255,255,255,.5)'; g.textAlign = 'left';
     if ((t % 1.4) < .9) g.fillText('▶ PLAY', 40, 54);
     g.fillText('CH 03 · STATIC', 40, 690);
     g.textAlign = 'right';
     g.fillText(new Date().toTimeString().slice(0, 8), 1240, 54);
-    if (S.bass > .62){
-      g.textAlign = 'center'; g.globalAlpha = .4;
-      g.fillText('— TRACKING —', 640, 660); g.globalAlpha = 1;
-    }
-    g.imageSmoothingEnabled = true;
 
-    // cool it down: slate wash + vignette
-    g.fillStyle = 'rgba(26,36,50,.2)'; g.fillRect(0, 0, 1280, 720);
-    vignette(g, .55);
+    // a whisper of the old grain + faint scanlines, for texture only
+    drawGrain(g, .22);
+    g.fillStyle = 'rgba(0,0,0,.1)';
+    for (let y = 0; y < 720; y += 4) g.fillRect(0, y, 1280, 1);
+    vignette(g, .6);
   }};
 }
 
@@ -1683,13 +1784,20 @@ function renderLoop(now){
   SIG.playing = !!(player.src && !player.paused && !player.ended);
   updateSignal(t);
   updateVU();
+  FX.flash *= Math.exp(-dt * 9); FX.punch *= Math.exp(-dt * 7);   // action-key FX decay
   if (visEl.hidden || !currentScene) return;
   const w = innerWidth, h = innerHeight;
   vctx.save();
   const s = Math.max(w / 1280, h / 720);          // cover-fit the 1280×720 scene
   vctx.translate((w - 1280 * s) / 2, (h - 720 * s) / 2);
   vctx.scale(s, s);
+  if (FX.punch > .01){                            // W: punch zoom + shake
+    const z = 1 + FX.punch * .055;
+    vctx.translate(640, 360); vctx.scale(z, z); vctx.translate(-640, -360);
+    vctx.translate(rnd(-1, 1) * 8 * FX.punch, rnd(-1, 1) * 6 * FX.punch);
+  }
   currentScene.draw(vctx, t, dt, SIG);
+  drawFX(vctx, dt);
   vctx.restore();
 }
 requestAnimationFrame(renderLoop);
@@ -1704,6 +1812,7 @@ window.addEventListener('keydown', (e) => {
 
   if (k === 'h'){ e.preventDefault(); toggleConsole(); return; }
   if (k === 'd'){ e.preventDefault(); toggleDiagnostics(); return; }
+  if (k === 'p'){ e.preventDefault(); if (mode === 'presets') presetToggle(); return; }   // play/pause
 
   const match = KEY_MAP.find(m => m.key.toLowerCase() === k);
   if (match){ e.preventDefault(); fireKey(match.action); } // preventDefault stops scroll + native cap re-fire
