@@ -94,6 +94,13 @@ picks). One song per station; the player loops it.
   zoom + shake, E = spark burst, Space = shock ring — instantly in the
   default scenes, and the same key message reaches TouchDesigner in
   parallel, stamped with who pressed it.
+- **Channel / VJ dropdowns** (top of the console): pick a channel, then who's
+  driving it. **House** plays the channel's default scene; a scene VJ tunes
+  their scene (station bank stays in sync); a "· live" VJ flips the console to
+  Live Station (per-VJ stream routing arrives with the streaming tiers).
+  Channels live in the `CHANNELS` config at the top of `index.html` — static
+  for now; ROADMAP Tier 1b replaces it with the admin-created list from
+  `/api/channels`. Every pick sends a `channel` message to TD (schema below).
 - The whole UI auto-fades after ~4 s idle for a clean capture; move the
   mouse to bring it back.
 
@@ -143,11 +150,13 @@ Leave the `[SIGNALING_SERVER_URL]` placeholder in place to run standalone
   { "type": "station",   "station": "<id>",    "user": {…}, "ts": … }   // station picks
   { "type": "transport", "action": "play"|"pause"|"skip", "user": {…}, "ts": … }
   { "type": "mode",      "mode": "presets"|"live",         "user": {…}, "ts": … }
+  { "type": "channel",   "channel": "<id>", "vj": "<vj-id>"|"house", "user": {…}, "ts": … }   // channel/VJ dropdowns
   ```
 
   Parse these on the WebRTC DAT callback — routing sketch in
   [README → Receiving it in TouchDesigner](README.md#receiving-it-in-touchdesigner).
-  When the channel opens, the current mode + station are re-sent so TD syncs.
+  When the channel opens, the current mode + station + channel/VJ are re-sent
+  so TD syncs.
 
 ### Knowing who pressed the key (paid users)
 

@@ -150,6 +150,26 @@
   }
   .eyebrow::after{ content:""; flex:1; height:1px; background:linear-gradient(90deg,var(--edge),transparent); }
 
+  /* ── Channel / VJ dropdowns (ROADMAP Tier 1a) ─────────────────── */
+  .chan{ display:flex; flex-wrap:wrap; gap:.9rem; align-items:center; }
+  .chan .pick{ display:flex; align-items:center; gap:.5rem; }
+  .chan .lb{ font-size:.6rem; letter-spacing:.2em; text-transform:uppercase; color:var(--ink-dim); }
+  .chan .sel{ position:relative; display:inline-block; }
+  .chan .sel::after{            /* chevron (appearance:none removes the native one) */
+    content:"▾"; position:absolute; right:.6rem; top:50%; transform:translateY(-50%);
+    color:var(--ink-dim); font-size:.7rem; pointer-events:none;
+  }
+  .chan select{
+    -webkit-appearance:none; appearance:none;
+    font-family:var(--mono); font-size:.78rem; color:var(--ink);
+    background:rgba(255,255,255,.015); border:1px solid var(--edge); border-radius:7px;
+    padding:.5rem 1.7rem .5rem .65rem; min-width:11.5rem; cursor:pointer;
+    transition:border-color .18s;
+  }
+  .chan select:hover{ border-color:color-mix(in srgb, var(--signal) 38%, transparent); }
+  .chan select:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
+  .chan option{ background:var(--bg); color:var(--ink); }
+
   /* ── Stations: radio group styled as a tuner preset bank ──────── */
   .stations{ display:flex; flex-wrap:wrap; gap:.55rem; }
   .station{ position:relative; }
@@ -491,6 +511,20 @@
     </div>
 
     <div class="zone">
+      <div class="eyebrow">Channel</div>
+      <div class="chan" id="chan">
+        <span class="pick">
+          <span class="lb" id="chanLb">CH</span>
+          <span class="sel"><select id="channelSelect" aria-labelledby="chanLb" aria-label="Channel"></select></span>
+        </span>
+        <span class="pick">
+          <span class="lb" id="vjLb">VJ</span>
+          <span class="sel"><select id="vjSelect" aria-labelledby="vjLb" aria-label="VJ"></select></span>
+        </span>
+      </div>
+    </div>
+
+    <div class="zone">
       <div class="eyebrow">Stations</div>
       <div class="stations" id="stations" role="radiogroup" aria-label="Choose a station"></div>
     </div>
@@ -611,6 +645,31 @@ const PRESET_TRACKS = {
   drift:   '',
 };
 
+/* ── Channels + VJs (ROADMAP Tier 1a — static config) ─────────────
+   channel → its VJs → which plane each uses. Static for now; Tier 1b
+   replaces this const with a fetched /api/channels payload — the
+   renderer (renderChannels) takes the data either way, so only the
+   source line changes. Shapes mirror 1b's tables:
+     channel: { id, name, slug, defaultScene, vjs[] }   defaultScene =
+       the scene shown when nobody (or "House") is driving — one of the
+       scene ids: ambient | pulse | static | drift.
+     vj.uses: { plane:'scene', scene:<id> }  → browser-rendered plane
+              { plane:'stream', peer:'' }    → live/TD plane (per-VJ
+                stream routing lands in Tier 3b; today it flips the
+                console to Live Station).
+   Seed data below is placeholder — rename freely.                   */
+const CHANNELS = [
+  { id: 'volt-fm', name: 'Volt FM', slug: 'volt-fm', defaultScene: 'ambient',
+    vjs: [
+      { id: 'kera', name: 'Kera',    uses: { plane: 'scene',  scene: 'pulse' } },
+      { id: 'nova', name: 'VJ Nova', uses: { plane: 'stream', peer: '' } },
+    ] },
+  { id: 'drift-radio', name: 'Drift Radio', slug: 'drift-radio', defaultScene: 'drift',
+    vjs: [
+      { id: 'moss', name: 'Moss',    uses: { plane: 'scene',  scene: 'static' } },
+    ] },
+];
+
 // NOTE: 'h' (hide console), 'd' (diagnostics), and 'p' (preset play/pause)
 // are handled directly in the keydown listener below — keep them OUT of
 // KEY_MAP so they don't clash.
@@ -691,6 +750,7 @@ const STORE = {
      stations  → { "type": "station",   "station": "<id>",     user, ts }
      transport → { "type": "transport", "action": "play|pause|skip", user, ts }
      mode      → { "type": "mode",      "mode": "presets|live", user, ts }
+     channel   → { "type": "channel",   "channel": "<id>", "vj": "<vj-id>|house", user, ts }
    Blackout is a latching toggle, so its key message also carries state:
      blackout  → { "type": "key", "action": "blackout", "state": "on"|"off" }
    Full example of what TD receives when a paying viewer hits E:
@@ -733,7 +793,8 @@ videoEl.muted = AUDIO.startMuted;
 function sendToTD(payload){
   const msg = JSON.stringify({ ...payload, user: IDENTITY, ts: Date.now() });
   if (dataChannel && dataChannel.readyState === 'open') dataChannel.send(msg);
-  const label = payload.station || payload.mode ||
+  const label = payload.type === 'channel' ? `${payload.channel} · ${payload.vj}` :
+    payload.station || payload.mode ||
     ((payload.action || '') + (payload.state ? ' ' + payload.state : ''));
   txEl.innerHTML = `TX → <b>${payload.type}</b> · ${label}`;
 }
@@ -923,6 +984,71 @@ function applyStage(){
   videoEl.style.display = presets ? 'none' : '';
   placeEl.style.display = (!presets && !isLive) ? '' : 'none';
 }
+
+/* ── Channel / VJ dropdowns (ROADMAP Tier 1a) ──
+   Pick a channel, then who's driving it. Routing keeps the two visual
+   planes separate (ROADMAP finding #1):
+     "House" / scene VJ → presets plane: tune the mapped canvas scene
+     stream VJ          → live plane: flip to Live Station (the actual
+                          per-VJ stream selection arrives with Tier 3b)
+   Every pick sends { type:'channel', channel, vj } to TD, then the
+   station/mode messages from the routing follow — so TD always hears
+   WHY the mode/station changed before it changes.                    */
+const channelSel = document.getElementById('channelSelect');
+const vjSel      = document.getElementById('vjSelect');
+let channelState = { channel: CHANNELS[0]?.id ?? null, vj: 'house' };
+
+const channelById = (id) => CHANNELS.find(c => c.id === id);
+
+function renderChannels(data){        // 1b: call this with the fetched payload
+  channelSel.innerHTML = '';
+  data.forEach(c => channelSel.append(new Option(c.name, c.id)));
+  if (channelState.channel) channelSel.value = channelState.channel;
+  renderVJs();
+}
+
+function renderVJs(){
+  const c = channelById(channelState.channel);
+  vjSel.innerHTML = '';
+  vjSel.append(new Option('House — default scene', 'house'));
+  (c?.vjs || []).forEach(v =>
+    vjSel.append(new Option(v.name + (v.uses.plane === 'stream' ? ' · live' : ''), v.id)));
+  vjSel.value = channelState.vj;
+}
+
+function selectChannel(id){
+  if (!channelById(id)) return;
+  channelState = { channel: id, vj: 'house' };   // new channel starts on its default scene
+  channelSel.value = id;
+  renderVJs();
+  routeChannelVJ();
+}
+
+function selectVJ(vjId){
+  channelState.vj = vjId;
+  vjSel.value = vjId;
+  routeChannelVJ();
+}
+
+function routeChannelVJ(){
+  const c = channelById(channelState.channel);
+  if (!c) return;
+  sendToTD({ type: 'channel', channel: c.id, vj: channelState.vj });
+  const v = (c.vjs || []).find(v => v.id === channelState.vj);
+  if (v && v.uses.plane === 'stream'){           // stream VJ → live plane
+    if (mode !== 'live') setMode('live');
+    return;
+  }
+  const scene = v ? v.uses.scene : c.defaultScene;  // house or scene VJ → presets plane
+  if (mode !== 'presets') setMode('presets');
+  const input = document.getElementById(`st-${scene}`);
+  if (input) input.checked = true;
+  selectStation(scene);
+}
+
+channelSel.addEventListener('change', () => selectChannel(channelSel.value));
+vjSel.addEventListener('change', () => selectVJ(vjSel.value));
+renderChannels(CHANNELS);             // initial populate — no routing, no messages
 
 /* ── Local player + Web Audio analysis chain ── */
 const player = new Audio();
@@ -1807,7 +1933,7 @@ transportState = 'paused'; syncTransport();   // presets start cued, not playing
 /* ── Physical keyboard ── */
 window.addEventListener('keydown', (e) => {
   if (e.repeat) return;                                  // ignore auto-repeat
-  if (e.target instanceof Element && e.target.closest('input, textarea, [contenteditable]')) return;
+  if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]')) return;
   const k = e.key.toLowerCase();
 
   if (k === 'h'){ e.preventDefault(); toggleConsole(); return; }
@@ -2249,6 +2375,7 @@ function wireDataChannel(ch){
     setStatus('live');
     sendToTD({ type: 'mode', mode });                                            // sync TD to console state
     if (currentStation) sendToTD({ type: 'station', station: currentStation });
+    if (channelState.channel) sendToTD({ type: 'channel', channel: channelState.channel, vj: channelState.vj });
   };
   ch.onclose = () => setStatus('offline');
 }

@@ -85,11 +85,14 @@ const script = html.match(/<script>([\s\S]*)<\/script>/)[1] +
   `;window.__dbg = () => ({ mode, currentStation, transportState, playing: SIG.playing,
      scenes: Object.keys(SCENES).join(','), paused: player.paused,
      fxCount: FX.sparks.length + FX.shocks.length + (FX.flash > .5 ? 1 : 0),
-     lastSent: window.__lastSent,
+     lastSent: window.__lastSent, sent: window.__sent,
+     channel: channelState.channel + '/' + channelState.vj,
      chip: (id) => document.getElementById('trk-' + id).textContent });
    const __origSend = sendToTD;
    window.__lastSent = null;
-   sendToTD = (p) => { window.__lastSent = { ...p, user: IDENTITY, ts: Date.now() }; return __origSend(p); };`;
+   window.__sent = [];
+   sendToTD = (p) => { window.__lastSent = { ...p, user: IDENTITY, ts: Date.now() };
+     window.__sent.push(window.__lastSent); return __origSend(p); };`;
 try { w.eval(script); console.log('EVAL OK'); }
 catch (e) { errors.push('EVAL FAIL: ' + e.stack.split('\n').slice(0, 3).join(' | ')); }
 const dbg = () => w.__dbg();
@@ -165,6 +168,32 @@ step('action keys fire scene FX + messages carry user/ts', () => {
   const sent = dbg().lastSent;
   if (!sent || !sent.user || !sent.user.id || !sent.ts) throw new Error('missing user/ts: ' + JSON.stringify(sent));
   pump(60, 6000);   // let FX decay across frames without error
+});
+step('channel/VJ dropdowns route planes + message', () => {
+  const ch = w.document.getElementById('channelSelect');
+  const vj = w.document.getElementById('vjSelect');
+  if (!ch || ch.options.length !== 2) throw new Error('channels not populated: ' + (ch && ch.options.length));
+  if (vj.options[0].value !== 'house') throw new Error('house not first: ' + vj.options[0].value);
+
+  w.eval(`selectVJ('nova')`);                    // stream VJ → live plane
+  if (dbg().mode !== 'live') throw new Error('stream VJ did not go live');
+  const msg = dbg().sent.find(m => m.type === 'channel' && m.vj === 'nova');
+  if (!msg || msg.channel !== 'volt-fm' || !msg.user || !msg.user.id || !msg.ts)
+    throw new Error('channel msg: ' + JSON.stringify(msg));
+
+  w.eval(`selectVJ('house')`);                   // house → presets + default scene
+  if (dbg().mode !== 'presets') throw new Error('house did not return to presets');
+  if (dbg().currentStation !== 'ambient') throw new Error('house scene: ' + dbg().currentStation);
+  if (!w.document.getElementById('st-ambient').checked) throw new Error('station radio not synced');
+
+  w.eval(`selectVJ('kera')`);                    // scene VJ → mapped station
+  if (dbg().currentStation !== 'pulse') throw new Error('scene VJ station: ' + dbg().currentStation);
+
+  w.eval(`selectChannel('drift-radio')`);        // switch channel → VJ list rebuilt, default scene routed
+  if (vj.options.length !== 2) throw new Error('vj list not rebuilt: ' + vj.options.length);
+  if (dbg().channel !== 'drift-radio/house') throw new Error('state: ' + dbg().channel);
+  if (dbg().currentStation !== 'drift') throw new Error('default scene: ' + dbg().currentStation);
+  pump(10, 6000);
 });
 step('VU + station cards present', () => {
   for (const id of ['vuBass', 'vuSnr', 'vuTrb', 'macro', 'dropzone', 'fileIn']) {

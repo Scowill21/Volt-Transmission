@@ -55,16 +55,18 @@ Two hard rules fall out of this:
 
 ### Tier 1 — Doable now (client + a small backend)
 
-**1a. Channels + VJ dropdowns (static first).** Add a `CHANNELS` config
-(channel → VJs → which scene/stream each uses) and two dropdowns in the
-console. Pure client work, same file you have.
+**1a. Channels + VJ dropdowns (static first). ✓ shipped** — `CHANNELS`
+config (channel → VJs → which scene/stream each uses) + CH/VJ dropdowns in
+the console. Scene VJs tune the mapped canvas scene; stream VJs flip to
+Live Station; "House" = the channel's default scene. Sends
+`{type:'channel', channel, vj}` to TD and re-syncs on connect.
 
 **1b. A real backend so admin-created channels appear.** Small API +
 Postgres on Render (or Supabase, which bundles DB + auth + realtime and
 saves you two phases). Tables: `channels`, `users`, `vj_profiles`,
 `channel_vjs`. The site fetches `/api/channels` to build the dropdowns;
-an admin page creates/edits them. New channels auto-assign one of the 3
-default scenes (a column: `default_scene: ambient|pulse|drift`).
+an admin page creates/edits them. New channels auto-assign one of the 4
+default scenes (a column: `default_scene: ambient|pulse|static|drift`).
 
 > **Prompt it as:** "Add a channel/VJ dropdown pair to the console driven
 > by a `/api/channels` endpoint; build a minimal Express + Postgres API on
