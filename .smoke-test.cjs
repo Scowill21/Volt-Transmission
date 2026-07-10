@@ -66,6 +66,21 @@ class FakeAC {
 w.AudioContext = FakeAC; w.webkitAudioContext = FakeAC;
 
 /* ── misc stubs ── */
+// /api/channels (Tier 1b): serve the static seed + a marker channel, so the
+// suite proves the fetched payload rebuilds the dropdowns via renderChannels.
+const API_CHANNELS = [
+  { id: 'volt-fm', name: 'Volt FM', slug: 'volt-fm', defaultScene: 'ambient',
+    vjs: [
+      { id: 'kera', name: 'Kera',    uses: { plane: 'scene',  scene: 'pulse' } },
+      { id: 'nova', name: 'VJ Nova', uses: { plane: 'stream', scene: null } },
+    ] },
+  { id: 'drift-radio', name: 'Drift Radio', slug: 'drift-radio', defaultScene: 'drift',
+    vjs: [ { id: 'moss', name: 'Moss', uses: { plane: 'scene', scene: 'static' } } ] },
+  { id: 'api-test', name: 'API Test FM', slug: 'api-test', defaultScene: 'pulse', vjs: [] },
+];
+w.fetch = (url) => String(url).endsWith('/api/channels')
+  ? Promise.resolve({ ok: true, json: () => Promise.resolve(API_CHANNELS) })
+  : Promise.resolve({ ok: false, json: () => Promise.resolve(null) });
 w.indexedDB = { open(){ return {}; } };
 w.URL.createObjectURL = () => 'blob:fake-' + Math.random();
 w.URL.revokeObjectURL = () => {};
@@ -172,7 +187,7 @@ step('action keys fire scene FX + messages carry user/ts', () => {
 step('channel/VJ dropdowns route planes + message', () => {
   const ch = w.document.getElementById('channelSelect');
   const vj = w.document.getElementById('vjSelect');
-  if (!ch || ch.options.length !== 2) throw new Error('channels not populated: ' + (ch && ch.options.length));
+  if (!ch || ch.options.length < 2) throw new Error('channels not populated: ' + (ch && ch.options.length));
   if (vj.options[0].value !== 'house') throw new Error('house not first: ' + vj.options[0].value);
 
   w.eval(`selectVJ('nova')`);                    // stream VJ → live plane
@@ -201,6 +216,23 @@ step('VU + station cards present', () => {
   }
 });
 
-pump(30, 6000);
-console.log(errors.length ? '\n=== ERRORS ===\n' + errors.join('\n') : '\nALL CLEAR — no runtime errors');
-process.exit(errors.length ? 1 : 0);
+// The /api/channels fetch resolves through microtasks, and everything above is
+// synchronous — yield once so the payload lands, then assert the rebuild.
+(async () => {
+  await new Promise((r) => setImmediate(r));
+  step('fetched /api/channels payload rebuilt the dropdowns', () => {
+    const ch = w.document.getElementById('channelSelect');
+    if (ch.options.length !== 3) throw new Error('expected 3 channels after fetch, got ' + ch.options.length);
+    if (![...ch.options].some(o => o.value === 'api-test')) throw new Error('api-test channel missing');
+    w.eval(`selectChannel('api-test')`);           // API-only channel routes like any other
+    if (dbg().currentStation !== 'pulse') throw new Error('api channel default scene: ' + dbg().currentStation);
+    const vj = w.document.getElementById('vjSelect');
+    if (vj.options.length !== 1 || vj.options[0].value !== 'house')
+      throw new Error('api channel should have house only');
+    pump(5, 6300);
+  });
+
+  pump(30, 6000);
+  console.log(errors.length ? '\n=== ERRORS ===\n' + errors.join('\n') : '\nALL CLEAR — no runtime errors');
+  process.exit(errors.length ? 1 : 0);
+})();

@@ -61,12 +61,14 @@ the console. Scene VJs tune the mapped canvas scene; stream VJs flip to
 Live Station; "House" = the channel's default scene. Sends
 `{type:'channel', channel, vj}` to TD and re-syncs on connect.
 
-**1b. A real backend so admin-created channels appear.** Small API +
-Postgres on Render (or Supabase, which bundles DB + auth + realtime and
-saves you two phases). Tables: `channels`, `users`, `vj_profiles`,
-`channel_vjs`. The site fetches `/api/channels` to build the dropdowns;
-an admin page creates/edits them. New channels auto-assign one of the 4
-default scenes (a column: `default_scene: ambient|pulse|static|drift`).
+**1b. A real backend so admin-created channels appear. ✓ shipped** —
+Express + Postgres in `server/` (JSON-file store for local dev), tables
+`channels` / `vj_profiles` / `channel_vjs`, deployed as one Render web
+service (render.yaml: site + API + database). The console fetches
+`/api/channels` and falls back to the static seed when no API exists;
+`/admin.html` (X-Admin-Key) creates channels (name, slug, default scene
+`ambient|pulse|static|drift`) and attaches scene/stream VJs. `users`
+lands with auth in Tier 2a.
 
 > **Prompt it as:** "Add a channel/VJ dropdown pair to the console driven
 > by a `/api/channels` endpoint; build a minimal Express + Postgres API on

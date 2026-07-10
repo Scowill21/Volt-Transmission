@@ -1,0 +1,73 @@
+/* Volt Transmission API (ROADMAP Tier 1b) — one small Node service that
+   serves BOTH the static site (repo root: index.html, admin.html, audio/)
+   and the channels API the console's dropdowns fetch.
+
+   Run locally:   node server/index.js          (JSON-file store, port 8787)
+   On Render:     see render.yaml               (Postgres via DATABASE_URL)
+
+   Admin endpoints require the X-Admin-Key header. The key comes from the
+   ADMIN_KEY env var; local dev falls back to "dev" (with a console warning)
+   so the admin page works out of the box.
+
+   API (JSON):
+     GET    /api/channels                        public — the dropdowns' data
+     POST   /api/channels                        { name, slug?, defaultScene? }
+     PATCH  /api/channels/:id                    { name?, defaultScene? }
+     DELETE /api/channels/:id
+     POST   /api/channels/:id/vjs                { name, plane, scene? }
+     DELETE /api/channels/:id/vjs/:vjId
+*/
+import express from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createStore } from './store.js';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const PORT = process.env.PORT || 8787;
+
+const ADMIN_KEY = process.env.ADMIN_KEY || 'dev';
+if (!process.env.ADMIN_KEY) console.warn('[admin] ADMIN_KEY not set — using the dev default ("dev"). Set it in production.');
+
+const store = await createStore();
+const app = express();
+app.use(express.json({ limit: '32kb' }));
+
+/* ── public ── */
+app.get('/healthz', (req, res) => res.json({ ok: true }));
+app.get('/api/channels', async (req, res, next) => {
+  try { res.json(await store.list()); } catch (e) { next(e); }
+});
+
+/* ── admin (X-Admin-Key) ── */
+function requireAdmin(req, res, next){
+  if (req.get('x-admin-key') === ADMIN_KEY) return next();
+  res.status(401).json({ error: 'bad admin key' });
+}
+
+app.post('/api/channels', requireAdmin, async (req, res, next) => {
+  try { res.status(201).json(await store.createChannel(req.body || {})); } catch (e) { next(e); }
+});
+app.patch('/api/channels/:id', requireAdmin, async (req, res, next) => {
+  try { res.json(await store.updateChannel(req.params.id, req.body || {})); } catch (e) { next(e); }
+});
+app.delete('/api/channels/:id', requireAdmin, async (req, res, next) => {
+  try { await store.deleteChannel(req.params.id); res.status(204).end(); } catch (e) { next(e); }
+});
+app.post('/api/channels/:id/vjs', requireAdmin, async (req, res, next) => {
+  try { res.status(201).json(await store.addVJ(req.params.id, req.body || {})); } catch (e) { next(e); }
+});
+app.delete('/api/channels/:id/vjs/:vjId', requireAdmin, async (req, res, next) => {
+  try { await store.removeVJ(req.params.id, req.params.vjId); res.status(204).end(); } catch (e) { next(e); }
+});
+
+/* ── the site itself (console + admin + audio/) ── */
+app.use(express.static(ROOT, { extensions: ['html'] }));
+
+/* ── errors → JSON (store throws httpError(status, message)) ── */
+app.use((err, req, res, next) => {   // eslint-disable-line no-unused-vars
+  const status = err.status || 500;
+  if (status >= 500) console.error(err);
+  res.status(status).json({ error: err.message || 'server error' });
+});
+
+app.listen(PORT, () => console.log(`[volt] site + api on http://localhost:${PORT}`));

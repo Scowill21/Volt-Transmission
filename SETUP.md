@@ -31,15 +31,16 @@ small meters in the footer (BAS / SNR / TRB) show the live signal.
 
 ## Running it locally
 
-Open `index.html` directly in a browser, or serve the folder:
+Two ways, depending on whether you want the channels API:
 
 ```bash
-npx serve .        # or: python3 -m http.server
+npm start          # site + channels API on http://localhost:8787 (admin at /admin.html)
+npx serve .        # static only — the console falls back to its built-in channel list
 ```
 
-Opening the file directly works for browser-uploaded songs. Songs referenced
-in `PRESET_TRACKS` (below) need the page to be **served** (localhost or
-Render), not opened as a `file://` path.
+Opening `index.html` directly as a file also works for browser-uploaded songs.
+Songs referenced in `PRESET_TRACKS` (below) need the page to be **served**
+(localhost or Render), not opened as a `file://` path.
 
 ---
 
@@ -103,6 +104,43 @@ picks). One song per station; the player loops it.
   `/api/channels`. Every pick sends a `channel` message to TD (schema below).
 - The whole UI auto-fades after ~4 s idle for a clean capture; move the
   mouse to bring it back.
+
+---
+
+## Channels & VJs (admin — ROADMAP Tier 1b)
+
+The console's **CH / VJ dropdowns** load from `GET /api/channels` whenever the
+site is served by the API (`npm start` locally, or the Render web service).
+Anywhere the API doesn't exist — `file://`, plain static hosting — the fetch
+fails silently and the built-in `CHANNELS` seed in `index.html` drives instead.
+
+**Admin page: [`/admin.html`](admin.html).** Enter the admin key (local dev:
+`dev` · on Render: the `ADMIN_KEY` env var, auto-generated — read it in the
+service's Environment tab), then:
+
+- **Create channels** — name, optional slug, and the default scene
+  (`ambient | pulse | static | drift`) that drives until a VJ is attached.
+- **Attach VJs** — a name plus what they use: a **scene** (one of the four
+  canvas visuals) or a **live stream** (flips the console to Live Station;
+  per-VJ stream routing arrives with the streaming tiers).
+- **Change the default scene** or **delete** channels/VJs inline.
+
+Changes appear in every console's dropdowns on their next page load.
+
+**Storage:** Postgres on Render (`DATABASE_URL`, tables auto-created);
+locally a JSON file at `server/channels.json` (gitignored — delete it to
+re-seed from the defaults).
+
+**API** (writes need the `X-Admin-Key` header):
+
+| Method + path | Body |
+| --- | --- |
+| `GET /api/channels` | — (public; the dropdowns' data) |
+| `POST /api/channels` | `{ name, slug?, defaultScene? }` |
+| `PATCH /api/channels/:id` | `{ name?, defaultScene? }` |
+| `DELETE /api/channels/:id` | — |
+| `POST /api/channels/:id/vjs` | `{ name, plane: "scene"\|"stream", scene? }` |
+| `DELETE /api/channels/:id/vjs/:vjId` | — |
 
 ---
 
@@ -200,16 +238,22 @@ under the audio buffer duration).
 
 ## Deploying on Render
 
-It's a static site — no build step needed for the console.
+Since Tier 1b the blueprint deploys **one Node web service** (it serves the
+static site *and* the channels API) plus a **managed Postgres** for channels.
 
 1. Push this repo to GitHub/GitLab.
-2. Render → **New → Static Site** → pick the repo.
-3. **Build Command:** *(leave empty)* · **Publish Directory:** `.`
-4. Every push redeploys. Songs in `audio/` + `PRESET_TRACKS` ship with it.
+2. Render → **New → Blueprint** → pick the repo (`render.yaml` defines the
+   web service + database). Already linked? It syncs on push.
+3. After the first deploy, open the service's **Environment** tab and copy
+   **`ADMIN_KEY`** (auto-generated) — that's your key for `/admin.html`.
+4. If the old *static site* service from pre-1b still exists, delete it in
+   the dashboard so only the web service serves the site.
+5. Every push redeploys. Songs in `audio/` + `PRESET_TRACKS` ship with it.
 
-(If you'd rather deploy the built Vite bundle, use build `npm run build`,
-publish `dist` — but that serves the React variant workflow; the console is
-self-contained and simplest from the repo root.)
+Heads-up: Render's **free Postgres expires after ~30 days** — move it to a
+paid plan (or point `DATABASE_URL` at Supabase) when this needs to live
+long-term. And static-only hosting still works fine — without the API the
+console simply falls back to the built-in channel list.
 
 Two things to know about **Live mode on a hosted page**:
 

@@ -5,11 +5,14 @@
   "type": "module",
   "description": "Full-screen TouchDesigner WebRTC livestream with a labeled keystroke control panel that sends actions back over the data channel.",
   "scripts": {
+    "start": "node server/index.js",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview --host"
   },
   "dependencies": {
+    "express": "^5.2.1",
+    "pg": "^8.22.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "webrtc-adapter": "^8.2.3"

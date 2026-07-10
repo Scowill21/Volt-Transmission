@@ -2,13 +2,18 @@
 
 Interactive radio/VJ platform. Today it's a self-contained broadcast console
 (`index.html`, no build step) with audio-reactive scenes, per-station music,
-and a WebRTC link to TouchDesigner. `src/` + `react-app.html` is an archived
-React variant — reference only, don't extend it.
+and a WebRTC link to TouchDesigner — plus a small Node service (`server/`,
+Express + Postgres-or-JSON-file) that serves the site and the `/api/channels`
+API behind the CH/VJ dropdowns, with `admin.html` (X-Admin-Key) to manage
+channels. `npm start` runs site + API on :8787. `src/` + `react-app.html` is
+an archived React variant — reference only, don't extend it.
 
 ## Golden rules
 
 - `index.html` stays ONE self-contained file: no bundler, no external JS deps,
-  no localStorage (song uploads use IndexedDB on purpose).
+  no localStorage (song uploads use IndexedDB on purpose). Server-backed
+  features must degrade gracefully — the `/api/channels` fetch falls back to
+  the static `CHANNELS` seed, and anything new follows that pattern.
 - Two visual planes (ROADMAP.md, finding #1): browser-rendered canvas scenes
   (instant interactivity, scales free) vs streamed video (TouchDesigner/VJ).
   New features must not collapse the two.

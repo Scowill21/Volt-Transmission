@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Volt Transmission — Channels Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  /* Same broadcast-console tokens as index.html — this is the ops room. */
+  :root{
+    --bg:#141009; --ink:#f3ebdd; --ink-dim:#9a8f7c;
+    --signal:#ffb24a; --signal-dim:#6f532a;
+    --glow:rgba(255,178,74,.55); --edge:rgba(255,178,74,.16);
+    --panel:rgba(255,255,255,.015); --warn:#ff7a4a;
+    --mono:'IBM Plex Mono', ui-monospace, Menlo, monospace;
+    --disp:'Space Grotesk', system-ui, sans-serif;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; min-height:100vh; background:var(--bg); color:var(--ink);
+    font-family:var(--mono); font-size:.82rem; -webkit-font-smoothing:antialiased;
+    padding:2.2rem 1.2rem 4rem;
+  }
+  .wrap{ max-width:720px; margin:0 auto; display:flex; flex-direction:column; gap:1.6rem; }
+  h1{ font-family:var(--disp); font-weight:500; font-size:1.35rem; letter-spacing:.06em; margin:0; }
+  h1 small{ display:block; font-family:var(--mono); font-size:.62rem; letter-spacing:.3em; text-transform:uppercase; color:var(--ink-dim); margin-top:.4rem; }
+  .eyebrow{
+    display:flex; align-items:center; gap:.7rem; margin-bottom:.7rem;
+    font-size:.62rem; letter-spacing:.34em; text-transform:uppercase; color:var(--ink-dim);
+  }
+  .eyebrow::after{ content:""; flex:1; height:1px; background:linear-gradient(90deg,var(--edge),transparent); }
+
+  .card{ border:1px solid var(--edge); border-radius:9px; background:var(--panel); padding:1rem 1.1rem; }
+  .row{ display:flex; flex-wrap:wrap; gap:.55rem; align-items:center; }
+
+  input, select{
+    font-family:var(--mono); font-size:.78rem; color:var(--ink);
+    background:rgba(255,255,255,.02); border:1px solid var(--edge); border-radius:7px;
+    padding:.5rem .65rem;
+  }
+  input::placeholder{ color:var(--signal-dim); }
+  input:focus-visible, select:focus-visible, button:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
+  select{ -webkit-appearance:none; appearance:none; cursor:pointer; padding-right:1.5rem;
+    background-image:linear-gradient(45deg, transparent 49%, var(--ink-dim) 50%), linear-gradient(135deg, var(--ink-dim) 50%, transparent 51%);
+    background-position:calc(100% - 14px) 55%, calc(100% - 9px) 55%; background-size:5px 5px; background-repeat:no-repeat; }
+  option{ background:var(--bg); }
+
+  button{
+    font-family:var(--mono); font-size:.66rem; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--ink); background:none; border:1px solid var(--edge); border-radius:7px;
+    padding:.5rem .8rem; cursor:pointer; transition:color .15s, border-color .15s;
+  }
+  button:hover{ color:var(--signal); border-color:color-mix(in srgb, var(--signal) 40%, transparent); }
+  button.primary{ color:var(--bg); background:var(--signal); border-color:var(--signal); font-weight:600; }
+  button.primary:hover{ color:var(--bg); box-shadow:0 0 14px var(--glow); }
+  button.danger:hover{ color:var(--warn); border-color:var(--warn); }
+
+  .chan-name{ font-family:var(--disp); font-weight:500; font-size:1.02rem; }
+  .slug{ color:var(--ink-dim); font-size:.66rem; letter-spacing:.06em; }
+  .vjs{ margin:.7rem 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:.4rem; }
+  .vjs li{ display:flex; align-items:center; gap:.6rem; padding:.4rem .55rem; border:1px solid var(--edge); border-radius:7px; }
+  .vjs .dot{ width:7px; height:7px; border-radius:50%; background:var(--signal-dim); flex:none; }
+  .vjs .dot.live{ background:var(--signal); box-shadow:0 0 8px var(--glow); }
+  .vjs .use{ color:var(--ink-dim); font-size:.66rem; letter-spacing:.04em; }
+  .vjs button{ margin-left:auto; padding:.25rem .5rem; }
+  .empty{ color:var(--signal-dim); font-size:.7rem; padding:.4rem 0; }
+
+  .status{ min-height:1.1em; font-size:.68rem; letter-spacing:.05em; color:var(--ink-dim); }
+  .status.err{ color:var(--warn); }
+  .status.ok{ color:var(--signal); }
+  .hint{ color:var(--ink-dim); font-size:.68rem; line-height:1.6; }
+  .hint code{ color:var(--signal); }
+  a{ color:var(--signal); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Channels admin<small>Volt Transmission · Tier 1b</small></h1>
+
+  <section>
+    <div class="eyebrow">Access</div>
+    <div class="card row">
+      <input id="key" type="password" placeholder="admin key" autocomplete="off" style="flex:1; min-width:12rem" />
+      <button class="primary" id="keySave">Use key</button>
+      <div class="hint" style="flex-basis:100%">Sent as <code>X-Admin-Key</code> with every change. Local dev default: <code>dev</code> · on Render it's the <code>ADMIN_KEY</code> env var.</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">New channel</div>
+    <form class="card row" id="createForm">
+      <input id="cName" placeholder="name — e.g. Night Bus" required style="flex:2; min-width:10rem" />
+      <input id="cSlug" placeholder="slug (optional)" style="flex:1; min-width:8rem" />
+      <select id="cScene" title="Default scene — shown until a VJ drives">
+        <option value="ambient">ambient</option><option value="pulse">pulse</option>
+        <option value="static">static</option><option value="drift">drift</option>
+      </select>
+      <button class="primary" type="submit">Create</button>
+      <div class="hint" style="flex-basis:100%">New channels open on their default scene until a VJ is attached (ROADMAP 1b).</div>
+    </form>
+  </section>
+
+  <section>
+    <div class="eyebrow">Channels</div>
+    <div id="list" style="display:flex; flex-direction:column; gap:.8rem"></div>
+  </section>
+
+  <div class="status" id="status">loading…</div>
+  <div class="hint">The console at <a href="/">/</a> rebuilds its CH / VJ dropdowns from this list on every load.</div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const statusEl = $('status');
+const keyEl = $('key');
+keyEl.value = sessionStorage.getItem('adminKey') || '';
+
+function setStatus(msg, cls){ statusEl.textContent = msg; statusEl.className = 'status ' + (cls || ''); }
+$('keySave').onclick = () => { sessionStorage.setItem('adminKey', keyEl.value); setStatus('key set for this tab', 'ok'); };
+
+async function api(method, url, body){
+  const res = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Key': keyEl.value },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.status);
+  return data;
+}
+
+const SCENE_OPTS = ['ambient', 'pulse', 'static', 'drift'];
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+async function refresh(){
+  try {
+    const channels = await (await fetch('/api/channels')).json();
+    $('list').innerHTML = channels.map(c => `
+      <div class="card" data-id="${esc(c.id)}">
+        <div class="row">
+          <div style="flex:1">
+            <div class="chan-name">${esc(c.name)}</div>
+            <div class="slug">/${esc(c.slug)}</div>
+          </div>
+          <label class="slug">default
+            <select data-act="scene">${SCENE_OPTS.map(s =>
+              `<option value="${s}"${s === c.defaultScene ? ' selected' : ''}>${s}</option>`).join('')}</select>
+          </label>
+          <button class="danger" data-act="delChan">Delete</button>
+        </div>
+        <ul class="vjs">
+          ${c.vjs.map(v => `
+            <li data-vj="${esc(v.id)}">
+              <span class="dot${v.uses.plane === 'stream' ? ' live' : ''}"></span>
+              <span>${esc(v.name)}</span>
+              <span class="use">${v.uses.plane === 'stream' ? 'live stream' : 'scene · ' + esc(v.uses.scene)}</span>
+              <button class="danger" data-act="delVj">✕</button>
+            </li>`).join('') || '<li class="empty">no VJs — the default scene drives</li>'}
+        </ul>
+        <form class="row" data-act="addVj" style="margin-top:.7rem">
+          <input name="name" placeholder="vj name" required style="flex:1; min-width:8rem" />
+          <select name="plane"><option value="scene">scene</option><option value="stream">live stream</option></select>
+          <select name="scene">${SCENE_OPTS.map(s => `<option>${s}</option>`).join('')}</select>
+          <button type="submit">Attach VJ</button>
+        </form>
+      </div>`).join('') || '<div class="empty card">no channels yet</div>';
+    setStatus(channels.length + ' channel' + (channels.length === 1 ? '' : 's'));
+  } catch (e){ setStatus('load failed: ' + e.message + ' — is the API running? (node server/index.js)', 'err'); }
+}
+
+$('createForm').onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    await api('POST', '/api/channels', { name: $('cName').value, slug: $('cSlug').value || undefined, defaultScene: $('cScene').value });
+    $('cName').value = ''; $('cSlug').value = '';
+    setStatus('channel created', 'ok'); refresh();
+  } catch (err){ setStatus('create failed: ' + err.message, 'err'); }
+};
+
+$('list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  const card = e.target.closest('[data-id]'); if (!card) return;
+  const id = card.dataset.id;
+  try {
+    if (btn.dataset.act === 'delChan'){
+      if (!confirm(`Delete channel "${id}"?`)) return;
+      await api('DELETE', '/api/channels/' + id);
+      setStatus('channel deleted', 'ok'); refresh();
+    } else if (btn.dataset.act === 'delVj'){
+      await api('DELETE', `/api/channels/${id}/vjs/${e.target.closest('[data-vj]').dataset.vj}`);
+      setStatus('vj removed', 'ok'); refresh();
+    }
+  } catch (err){ setStatus('failed: ' + err.message, 'err'); }
+});
+
+$('list').addEventListener('change', async (e) => {
+  const sel = e.target.closest('select[data-act="scene"]'); if (!sel) return;
+  const id = e.target.closest('[data-id]').dataset.id;
+  try { await api('PATCH', '/api/channels/' + id, { defaultScene: sel.value }); setStatus('default scene saved', 'ok'); }
+  catch (err){ setStatus('failed: ' + err.message, 'err'); refresh(); }
+});
+
+$('list').addEventListener('submit', async (e) => {
+  const form = e.target.closest('form[data-act="addVj"]'); if (!form) return;
+  e.preventDefault();
+  const id = e.target.closest('[data-id]').dataset.id;
+  const f = new FormData(form);
+  try {
+    await api('POST', `/api/channels/${id}/vjs`,
+      { name: f.get('name'), plane: f.get('plane'), scene: f.get('plane') === 'scene' ? f.get('scene') : undefined });
+    setStatus('vj attached', 'ok'); refresh();
+  } catch (err){ setStatus('failed: ' + err.message, 'err'); }
+});
+
+refresh();
+</script>
+</body>
+</html>

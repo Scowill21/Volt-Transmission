@@ -1050,6 +1050,26 @@ channelSel.addEventListener('change', () => selectChannel(channelSel.value));
 vjSel.addEventListener('change', () => selectVJ(vjSel.value));
 renderChannels(CHANNELS);             // initial populate — no routing, no messages
 
+/* Tier 1b: admin-created channels. When the site is served by the API
+   (node server/index.js — locally or on Render), /api/channels returns the
+   live list and the dropdowns rebuild from it. Anywhere the API doesn't
+   exist (file://, plain static hosting, offline) the fetch fails silently
+   and the static CHANNELS seed above keeps driving — same renderer.      */
+if (typeof fetch === 'function'){
+  fetch('/api/channels')
+    .then(r => (r.ok ? r.json() : null))
+    .then(data => {
+      if (!Array.isArray(data) || !data.length) return;
+      CHANNELS.length = 0; CHANNELS.push(...data);              // in place — channelById keeps working
+      const c = channelById(channelState.channel);              // keep the pick if it survived the swap
+      if (!c) channelState = { channel: CHANNELS[0].id, vj: 'house' };
+      else if (channelState.vj !== 'house' && !(c.vjs || []).some(v => v.id === channelState.vj))
+        channelState.vj = 'house';
+      renderChannels(CHANNELS);
+    })
+    .catch(() => {});
+}
+
 /* ── Local player + Web Audio analysis chain ── */
 const player = new Audio();
 player.loop = true; player.preload = 'auto'; player.crossOrigin = 'anonymous';
