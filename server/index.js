@@ -22,6 +22,9 @@
      POST   /api/apply                           { role: vj|radio, note? }
      GET    /api/admin/applications              pending applications
      POST   /api/admin/applications/:userId      { action: approve|decline }
+   Live-action bus (Tier 4 slice — server/bus.js):
+     WS     /api/bus?channel=<id>[&as=vj]        subscribe + publish actions
+     POST   /api/channels/:id/actions            inject a message by HTTP
 */
 import express from 'express';
 import path from 'node:path';
@@ -29,6 +32,7 @@ import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { createStore, httpError } from './store.js';
 import { initAuth, mountAuth, authConfigured } from './auth.js';
+import { attachBus } from './bus.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.PORT || 8787;
@@ -112,4 +116,5 @@ app.use((err, req, res, next) => {   // eslint-disable-line no-unused-vars
   res.status(status).json({ error: err.message || 'server error' });
 });
 
-app.listen(PORT, () => console.log(`[volt] site + api on http://localhost:${PORT}`));
+const server = app.listen(PORT, () => console.log(`[volt] site + api on http://localhost:${PORT}`));
+attachBus(server, app);   // live-action bus: wss://…/api/bus?channel=<id> (see server/bus.js)

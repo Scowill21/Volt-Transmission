@@ -250,6 +250,10 @@ Leave the `[SIGNALING_SERVER_URL]` placeholder in place to run standalone
   When the channel opens, the current mode + station + channel/VJ are re-sent
   so TD syncs.
 
+  The **same messages** also ride the site's action bus in Live mode, so a
+  remote VJ rig can receive them with zero WebRTC setup — see
+  [Receiving viewer actions in your VJ software](#receiving-viewer-actions-in-your-vj-software-the-action-bus).
+
 ### Knowing who pressed the key (paid users)
 
 Identity comes from the signed-in **account** when there is one (Tier 2a —
@@ -288,6 +292,140 @@ Press **D** for diagnostics. High loss/jitter/concealment → network: raise
 `AUDIO.jitterBufferMs` (400–800 for a solid music feed). Clean numbers but
 still glitchy → fix it in TD (bigger Audio Out buffer, 48 kHz, cook time
 under the audio buffer duration).
+
+---
+
+## Receiving viewer actions in your VJ software (the action bus)
+
+Every control a viewer fires **in Live mode** — the Live 1–4 actions, the
+Q/W/E/Space overlay actions, Blackout, transport — is published to the
+site's **action bus** and fanned out, over the plain internet, to anything
+subscribed to that channel. No LAN, no WebRTC setup, no port-forwarding on
+the VJ's side. One URL:
+
+```
+wss://<your-site>.onrender.com/api/bus?channel=<channel-id>&as=vj
+```
+
+(`channel-id` = the channel's slug from `/admin.html`, e.g. `volt-fm`.
+Locally it's `ws://localhost:8787/api/bus?...`.)
+
+Messages are the **same stamped JSON** documented above — always `type` +
+`user` + `ts`, e.g. a viewer pressing **Live 3**:
+
+```json
+{ "type": "key", "action": "scene_3", "ts": 1783784758775,
+  "user": { "id": "…", "name": "Ada", "role": "listener", "sid": "…" } }
+```
+
+### TouchDesigner (native — no bridge needed)
+
+1. **OP Create → DAT → WebSocket.** On its parameters set
+   **Network Address** to the bus URL above and turn **Active** on.
+2. Open the DAT's **callbacks** (the attached `webrtc1_callbacks`-style DAT)
+   and route on `type` / `action`:
+
+   ```python
+   import json
+
+   def onReceiveText(dat, rowIndex, message):
+       msg = json.loads(message)
+       if msg.get('type') != 'key':
+           return
+       who = msg.get('user', {}).get('name', 'anon')
+       action = msg['action']                 # scene_1..4, action_1..3, trigger, blackout
+       if   action == 'scene_1': op('trigger1').par.pulse.pulse()
+       elif action == 'trigger': op('shock').par.pulse.pulse()
+       # …map the rest to whatever they should fire; `who` is the presser
+       return
+   ```
+
+3. That's it — press a key in the console's Live mode and watch it fire.
+   (If your rig is *also* wired as the WebRTC video peer, note the same key
+   arrives on **both** the WebRTC DAT and the bus — pick one source, or
+   dedupe on the message `ts`.)
+
+### Resolume / VDMX / MadMapper / anything OSC
+
+Run the bundled bridge on the VJ's machine (needs Node 18+, `npm ci` once
+in the repo folder):
+
+```bash
+node tools/bus-to-osc.mjs \
+  --url "wss://<your-site>.onrender.com/api/bus?channel=volt-fm&as=vj" \
+  --osc 127.0.0.1:7000
+```
+
+It forwards every action as an OSC message (string arg = presser's name):
+
+| OSC address | Fires when |
+| --- | --- |
+| `/volt/key/scene_1` … `scene_4` | a viewer hits **Live 1–4** |
+| `/volt/key/action_1` … `action_3` | **Q / W / E** overlay actions |
+| `/volt/key/trigger` | **Space** |
+| `/volt/key/blackout` | **B** (second arg: `on` / `off`) |
+| `/volt/transport/play` / `pause` | transport intents |
+
+Then map those addresses in your software's OSC input (Resolume:
+*Preferences → OSC → OSC Input Port 7000*, then shortcut-map any clip or
+effect to the address). The bridge reconnects forever; leave it running.
+
+### Testing a rig without the console
+
+Inject an action by HTTP and watch it fire:
+
+```bash
+curl -X POST https://<your-site>.onrender.com/api/channels/volt-fm/actions \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"key","action":"scene_3","user":{"name":"test"}}'
+```
+
+Subscribing is open for now (actions aren't secrets); publish is
+rate-limited per connection. Role-gated buses land with the Tier 4
+takeover work.
+
+---
+
+## Sending your feed to the site (going live)
+
+Two kinds of feed, matching the two Live planes:
+
+### Audio feed — a radio broadcast (works today, easiest)
+
+1. **Get a stream URL.** Broadcast from any encoder — **butt**, **Mixxx**,
+   OBS, or your DAW — to an Icecast-style host (a rented Icecast server,
+   Radio.co, Caster.fm, Azuracast…). They give you a public URL like
+   `https://yourhost.example/live.mp3`.
+2. **Paste it into the channel** at `/admin.html` → your channel's
+   *live audio stream URL* → **Save audio**.
+3. Done. Every listener who tunes your channel in **Live** hears the
+   broadcast (through the site's relay — any stream host works, no CORS
+   worries) and the channel's scene reacts to your audio in their browser.
+   Expect ~5–10 s of buffering on first play.
+
+### Video feed — your TouchDesigner rig (today's path)
+
+Today the video plane dials **one TD rig per deployment** over WebRTC
+(per-VJ video routing arrives with the LiveKit tier). To put your rig on
+the "· live" VJ slot:
+
+1. **TD side** (Palette → WebRTC): `signalingServer` COMP with **Secure**
+   on + a certificate (mkcert steps in [README](README.md)); a
+   `signalingClient` pointed at it with **Forward to subscribers** on; a
+   `WebRTCRemotePanel` with the panel/TOP (and 48 kHz audio) to stream.
+2. **Reach it from the internet:** forward the signalingServer's port on
+   your router, and use a cert the viewer's browser trusts (a real domain
+   + CA cert is the smooth path; mkcert works for machines that install
+   your root).
+3. **Page side:** set `CONNECTION.signalingUrl` in `index.html` to
+   `wss://<your-public-ip-or-domain>:<port>` (plus `peerAddressFilter` if
+   several TD rigs share the signaling server), commit, push.
+4. **Remote viewers** behind strict NATs may also need a TURN server in
+   `CONNECTION.iceServers` — without it, some viewers' video won't
+   connect (they still get everything else).
+5. Viewers picking your "· live" VJ now see your feed — and your rig hears
+   their actions through the **action bus above**, even with no direct
+   WebRTC data channel.
 
 ---
 

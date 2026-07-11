@@ -825,10 +825,41 @@ const lastFire = {};   // per-action lockout (debounce repeats + click/keydown d
 
 videoEl.muted = AUDIO.startMuted;
 
-/* ── Send: uses the data channel if open, always echoes to the TX readout ── */
+/* ── Live-action bus (a slice of ROADMAP Tier 4) ──
+   In Live mode the console also publishes every stamped message to the
+   site's WebSocket bus (/api/bus?channel=<id>), which fans it out to the
+   channel's subscribed VJ rigs over the plain web — no LAN or WebRTC setup
+   on the viewer's side. VJ instructions: SETUP.md → "Receiving viewer
+   actions in your VJ software". Degrades silently anywhere the API/WS
+   doesn't exist (file://, static hosting); reconnects with backoff. */
+let busWS = null, busChannel = null, busTimer = null;
+
+function busSync(){
+  const want = mode === 'live' && channelState.channel && typeof WebSocket === 'function';
+  if (busWS && (!want || busChannel !== channelState.channel)){
+    try { busWS.close(); } catch { /* already dead */ }
+    busWS = null;
+  }
+  clearTimeout(busTimer);
+  if (!want){ busChannel = null; return; }
+  if (busWS) return;                                       // already connected to the right room
+  busChannel = channelState.channel;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  try { busWS = new WebSocket(`${proto}://${location.host}/api/bus?channel=${encodeURIComponent(busChannel)}`); }
+  catch { busWS = null; return; }
+  busWS.onerror = () => {};                                // close handles retry
+  busWS.onclose = () => {
+    busWS = null;
+    if (mode === 'live'){ clearTimeout(busTimer); busTimer = setTimeout(busSync, 3000); }
+  };
+  busWS.onmessage = () => {};   // other viewers' actions arrive here — Tier 4 pooled FX hook
+}
+
+/* ── Send: TD data channel + (in Live) the action bus; echoes to the TX readout ── */
 function sendToTD(payload){
   const msg = JSON.stringify({ ...payload, user: IDENTITY, ts: Date.now() });
   if (dataChannel && dataChannel.readyState === 'open') dataChannel.send(msg);
+  if (mode === 'live' && busWS && busWS.readyState === 1) busWS.send(msg);   // 1 = OPEN
   const label = payload.type === 'channel' ? `${payload.channel} · ${payload.vj}` :
     payload.station || payload.mode ||
     ((payload.action || '') + (payload.state ? ' ' + payload.state : ''));
@@ -1052,6 +1083,7 @@ function setMode(m){
     plane = 'canvas';              // Offline is always the canvas plane
     presetPause();                 // live stream off; songs resume on Play
     presetTune(currentStation);    // back to the tuned station's scene + song cue
+    busSync();                     // Offline → leave the action bus
   }
   applyStage();
 }
@@ -1116,6 +1148,7 @@ function selectVJ(vjId){
 function routeChannelVJ(){
   const c = channelById(channelState.channel);
   if (!c) return;
+  busSync();                                     // join/switch the channel's action bus (Live only)
   sendToTD({ type: 'channel', channel: c.id, vj: channelState.vj });
   if (mode !== 'live') return;                   // channels only drive Live mode
   const v = (c.vjs || []).find(v => v.id === channelState.vj);

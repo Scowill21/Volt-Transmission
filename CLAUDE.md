@@ -12,7 +12,11 @@ Secrets live in `.env` (gitignored) — SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY,
 DATABASE_URL (session-pooler string), ADMIN_KEY. `npm start` runs site + API
 on :8787. Tier 3a: channels can carry a live `audioUrl`, played through the
 server's same-origin relay (`/api/channels/:id/audio`) so the analyser is
-never CORS-blocked — scenes react to the live broadcast. `src/` +
+never CORS-blocked — scenes react to the live broadcast. Tier 4 slice: the
+**action bus** (`server/bus.js`, ws dep) — in Live mode the console publishes
+every stamped message to `wss://…/api/bus?channel=<id>`; VJ rigs subscribe
+(TD WebSocket DAT natively, OSC software via `tools/bus-to-osc.mjs`), and
+`POST /api/channels/:id/actions` injects test actions. `src/` +
 `react-app.html` is an archived React variant — reference only, don't
 extend it.
 

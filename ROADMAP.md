@@ -128,7 +128,12 @@ easier than the VJ mesh below.
 keypresses → server → fan-out to all viewers (scenes react instantly)
 **and** to the TD operator's machine (a tiny bridge script forwards them
 into TD's WebRTC DAT / OSC — your existing `{type:'key'}` schema already
-fits). Two modes worth building: **pooled** (everyone's hits spawn effects,
+fits). **First slice shipped:** `server/bus.js` fans Live-mode actions to
+per-channel subscribers over `wss://…/api/bus?channel=<id>`; VJ rigs
+consume it via TD's WebSocket DAT or `tools/bus-to-osc.mjs` (OSC), and
+`POST /api/channels/:id/actions` injects test events. Still open here:
+viewers CONSUMING the bus (pooled FX from other people's keys), per-user
+rate limits tied to accounts, and the takeover product. Two modes worth building: **pooled** (everyone's hits spawn effects,
 rate-limited per user) and **takeover** (one paid user holds the controls
 for N minutes — this is a *product*, pairs beautifully with Stripe from
 Tier 2). The console is already staged for it: keys 1–4 are the **live

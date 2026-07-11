@@ -89,6 +89,13 @@ w.fetch = (url) => {
   return Promise.resolve({ ok: false, json: () => Promise.resolve(null) });
 };
 w.indexedDB = { open(){ return {}; } };
+// Live-action bus (Tier 4 slice): capture the console's bus sockets.
+w.__busSockets = [];
+w.WebSocket = class {
+  constructor(url){ this.url = String(url); this.readyState = 1; this.sent = []; w.__busSockets.push(this); }
+  send(m){ this.sent.push(JSON.parse(m)); }
+  close(){ this.readyState = 3; this.onclose && this.onclose(); }
+};
 w.URL.createObjectURL = () => 'blob:fake-' + Math.random();
 w.URL.revokeObjectURL = () => {};
 if (!w.matchMedia) w.matchMedia = () => ({ matches: false, addEventListener(){} });
@@ -249,6 +256,19 @@ step('channel/VJ dropdowns route planes + message (Live only)', () => {
 
   w.eval(`setMode('presets')`);
   pump(10, 6000);
+});
+step('Live actions publish to the channel action bus', () => {
+  const before = w.__busSockets.length;
+  w.eval(`setMode('live')`);                     // channel is drift-radio from the previous step
+  const s = w.__busSockets[w.__busSockets.length - 1];
+  if (w.__busSockets.length === before || !s) throw new Error('no bus socket opened');
+  if (!/\/api\/bus\?channel=drift-radio/.test(s.url)) throw new Error('bus url: ' + s.url);
+  w.eval(`__resetFire('action_2'); fireKey('action_2')`);
+  const got = s.sent.find(m => m.type === 'key' && m.action === 'action_2');
+  if (!got || !got.user || !got.user.id || !got.ts) throw new Error('bus msg missing/unstamped: ' + JSON.stringify(s.sent.slice(-2)));
+  w.eval(`setMode('presets')`);
+  if (s.readyState === 1) throw new Error('bus socket not closed in Offline');
+  pump(5, 6200);
 });
 step('VU + station cards present', () => {
   for (const id of ['vuBass', 'vuSnr', 'vuTrb', 'macro', 'dropzone', 'fileIn']) {
