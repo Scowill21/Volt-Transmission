@@ -25,8 +25,9 @@
 */
 import express from 'express';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { createStore } from './store.js';
+import { createStore, httpError } from './store.js';
 import { initAuth, mountAuth, authConfigured } from './auth.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -45,6 +46,35 @@ app.use(express.json({ limit: '32kb' }));
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 app.get('/api/channels', async (req, res, next) => {
   try { res.json(await store.list()); } catch (e) { next(e); }
+});
+
+/* Live-audio relay (Tier 3a): pipes the channel's upstream stream through our
+   origin. The console plays THIS instead of the raw URL, so the Web Audio
+   analyser is never CORS-tainted and any stream host works — admins paste a
+   URL without caring about CORS. Costs us the bandwidth (fine at this scale;
+   the LiveKit tier replaces it). */
+app.get('/api/channels/:id/audio', async (req, res, next) => {
+  try {
+    const channel = (await store.list()).find(c => c.id === req.params.id);
+    if (!channel || !channel.audioUrl) throw httpError(404, 'channel has no live audio');
+
+    const upstreamAbort = new AbortController();
+    const upstream = await fetch(channel.audioUrl, {
+      headers: { 'user-agent': 'VoltTransmission-relay' },
+      redirect: 'follow',
+      signal: upstreamAbort.signal,
+    }).catch(() => null);
+    if (!upstream || !upstream.ok || !upstream.body) throw httpError(502, 'upstream stream unreachable');
+
+    res.status(200);
+    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'audio/mpeg');
+    res.setHeader('Cache-Control', 'no-store');
+
+    const body = Readable.fromWeb(upstream.body);
+    res.on('close', () => { upstreamAbort.abort(); body.destroy(); });  // listener left → drop upstream
+    body.on('error', () => res.end());
+    body.pipe(res);
+  } catch (e) { next(e); }
 });
 
 /* ── admin (X-Admin-Key) ── */

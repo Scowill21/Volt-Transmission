@@ -184,6 +184,12 @@ async function refresh(){
           </label>
           <button class="danger" data-act="delChan">Delete</button>
         </div>
+        <form class="row" data-act="audio" style="margin-top:.7rem">
+          <input name="audioUrl" placeholder="live audio stream URL (optional — https://…mp3)"
+            value="${esc(c.audioUrl || '')}" style="flex:1; min-width:12rem" />
+          <button type="submit">Save audio</button>
+          <div class="hint" style="flex-basis:100%">When set, every listener tuned here hears this stream and the scene reacts to it (station songs are the fallback). The stream host must allow CORS for visuals to react — see SETUP.md. Clear + save to remove.</div>
+        </form>
         <ul class="vjs">
           ${c.vjs.map(v => `
             <li data-vj="${esc(v.id)}">
@@ -237,9 +243,18 @@ $('list').addEventListener('change', async (e) => {
 });
 
 $('list').addEventListener('submit', async (e) => {
+  const id = e.target.closest('[data-id]')?.dataset.id;
+  const audioForm = e.target.closest('form[data-act="audio"]');
+  if (audioForm){
+    e.preventDefault();
+    try {
+      await api('PATCH', '/api/channels/' + id, { audioUrl: new FormData(audioForm).get('audioUrl') });
+      setStatus('live audio saved', 'ok'); refresh();
+    } catch (err){ setStatus('failed: ' + err.message, 'err'); }
+    return;
+  }
   const form = e.target.closest('form[data-act="addVj"]'); if (!form) return;
   e.preventDefault();
-  const id = e.target.closest('[data-id]').dataset.id;
   const f = new FormData(form);
   try {
     await api('POST', `/api/channels/${id}/vjs`,

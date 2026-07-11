@@ -76,7 +76,8 @@ const API_CHANNELS = [
     ] },
   { id: 'drift-radio', name: 'Drift Radio', slug: 'drift-radio', defaultScene: 'drift',
     vjs: [ { id: 'moss', name: 'Moss', uses: { plane: 'scene', scene: 'static' } } ] },
-  { id: 'api-test', name: 'API Test FM', slug: 'api-test', defaultScene: 'pulse', vjs: [] },
+  { id: 'api-test', name: 'API Test FM', slug: 'api-test', defaultScene: 'pulse',
+    audioUrl: 'https://stream.example/live.mp3', vjs: [] },   // Tier 3a: live channel audio
 ];
 // /api/me (Tier 2a): a signed-in account — the console must stamp messages
 // with it (IDENTITY hydration) and light the footer account chip.
@@ -108,6 +109,7 @@ const script = html.match(/<script>([\s\S]*)<\/script>/)[1] +
      fxCount: FX.sparks.length + FX.shocks.length + (FX.flash > .5 ? 1 : 0),
      lastSent: window.__lastSent, sent: window.__sent,
      channel: channelState.channel + '/' + channelState.vj,
+     playerSrc: player.src || '', playerTid: player.dataset.tid || '',
      chip: (id) => document.getElementById('trk-' + id).textContent });
    const __origSend = sendToTD;
    window.__lastSent = null;
@@ -238,6 +240,22 @@ step('VU + station cards present', () => {
     pump(5, 6300);
   });
 
+  step('channel live audio overrides station songs + falls back', () => {
+    // api-test carries audioUrl → Play must tune the LIVE stream, not a song
+    w.eval(`selectChannel('api-test'); presetPlay()`);
+    if (dbg().playerTid !== 'live:api-test') throw new Error('tid: ' + dbg().playerTid);
+    if (!/\/api\/channels\/api-test\/audio/.test(dbg().playerSrc)) throw new Error('src: ' + dbg().playerSrc);
+    if (!/LIVE AUDIO/.test(w.document.getElementById('tx').textContent))
+      throw new Error('tx: ' + w.document.getElementById('tx').textContent);
+    // station switch keeps the channel's stream underneath (visual-only swap)
+    w.eval(`document.getElementById('st-drift').checked = true; selectStation('drift')`);
+    if (dbg().playerTid !== 'live:api-test') throw new Error('station switch dropped stream: ' + dbg().playerTid);
+    // switching to a channel WITHOUT live audio falls back to station songs
+    w.eval(`selectChannel('volt-fm')`);      // house → ambient, which has the uploaded test song
+    if (dbg().playerTid !== 'ambient') throw new Error('fallback tid: ' + dbg().playerTid);
+    if (!/blob:/.test(dbg().playerSrc)) throw new Error('fallback src: ' + dbg().playerSrc);
+    pump(8, 6400);
+  });
   step('signed-in account stamps messages + lights the chip', () => {
     w.eval(`fireKey('trigger')`);
     const sent = dbg().lastSent;

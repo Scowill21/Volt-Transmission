@@ -99,13 +99,16 @@ skipped requests. This is well-trodden; the work is in the flow, not the tech.
 
 ### Tier 3 — Real streaming (one-to-many, still well-supported)
 
-**3a. Radio audio to the world + default graphics that react.** The radio
-account streams **audio** (from their browser — mic/line-in — or via
-OBS/butt to an ingest). Every listener's browser plays that audio and the
-existing analyser drives the channel's default scene — **your current
-engine already does exactly this**; it just needs the audio element pointed
-at a live stream URL (CORS matters). Interactivity on this tier is instant
-because the visuals are client-rendered.
+**3a. Radio audio to the world + default graphics that react.
+✓ shipped (URL-stream half).** Channels carry a live `audioUrl`
+(admin-set); listeners tuned there hear the broadcast through a
+same-origin server relay (`/api/channels/:id/audio` — kills the CORS
+problem for any stream host, costs us bandwidth per listener until
+LiveKit) and the analyser drives the scenes off the live signal. Station
+songs remain the fallback. **Still open in 3a:** the radio account
+publishing from their own browser (mic/line-in) — that lands with the
+LiveKit work in 3b; today they stream via OBS/butt → any Icecast-style
+ingest and paste the URL.
 
 **3b. Video channels via an SFU.** Stand up LiveKit (Cloud to start):
 TD → NDI → OBS → **WHIP** → LiveKit room → WebRTC to viewers. The console's

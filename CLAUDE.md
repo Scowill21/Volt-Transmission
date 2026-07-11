@@ -10,8 +10,11 @@ role applications; approvals in admin.html). Storage = Supabase Postgres via
 DATABASE_URL (JSON-file fallback for zero-setup dev; accounts need the env).
 Secrets live in `.env` (gitignored) — SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY,
 DATABASE_URL (session-pooler string), ADMIN_KEY. `npm start` runs site + API
-on :8787. `src/` + `react-app.html` is an archived React variant — reference
-only, don't extend it.
+on :8787. Tier 3a: channels can carry a live `audioUrl`, played through the
+server's same-origin relay (`/api/channels/:id/audio`) so the analyser is
+never CORS-blocked — scenes react to the live broadcast. `src/` +
+`react-app.html` is an archived React variant — reference only, don't
+extend it.
 
 ## Golden rules
 

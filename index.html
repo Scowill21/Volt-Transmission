@@ -1288,12 +1288,33 @@ window.addEventListener('drop', (e) => {
   if (f && f.type.startsWith('audio')) setTrack(currentStation, URL.createObjectURL(f), f.name, { persistBlob: f });
 });
 
-/* ── Local playback (PRESETS mode transport) ── */
+/* ── Local playback (PRESETS mode transport) ──
+   Tier 3a: if the tuned CHANNEL carries a live audio stream URL, presets
+   mode plays THAT through the same analyser chain — every listener hears
+   the broadcast and the scene reacts to it. Station songs are the
+   fallback when the channel has no live audio. Station switches only
+   swap the visual; the channel's stream keeps playing underneath. */
+function currentLiveAudio(){
+  const c = channelById(channelState.channel);
+  // Play through the server's same-origin relay (not the raw URL) so the
+  // analyser is never CORS-tainted — any upstream host works.
+  return c && c.audioUrl ? { id: c.id, url: `/api/channels/${c.id}/audio` } : null;
+}
 function presetTune(id, opts = {}){
   if (typeof SCENES !== 'undefined') currentScene = SCENES[id] || currentScene;
   if (mode !== 'presets') return;
-  const tr = tracks[id];
   const wasPlaying = !player.paused && player.src;
+  const live = currentLiveAudio();
+  if (live){
+    ensureAudio();
+    if (player.dataset.tid !== 'live:' + live.id){ player.src = live.url; player.dataset.tid = 'live:' + live.id; }
+    if (wasPlaying || opts.autoplay) player.play().catch(() => {});
+    return;
+  }
+  if ((player.dataset.tid || '').startsWith('live:')){   // channel's live audio went away
+    player.pause(); player.removeAttribute('src'); player.dataset.tid = '';
+  }
+  const tr = tracks[id];
   if (tr){
     ensureAudio();
     if (player.dataset.tid !== id){ player.src = tr.url; player.dataset.tid = id; }
@@ -1303,6 +1324,14 @@ function presetTune(id, opts = {}){
   }
 }
 function presetPlay(){
+  const live = currentLiveAudio();
+  if (live){
+    ensureAudio();
+    if (player.dataset.tid !== 'live:' + live.id){ player.src = live.url; player.dataset.tid = 'live:' + live.id; }
+    player.play().catch(() => {});
+    txEl.innerHTML = `LIVE AUDIO → <b>play</b> · ${live.id}`;
+    return;
+  }
   const tr = tracks[currentStation];
   if (!tr){ txEl.innerHTML = `PRESET → <b>no track</b> · upload a song to ${currentStation}`; return; }
   ensureAudio();
@@ -1315,7 +1344,11 @@ function presetToggle(){ (player.paused || !player.src) ? presetPlay() : presetP
 
 player.addEventListener('play',  () => { if (mode === 'presets'){ transportState = 'playing'; syncTransport(); } });
 player.addEventListener('pause', () => { if (mode === 'presets'){ transportState = 'paused';  syncTransport(); } });
-player.addEventListener('error', () => { txEl.innerHTML = 'PRESET → <b>error</b> · could not decode that file'; });
+player.addEventListener('error', () => {
+  txEl.innerHTML = (player.dataset.tid || '').startsWith('live:')
+    ? 'LIVE AUDIO → <b>error</b> · stream unreachable (check the URL / CORS)'
+    : 'PRESET → <b>error</b> · could not decode that file';
+});
 
 volEl.addEventListener('input', () => { if (masterGain) masterGain.gain.value = volEl.value / 100; });
 

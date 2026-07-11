@@ -35,6 +35,13 @@ export const slugify = (s) => String(s || '').trim().toLowerCase()
 function validateScene(scene){
   if (!SCENES.includes(scene)) throw httpError(400, `scene must be one of ${SCENES.join('|')}`);
 }
+// Live channel audio (Tier 3a): empty clears it; otherwise it must be http(s).
+function normalizeAudioUrl(url){
+  const s = String(url ?? '').trim();
+  if (!s) return null;
+  if (!/^https?:\/\//i.test(s)) throw httpError(400, 'audioUrl must be an http(s) URL (or empty to clear)');
+  return s.slice(0, 500);
+}
 export function httpError(status, message){
   const e = new Error(message); e.status = status; return e;
 }
@@ -58,14 +65,15 @@ class FileStore {
 
   async list(){ return this._read(); }
 
-  async createChannel({ name, slug, defaultScene = 'ambient' }){
+  async createChannel({ name, slug, defaultScene = 'ambient', audioUrl }){
     if (!name || !String(name).trim()) throw httpError(400, 'name required');
     validateScene(defaultScene);
     const id = slugify(slug || name);
     if (!id) throw httpError(400, 'slug required');
     const data = this._read();
     if (data.some(c => c.id === id)) throw httpError(409, `channel "${id}" already exists`);
-    const channel = { id, name: String(name).trim(), slug: id, defaultScene, vjs: [] };
+    const channel = { id, name: String(name).trim(), slug: id, defaultScene,
+      audioUrl: normalizeAudioUrl(audioUrl), vjs: [] };
     data.push(channel);
     this._write(data);
     return channel;
@@ -80,6 +88,7 @@ class FileStore {
       c.name = String(patch.name).trim();
     }
     if (patch.defaultScene !== undefined){ validateScene(patch.defaultScene); c.defaultScene = patch.defaultScene; }
+    if (patch.audioUrl !== undefined) c.audioUrl = normalizeAudioUrl(patch.audioUrl);
     this._write(data);
     return c;
   }
@@ -151,6 +160,8 @@ class PgStore {
         PRIMARY KEY (channel_id, vj_id)
       );
     `);
+    // Tier 3a: live channel audio — additive migration for existing tables.
+    await this.pool.query('ALTER TABLE channels ADD COLUMN IF NOT EXISTS audio_url TEXT');
     const { rows } = await this.pool.query('SELECT COUNT(*)::int AS n FROM channels');
     if (rows[0].n === 0) for (const c of SEED){
       await this.pool.query('INSERT INTO channels (id, name, default_scene) VALUES ($1,$2,$3)', [c.id, c.name, c.defaultScene]);
@@ -163,40 +174,50 @@ class PgStore {
   }
 
   async list(){
-    const { rows: chans } = await this.pool.query('SELECT id, name, default_scene FROM channels ORDER BY position');
+    const { rows: chans } = await this.pool.query('SELECT id, name, default_scene, audio_url FROM channels ORDER BY position');
     const { rows: vjs } = await this.pool.query(`
       SELECT cv.channel_id, cv.vj_id, cv.plane, cv.scene, p.name
       FROM channel_vjs cv JOIN vj_profiles p ON p.id = cv.vj_id
       ORDER BY cv.position`);
     return chans.map(c => ({
       id: c.id, name: c.name, slug: c.id, defaultScene: c.default_scene,
+      audioUrl: c.audio_url || null,
       vjs: vjs.filter(v => v.channel_id === c.id)
         .map(v => ({ id: v.vj_id, name: v.name, uses: { plane: v.plane, scene: v.scene } })),
     }));
   }
 
-  async createChannel({ name, slug, defaultScene = 'ambient' }){
+  async createChannel({ name, slug, defaultScene = 'ambient', audioUrl }){
     if (!name || !String(name).trim()) throw httpError(400, 'name required');
     validateScene(defaultScene);
+    const cleanUrl = normalizeAudioUrl(audioUrl);
     const id = slugify(slug || name);
     if (!id) throw httpError(400, 'slug required');
     try {
-      await this.pool.query('INSERT INTO channels (id, name, default_scene) VALUES ($1,$2,$3)',
-        [id, String(name).trim(), defaultScene]);
+      await this.pool.query('INSERT INTO channels (id, name, default_scene, audio_url) VALUES ($1,$2,$3,$4)',
+        [id, String(name).trim(), defaultScene, cleanUrl]);
     } catch (e){
       if (e.code === '23505') throw httpError(409, `channel "${id}" already exists`);
       throw e;
     }
-    return { id, name: String(name).trim(), slug: id, defaultScene, vjs: [] };
+    return { id, name: String(name).trim(), slug: id, defaultScene, audioUrl: cleanUrl, vjs: [] };
   }
 
   async updateChannel(id, patch){
     if (patch.name !== undefined && !String(patch.name).trim()) throw httpError(400, 'name required');
     if (patch.defaultScene !== undefined) validateScene(patch.defaultScene);
+    // audioUrl can be SET or CLEARED (unlike name/scene, null is a real value),
+    // so it gets an explicit has-flag instead of COALESCE.
+    const hasAudio = patch.audioUrl !== undefined;
+    const audioVal = hasAudio ? normalizeAudioUrl(patch.audioUrl) : null;
     const { rows } = await this.pool.query(
-      `UPDATE channels SET name = COALESCE($2, name), default_scene = COALESCE($3, default_scene)
-       WHERE id = $1 RETURNING id, name, default_scene`,
-      [id, patch.name !== undefined ? String(patch.name).trim() : null, patch.defaultScene ?? null]);
+      `UPDATE channels SET
+         name          = COALESCE($2, name),
+         default_scene = COALESCE($3, default_scene),
+         audio_url     = CASE WHEN $4 THEN $5 ELSE audio_url END
+       WHERE id = $1 RETURNING id, name, default_scene, audio_url`,
+      [id, patch.name !== undefined ? String(patch.name).trim() : null,
+       patch.defaultScene ?? null, hasAudio, audioVal]);
     if (!rows.length) throw httpError(404, 'channel not found');
     return rows[0];
   }

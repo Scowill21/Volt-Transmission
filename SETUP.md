@@ -127,6 +127,21 @@ service's Environment tab), then:
 
 Changes appear in every console's dropdowns on their next page load.
 
+**Live channel audio (ROADMAP Tier 3a):** give a channel a **live audio
+stream URL** in `/admin.html` (any Icecast/HTTP audio stream — SomaFM,
+Radio Paradise, your own `butt`/OBS→Icecast ingest). When set, every
+listener tuned to that channel hears the broadcast instead of the station
+songs, and the scene reacts to it — the console plays the stream through
+the server's **same-origin relay** (`/api/channels/<id>/audio`), so it
+works with any stream host, no CORS setup needed. Notes:
+
+- First play takes **~5–10 s** to buffer through the relay — normal.
+- The relay costs the server bandwidth per listener (fine at small scale;
+  the LiveKit tier replaces this). Station songs are the fallback whenever
+  the URL is empty — clear the field + save to go back to songs.
+- Switching stations while live audio plays swaps only the **visual**;
+  the broadcast keeps playing. Play/Pause controls the stream as usual.
+
 **Storage:** Postgres on Render (`DATABASE_URL`, tables auto-created);
 locally a JSON file at `server/channels.json` (gitignored — delete it to
 re-seed from the defaults).
