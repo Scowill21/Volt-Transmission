@@ -34,6 +34,13 @@ extend it.
   — Canvas 2D, no per-frame allocations in hot loops beyond what's there.
 - Keyboard: keys `h` `d` `p` are reserved outside KEY_MAP (console, diag,
   play/pause). Action keys must keep firing both sceneFX() and sendToTD().
+- Modes: the UI says **Offline | Live** but the wire value stays
+  `'presets'|'live'` ('presets' = Offline) — public contract. Offline owns
+  the station bank + local songs; Live owns channels (canvas plane = scene +
+  channel live audio, video plane = TD feed). Overlay FX (Q/W/E/Space) must
+  work on BOTH planes (the canvas doubles as a transparent FX overlay above
+  the video). Keys 1–4 tune stations ONLY in Offline; in Live they're the
+  live actions (future: permission-gated action packs). No Skip in Live.
 
 ## Test (run after every change)
 

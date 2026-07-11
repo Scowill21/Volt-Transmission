@@ -131,7 +131,10 @@ into TD's WebRTC DAT / OSC — your existing `{type:'key'}` schema already
 fits). Two modes worth building: **pooled** (everyone's hits spawn effects,
 rate-limited per user) and **takeover** (one paid user holds the controls
 for N minutes — this is a *product*, pairs beautifully with Stripe from
-Tier 2). Requires abuse limiting, per-channel rooms, and reconnect logic —
+Tier 2). The console is already staged for it: keys 1–4 are the **live
+actions** in Live mode (today unrestricted; gate on role/purchase here),
+and the plan is purchasable **action packs** — different overlay actions a
+user can buy and bring to a channel. Requires abuse limiting, per-channel rooms, and reconnect logic —
 moderate-hard but no exotic tech.
 
 > **Prompt it as:** "Build a per-channel WebSocket control bus: viewers'

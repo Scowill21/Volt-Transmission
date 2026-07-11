@@ -123,8 +123,8 @@
     -webkit-backdrop-filter:blur(14px) saturate(120%);
     border-top:1px solid var(--edge);
     box-shadow:0 -1px 0 rgba(0,0,0,.5), 0 -20px 40px rgba(0,0,0,.35);
-    padding:1rem 1.25rem calc(1rem + env(safe-area-inset-bottom));
-    display:flex; flex-direction:column; gap:1rem;
+    padding:.8rem 1.25rem calc(.8rem + env(safe-area-inset-bottom));
+    display:flex; flex-direction:column; gap:.7rem;
     transition:transform .32s cubic-bezier(.2,.8,.2,1), opacity .32s;
   }
   .console.hidden{ transform:translateY(105%); opacity:0; pointer-events:none; }
@@ -144,6 +144,15 @@
   .collapse-tab:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
 
   .zone{ display:flex; flex-direction:column; gap:.55rem; }
+  /* Top row: Mode + (Live: channel picks | Offline: station bank) share a line */
+  .zone-row{ display:flex; flex-wrap:wrap; gap:1.6rem; align-items:flex-start; }
+  /* Mode-driven visibility: Offline hides the channel menu; Live hides the
+     station preset bank and Skip (you can't skip a live broadcast). */
+  .console:not(.mode-live) .zone-chan{ display:none; }
+  .console.mode-live .zone-stations{ display:none; }
+  .console.mode-live [data-transport="skip"]{ display:none; }
+  /* One consolidated actions line: transport + vol + key caps */
+  .actions-row{ display:flex; flex-wrap:wrap; gap:.55rem 1.1rem; align-items:flex-end; }
   .eyebrow{
     display:flex; align-items:center; gap:.7rem;
     font-size:.62rem; letter-spacing:.34em; text-transform:uppercase; color:var(--ink-dim);
@@ -201,12 +210,12 @@
   .station input:checked + label .name{ color:var(--signal); }
 
   /* ── Controls: discrete keys, function label ABOVE each cap ───── */
-  .keys{ display:flex; flex-wrap:wrap; gap:.7rem; }
+  .keys{ display:flex; flex-wrap:wrap; gap:.5rem; }
   .key-slot{ display:flex; flex-direction:column; align-items:center; gap:.4rem; }
   .key-label{ font-size:.6rem; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-dim); white-space:nowrap; }
   .keycap{
     font-family:var(--mono); font-weight:600; font-size:.9rem; color:var(--ink);
-    min-width:3.1rem; height:3.1rem; padding:0 .7rem;
+    min-width:2.7rem; height:2.7rem; padding:0 .6rem;
     display:grid; place-items:center; cursor:pointer;
     background:linear-gradient(180deg,var(--keycap-hi),var(--keycap));
     border:1px solid var(--edge); border-bottom-width:3px; border-radius:9px;
@@ -272,7 +281,7 @@
   }
 
   /* ── TX readout + console footer ──────────────────────────────── */
-  .footer{ display:flex; align-items:center; justify-content:space-between; gap:1rem; padding-top:.2rem; }
+  .footer{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.5rem 1rem; padding-top:.2rem; }
   .foot-left{ display:flex; align-items:center; gap:.7rem; min-width:0; }
   .tx{ font-size:.66rem; letter-spacing:.06em; color:var(--ink-dim); min-height:1em; }
   .tx b{ color:var(--signal); font-weight:600; }
@@ -372,8 +381,12 @@
   .modal__alt a{ color:var(--signal); }
 
   /* ── Preset visuals: the full-screen reactive canvas ──────────── */
-  .stage canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; }
+  /* The canvas always runs: full scenes in Offline / canvas-plane Live, and a
+     transparent ACTION-FX overlay above the video plane (z-index 2 > video). */
+  .stage canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; z-index:2; pointer-events:none; }
   .stage canvas[hidden]{ display:none; }
+  .stage video{ position:relative; z-index:1; }
+  .stage .placeholder{ z-index:3; }
 
   /* ── Macro mode toggle: PRESETS ↔ LIVE STATION ────────────────── */
   .macro{ display:flex; flex-wrap:wrap; gap:.55rem; }
@@ -506,46 +519,46 @@
   <section class="console" id="console" aria-label="Stream controls">
     <button class="collapse-tab" id="collapseTab" type="button" title="Collapse controls (H)" aria-label="Collapse controls (H)">▾</button>
 
-    <div class="zone">
-      <div class="eyebrow">Mode</div>
-      <div class="macro" id="macro" role="group" aria-label="Console mode">
-        <button class="mbtn" type="button" data-mode="presets" aria-pressed="true"><span class="tuner" aria-hidden="true"></span>Presets</button>
-        <button class="mbtn" type="button" data-mode="live" aria-pressed="false"><span class="tuner" aria-hidden="true"></span>Live Station</button>
+    <div class="zone-row">
+      <div class="zone zone-mode">
+        <div class="eyebrow">Mode</div>
+        <div class="macro" id="macro" role="group" aria-label="Console mode">
+          <button class="mbtn" type="button" data-mode="presets" aria-pressed="true"><span class="tuner" aria-hidden="true"></span>Offline</button>
+          <button class="mbtn" type="button" data-mode="live" aria-pressed="false"><span class="tuner" aria-hidden="true"></span>Live</button>
+        </div>
+      </div>
+
+      <div class="zone zone-chan">
+        <div class="eyebrow">Channel</div>
+        <div class="chan" id="chan">
+          <span class="pick">
+            <span class="lb" id="chanLb">CH</span>
+            <span class="sel"><select id="channelSelect" aria-labelledby="chanLb" aria-label="Channel"></select></span>
+          </span>
+          <span class="pick">
+            <span class="lb" id="vjLb">VJ</span>
+            <span class="sel"><select id="vjSelect" aria-labelledby="vjLb" aria-label="VJ"></select></span>
+          </span>
+        </div>
+      </div>
+
+      <div class="zone zone-stations">
+        <div class="eyebrow">Stations</div>
+        <div class="stations" id="stations" role="radiogroup" aria-label="Choose a station"></div>
       </div>
     </div>
 
-    <div class="zone">
-      <div class="eyebrow">Channel</div>
-      <div class="chan" id="chan">
-        <span class="pick">
-          <span class="lb" id="chanLb">CH</span>
-          <span class="sel"><select id="channelSelect" aria-labelledby="chanLb" aria-label="Channel"></select></span>
-        </span>
-        <span class="pick">
-          <span class="lb" id="vjLb">VJ</span>
-          <span class="sel"><select id="vjSelect" aria-labelledby="vjLb" aria-label="VJ"></select></span>
-        </span>
+    <div class="zone zone-actions">
+      <div class="eyebrow">Actions</div>
+      <div class="actions-row">
+        <div class="transport" id="transport">
+          <button class="tbtn" type="button" data-transport="play"  aria-label="Play"  aria-pressed="false"><span class="ico" aria-hidden="true">▶</span>Play</button>
+          <button class="tbtn" type="button" data-transport="pause" aria-label="Pause" aria-pressed="false"><span class="ico" aria-hidden="true">⏸</span>Pause</button>
+          <button class="tbtn" type="button" data-transport="skip"  aria-label="Skip"><span class="ico" aria-hidden="true">⏭</span>Skip</button>
+          <div class="vol"><span class="lb">Vol</span><input type="range" id="vol" min="0" max="100" value="80" aria-label="Volume"></div>
+        </div>
+        <div class="keys" id="keys"></div>
       </div>
-    </div>
-
-    <div class="zone">
-      <div class="eyebrow">Stations</div>
-      <div class="stations" id="stations" role="radiogroup" aria-label="Choose a station"></div>
-    </div>
-
-    <div class="zone">
-      <div class="eyebrow">Transport</div>
-      <div class="transport" id="transport">
-        <button class="tbtn" type="button" data-transport="play"  aria-label="Play"  aria-pressed="false"><span class="ico" aria-hidden="true">▶</span>Play</button>
-        <button class="tbtn" type="button" data-transport="pause" aria-label="Pause" aria-pressed="false"><span class="ico" aria-hidden="true">⏸</span>Pause</button>
-        <button class="tbtn" type="button" data-transport="skip"  aria-label="Skip"><span class="ico" aria-hidden="true">⏭</span>Skip</button>
-        <div class="vol"><span class="lb">Vol</span><input type="range" id="vol" min="0" max="100" value="80" aria-label="Preset volume"></div>
-      </div>
-    </div>
-
-    <div class="zone">
-      <div class="eyebrow">Controls</div>
-      <div class="keys" id="keys"></div>
     </div>
 
     <div class="footer">
@@ -859,23 +872,39 @@ function fireKey(action){
   const cap = keysEl.querySelector(`.keycap[data-action="${action}"]`);
   if (cap){ cap.classList.add('active'); setTimeout(() => cap.classList.remove('active'), 140); }
 
-  // PRESETS mode: 1–4 tune the matching station locally; every other
-  // action key fires its visual effect in the default graphics (Q flash,
-  // W punch, E burst, Space shock ring). TD receives the key in parallel
-  // either way — same message, stamped with the user who pressed it.
-  if (mode === 'presets'){
-    const m = /^scene_([1-4])$/.exec(action);
-    if (m){
+  // Keys 1–4: Offline they tune the matching station; in Live they're the
+  // LIVE ACTIONS — TD receives {action:'scene_N'} and reacts on its side.
+  // (Future: live actions become a permissioned/purchasable action pack —
+  // gate here on IDENTITY.role when that lands.)
+  // The overlay actions (Q flash, W punch, E burst, Space shock) fire their
+  // graphics in BOTH modes — on the video plane they draw on the FX overlay
+  // above the stream. TD receives every key in parallel, stamped with who
+  // pressed it.
+  const m = /^scene_([1-4])$/.exec(action);
+  if (m){
+    if (mode === 'presets'){
       const st = STATIONS[+m[1] - 1];
       if (st){
         const input = document.getElementById(`st-${st.id}`);
         if (input) input.checked = true;
         selectStation(st.id);
       }
-    } else {
-      sceneFX(action);
     }
+  } else {
+    sceneFX(action);
   }
+}
+
+// Keys 1–4 relabel per mode: station names Offline, live actions in Live.
+function syncKeyLabels(){
+  keysEl.querySelectorAll('.keycap').forEach(cap => {
+    const m = /^scene_([1-4])$/.exec(cap.dataset.action);
+    if (!m) return;
+    const label = cap.parentElement.querySelector('.key-label');
+    if (label) label.textContent = mode === 'live'
+      ? `Live ${m[1]}`
+      : (KEY_MAP.find(k => k.action === cap.dataset.action)?.label || label.textContent);
+  });
 }
 
 // Reflect the blackout toggle: latch the cap "on" and cut the stage to black.
@@ -940,9 +969,17 @@ function setTransport(action){
     return;                                   // player events sync the lit pair
   }
 
-  // LIVE mode: transport messages ride the data channel to TouchDesigner.
+  // LIVE mode: you can't skip a live broadcast (the button is hidden too).
+  if (action === 'skip') return;
+
+  // Live + canvas plane: play/pause the channel's live audio stream locally.
+  if (plane === 'canvas'){
+    if (action === 'play') presetPlay(); else presetPause();
+    return;                                     // player events sync the lit pair
+  }
+
+  // Live + video plane: transport messages ride the data channel to TD.
   sendToTD({ type: 'transport', action });
-  if (action === 'skip'){ pulse(); return; }
   transportState = action === 'play' ? 'playing' : 'paused';
   syncTransport();
 }
@@ -983,7 +1020,23 @@ const dropLb = document.getElementById('dropLabel');
 const volEl  = document.getElementById('vol');
 const vuB = document.getElementById('vuBass'), vuS = document.getElementById('vuSnr'), vuT = document.getElementById('vuTrb');
 
-let mode = 'presets';            // 'presets' | 'live'
+/* MODES (UI: "Offline" | "Live") — the wire value keeps the original
+   'presets'|'live' names because the TD message schema is a public
+   contract; 'presets' simply means Offline.
+     Offline → the 4 reactive canvas scenes + YOUR local songs. The
+               channel menu is hidden — channels are a Live-mode thing.
+     Live    → the channel world. Within it the PLANE follows the
+               channel/VJ routing:
+                 canvas → a scene drawn locally + the channel's live
+                          audio stream (station bank hidden — scenes
+                          come from the channel, not manual picks)
+                 video  → the TouchDesigner/VJ WebRTC feed (placeholder
+                          holds until TD connects)
+   The canvas element ALWAYS runs: full scenes on the canvas plane, and a
+   transparent ACTION-FX overlay on the video plane — so Q/W/E/Space
+   graphics land in both modes.                                        */
+let mode  = 'presets';           // 'presets' (= Offline UI) | 'live'
+let plane = 'canvas';            // what the stage shows: 'canvas' | 'video'
 
 function setMode(m){
   if (mode === m && m === 'live'){ applyStage(); return; }  // re-click: keep holding "awaiting transmission"
@@ -991,21 +1044,28 @@ function setMode(m){
   document.querySelectorAll('#macro .mbtn').forEach(b =>
     b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
   sendToTD({ type: 'mode', mode: m });
-  if (m === 'live') presetPause();               // cut local music for the real feed
+  syncKeyLabels();
+  if (m === 'live'){
+    presetPause();                 // cut local songs; the channel decides what plays
+    routeChannelVJ();              // apply the current channel/VJ (sets plane + audio)
+  } else {
+    plane = 'canvas';              // Offline is always the canvas plane
+    presetPause();                 // live stream off; songs resume on Play
+    presetTune(currentStation);    // back to the tuned station's scene + song cue
+  }
   applyStage();
 }
 document.querySelectorAll('#macro .mbtn').forEach(b =>
   b.addEventListener('click', () => setMode(b.dataset.mode)));
 
-/* One place decides what the stage shows:
-     presets            → reactive canvas
-     live + TD offline  → "awaiting signal / TRANSMISSION" placeholder (held)
-     live + TD live     → the WebRTC video                                  */
+/* One place decides what the stage shows. The canvas never hides — on the
+   video plane the render loop draws only the transparent FX overlay. */
 function applyStage(){
-  const presets = mode === 'presets';
-  visEl.hidden = !presets;
-  videoEl.style.display = presets ? 'none' : '';
-  placeEl.style.display = (!presets && !isLive) ? '' : 'none';
+  const video = mode === 'live' && plane === 'video';
+  visEl.hidden = false;
+  videoEl.style.display = video ? '' : 'none';
+  placeEl.style.display = (video && !isLive) ? '' : 'none';
+  consoleEl.classList.toggle('mode-live', mode === 'live');
 }
 
 /* ── Channel / VJ dropdowns (ROADMAP Tier 1a) ──
@@ -1057,16 +1117,22 @@ function routeChannelVJ(){
   const c = channelById(channelState.channel);
   if (!c) return;
   sendToTD({ type: 'channel', channel: c.id, vj: channelState.vj });
+  if (mode !== 'live') return;                   // channels only drive Live mode
   const v = (c.vjs || []).find(v => v.id === channelState.vj);
-  if (v && v.uses.plane === 'stream'){           // stream VJ → live plane
-    if (mode !== 'live') setMode('live');
+  if (v && v.uses.plane === 'stream'){           // stream VJ → the video plane
+    plane = 'video';
+    presetPause();                               // TD supplies the audio
+    applyStage();
     return;
   }
-  const scene = v ? v.uses.scene : c.defaultScene;  // house or scene VJ → presets plane
-  if (mode !== 'presets') setMode('presets');
-  const input = document.getElementById(`st-${scene}`);
-  if (input) input.checked = true;
-  selectStation(scene);
+  // house / scene VJ → the canvas plane: the channel picks the scene and
+  // supplies the audio (its live stream, if it has one)
+  plane = 'canvas';
+  const scene = v ? v.uses.scene : c.defaultScene;
+  if (typeof SCENES !== 'undefined' && SCENES[scene]) currentScene = SCENES[scene];
+  sendToTD({ type: 'station', station: scene }); // tell TD which scene is up (schema unchanged)
+  liveTune();                                    // start/swap the channel's live audio
+  applyStage();
 }
 
 channelSel.addEventListener('change', () => selectChannel(channelSel.value));
@@ -1288,30 +1354,38 @@ window.addEventListener('drop', (e) => {
   if (f && f.type.startsWith('audio')) setTrack(currentStation, URL.createObjectURL(f), f.name, { persistBlob: f });
 });
 
-/* ── Local playback (PRESETS mode transport) ──
-   Tier 3a: if the tuned CHANNEL carries a live audio stream URL, presets
-   mode plays THAT through the same analyser chain — every listener hears
-   the broadcast and the scene reacts to it. Station songs are the
-   fallback when the channel has no live audio. Station switches only
-   swap the visual; the channel's stream keeps playing underneath. */
+/* ── Playback routing ──
+   Offline ('presets')   → the tuned station's LOCAL song. Live streams
+                           never play here — channels are Live-mode only.
+   Live + canvas plane   → the channel's live audio stream (Tier 3a),
+                           played through the server's same-origin relay
+                           so the analyser is never CORS-tainted and the
+                           scene reacts to the broadcast. No live audio
+                           on the channel → silence (visual still runs).
+   Live + video plane    → the player stays paused; TD's WebRTC feed
+                           carries the audio. */
 function currentLiveAudio(){
   const c = channelById(channelState.channel);
-  // Play through the server's same-origin relay (not the raw URL) so the
-  // analyser is never CORS-tainted — any upstream host works.
   return c && c.audioUrl ? { id: c.id, url: `/api/channels/${c.id}/audio` } : null;
 }
-function presetTune(id, opts = {}){
-  if (typeof SCENES !== 'undefined') currentScene = SCENES[id] || currentScene;
-  if (mode !== 'presets') return;
+// Live/canvas: start (or keep) the tuned channel's live stream.
+function liveTune(){
+  if (mode !== 'live' || plane !== 'canvas') return;
   const wasPlaying = !player.paused && player.src;
   const live = currentLiveAudio();
   if (live){
     ensureAudio();
     if (player.dataset.tid !== 'live:' + live.id){ player.src = live.url; player.dataset.tid = 'live:' + live.id; }
-    if (wasPlaying || opts.autoplay) player.play().catch(() => {});
-    return;
+    if (wasPlaying) player.play().catch(() => {});
+  } else {                             // channel has no live audio — silence
+    player.pause(); player.removeAttribute('src'); player.dataset.tid = '';
   }
-  if ((player.dataset.tid || '').startsWith('live:')){   // channel's live audio went away
+}
+function presetTune(id, opts = {}){
+  if (typeof SCENES !== 'undefined') currentScene = SCENES[id] || currentScene;
+  if (mode !== 'presets') return;
+  const wasPlaying = !player.paused && player.src;
+  if ((player.dataset.tid || '').startsWith('live:')){   // back from Live — drop the stream
     player.pause(); player.removeAttribute('src'); player.dataset.tid = '';
   }
   const tr = tracks[id];
@@ -1324,8 +1398,9 @@ function presetTune(id, opts = {}){
   }
 }
 function presetPlay(){
-  const live = currentLiveAudio();
-  if (live){
+  if (mode === 'live'){
+    const live = currentLiveAudio();
+    if (plane !== 'canvas' || !live) return;     // video plane: TD owns audio
     ensureAudio();
     if (player.dataset.tid !== 'live:' + live.id){ player.src = live.url; player.dataset.tid = 'live:' + live.id; }
     player.play().catch(() => {});
@@ -1988,7 +2063,11 @@ function renderLoop(now){
   updateVU();
   FX.flash *= Math.exp(-dt * 9); FX.punch *= Math.exp(-dt * 7);   // action-key FX decay
   if (visEl.hidden || !currentScene) return;
+  // Video plane: the canvas becomes a transparent ACTION-FX overlay above the
+  // stream — no scene background, just the Q/W/E/Space graphics.
+  const overlayOnly = mode === 'live' && plane === 'video';
   const w = innerWidth, h = innerHeight;
+  if (overlayOnly) vctx.clearRect(0, 0, w, h);
   vctx.save();
   const s = Math.max(w / 1280, h / 720);          // cover-fit the 1280×720 scene
   vctx.translate((w - 1280 * s) / 2, (h - 720 * s) / 2);
@@ -1998,7 +2077,7 @@ function renderLoop(now){
     vctx.translate(640, 360); vctx.scale(z, z); vctx.translate(-640, -360);
     vctx.translate(rnd(-1, 1) * 8 * FX.punch, rnd(-1, 1) * 6 * FX.punch);
   }
-  currentScene.draw(vctx, t, dt, SIG);
+  if (!overlayOnly) currentScene.draw(vctx, t, dt, SIG);
   drawFX(vctx, dt);
   vctx.restore();
 }

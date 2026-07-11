@@ -104,7 +104,8 @@ w.addEventListener('error', (e) => errors.push('window.onerror: ' + e.message));
 
 /* ── run the page script ── */
 const script = html.match(/<script>([\s\S]*)<\/script>/)[1] +
-  `;window.__dbg = () => ({ mode, currentStation, transportState, playing: SIG.playing,
+  `;window.__dbg = () => ({ mode, plane, currentStation, transportState, playing: SIG.playing,
+     scene: (Object.keys(SCENES).find(k => SCENES[k] === currentScene) || ''),
      scenes: Object.keys(SCENES).join(','), paused: player.paused,
      fxCount: FX.sparks.length + FX.shocks.length + (FX.flash > .5 ? 1 : 0),
      lastSent: window.__lastSent, sent: window.__sent,
@@ -112,6 +113,7 @@ const script = html.match(/<script>([\s\S]*)<\/script>/)[1] +
      playerSrc: player.src || '', playerTid: player.dataset.tid || '',
      chip: (id) => document.getElementById('trk-' + id).textContent });
    const __origSend = sendToTD;
+   window.__resetFire = (a) => { lastFire[a] = 0; };   // step re-fires within the 70ms lockout
    window.__lastSent = null;
    window.__sent = [];
    sendToTD = (p) => { window.__lastSent = { ...p, user: IDENTITY, ts: Date.now() };
@@ -166,22 +168,37 @@ step('transport pause/play/skip routing', () => {
   if (dbg().currentStation !== 'pulse') throw new Error('skip went to: ' + dbg().currentStation);
   pump(10, 3000);
 });
-step('mode → live holds placeholder, pauses music', () => {
+step('Live mode: plane follows the channel, placeholder on video plane', () => {
   w.eval(`setMode('live')`);
-  const place = w.document.getElementById('placeholder').style.display;
-  const vis = w.document.getElementById('vis').hidden;
-  if (place === 'none') throw new Error('placeholder hidden in live+offline');
-  if (!vis) throw new Error('canvas still visible in live');
-  if (!dbg().paused) throw new Error('music still playing in live');
-  w.eval(`setMode('live')`);          // re-click: must keep holding
+  if (!w.document.getElementById('console').classList.contains('mode-live')) throw new Error('console missing mode-live');
+  if (dbg().plane !== 'canvas') throw new Error('house channel should be canvas plane: ' + dbg().plane);
+  if (w.document.getElementById('vis').hidden) throw new Error('canvas hidden on canvas plane');
+  if (w.document.getElementById('stream').style.display !== 'none') throw new Error('video visible on canvas plane');
+  if (!dbg().paused) throw new Error('local music still playing in Live');
+  w.eval(`selectVJ('nova')`);                    // stream VJ → video plane
+  if (dbg().plane !== 'video') throw new Error('nova should be video plane: ' + dbg().plane);
+  if (w.document.getElementById('placeholder').style.display === 'none') throw new Error('placeholder hidden on video+offline');
+  w.eval(`setMode('live')`);                     // re-click: must keep holding
   if (w.document.getElementById('placeholder').style.display === 'none') throw new Error('re-click broke hold');
-  w.eval(`setMode('presets')`);
-  if (w.document.getElementById('vis').hidden) throw new Error('canvas hidden back in presets');
+  w.eval(`selectVJ('house'); setMode('presets')`);
+  if (dbg().mode !== 'presets' || dbg().plane !== 'canvas') throw new Error('did not return to Offline canvas');
+  if (w.document.getElementById('vis').hidden) throw new Error('canvas hidden back in Offline');
+  if (w.document.getElementById('console').classList.contains('mode-live')) throw new Error('mode-live class stuck');
   pump(5, 4000);
 });
-step('keys 1-4 tune stations in presets', () => {
+step('keys 1-4: tune stations Offline, live actions in Live', () => {
   w.eval(`fireKey('scene_3')`);
   if (dbg().currentStation !== 'static') throw new Error('got: ' + dbg().currentStation);
+  w.eval(`setMode('live')`);
+  w.eval(`fireKey('scene_2')`);
+  if (dbg().currentStation !== 'static') throw new Error('Live 1-4 must not tune: ' + dbg().currentStation);
+  const sent = dbg().lastSent;
+  if (sent.type !== 'key' || sent.action !== 'scene_2') throw new Error('live action msg: ' + JSON.stringify(sent));
+  const liveLbl = w.document.querySelectorAll('#keys .key-label')[1].textContent;
+  if (liveLbl !== 'Live 2') throw new Error('live label: ' + liveLbl);
+  w.eval(`setMode('presets')`);
+  const offLbl = w.document.querySelectorAll('#keys .key-label')[0].textContent;
+  if (offLbl !== 'Scene 1') throw new Error('offline label: ' + offLbl);
   pump(5, 5000);
 });
 step('action keys fire scene FX + messages carry user/ts', () => {
@@ -192,30 +209,45 @@ step('action keys fire scene FX + messages carry user/ts', () => {
   if (!sent || !sent.user || !sent.user.id || !sent.ts) throw new Error('missing user/ts: ' + JSON.stringify(sent));
   pump(60, 6000);   // let FX decay across frames without error
 });
-step('channel/VJ dropdowns route planes + message', () => {
+step('overlay FX also fire on the Live video plane', () => {
+  w.eval(`setMode('live'); selectVJ('nova')`);   // video plane
+  // the whole suite runs in <70ms real time — clear the per-action lockout
+  w.eval(`__resetFire('action_3'); __resetFire('trigger')`);
+  w.eval(`fireKey('action_3'); fireKey('trigger')`);
+  pump(4, 6100);
+  if (dbg().fxCount < 1) throw new Error('no FX on video plane: ' + dbg().fxCount);
+  if (w.document.getElementById('vis').hidden) throw new Error('FX overlay canvas hidden on video plane');
+  w.eval(`selectVJ('house'); setMode('presets')`);
+  pump(30, 6150);
+});
+step('channel/VJ dropdowns route planes + message (Live only)', () => {
   const ch = w.document.getElementById('channelSelect');
   const vj = w.document.getElementById('vjSelect');
   if (!ch || ch.options.length < 2) throw new Error('channels not populated: ' + (ch && ch.options.length));
   if (vj.options[0].value !== 'house') throw new Error('house not first: ' + vj.options[0].value);
 
-  w.eval(`selectVJ('nova')`);                    // stream VJ → live plane
-  if (dbg().mode !== 'live') throw new Error('stream VJ did not go live');
+  w.eval(`selectVJ('nova')`);                    // in Offline: message only, no mode flip
+  if (dbg().mode !== 'presets') throw new Error('Offline channel pick flipped the mode');
   const msg = dbg().sent.find(m => m.type === 'channel' && m.vj === 'nova');
   if (!msg || msg.channel !== 'volt-fm' || !msg.user || !msg.user.id || !msg.ts)
     throw new Error('channel msg: ' + JSON.stringify(msg));
 
-  w.eval(`selectVJ('house')`);                   // house → presets + default scene
-  if (dbg().mode !== 'presets') throw new Error('house did not return to presets');
-  if (dbg().currentStation !== 'ambient') throw new Error('house scene: ' + dbg().currentStation);
-  if (!w.document.getElementById('st-ambient').checked) throw new Error('station radio not synced');
+  w.eval(`setMode('live')`);                     // entering Live applies the pick
+  if (dbg().plane !== 'video') throw new Error('nova should be video plane: ' + dbg().plane);
 
-  w.eval(`selectVJ('kera')`);                    // scene VJ → mapped station
-  if (dbg().currentStation !== 'pulse') throw new Error('scene VJ station: ' + dbg().currentStation);
+  w.eval(`selectVJ('kera')`);                    // scene VJ → canvas plane + their scene
+  if (dbg().plane !== 'canvas' || dbg().scene !== 'pulse')
+    throw new Error('kera routing: ' + dbg().plane + '/' + dbg().scene);
 
-  w.eval(`selectChannel('drift-radio')`);        // switch channel → VJ list rebuilt, default scene routed
+  w.eval(`selectChannel('drift-radio')`);        // switch channel → VJ list rebuilt, default scene
   if (vj.options.length !== 2) throw new Error('vj list not rebuilt: ' + vj.options.length);
   if (dbg().channel !== 'drift-radio/house') throw new Error('state: ' + dbg().channel);
-  if (dbg().currentStation !== 'drift') throw new Error('default scene: ' + dbg().currentStation);
+  if (dbg().scene !== 'drift') throw new Error('default scene: ' + dbg().scene);
+  if (!dbg().sent.some(m => m.type === 'station' && m.station === 'drift'))
+    throw new Error('scene message missing');
+  if (dbg().currentStation !== 'static') throw new Error('Live routing must not touch the Offline station');
+
+  w.eval(`setMode('presets')`);
   pump(10, 6000);
 });
 step('VU + station cards present', () => {
@@ -232,28 +264,36 @@ step('VU + station cards present', () => {
     const ch = w.document.getElementById('channelSelect');
     if (ch.options.length !== 3) throw new Error('expected 3 channels after fetch, got ' + ch.options.length);
     if (![...ch.options].some(o => o.value === 'api-test')) throw new Error('api-test channel missing');
-    w.eval(`selectChannel('api-test')`);           // API-only channel routes like any other
-    if (dbg().currentStation !== 'pulse') throw new Error('api channel default scene: ' + dbg().currentStation);
+    w.eval(`setMode('live'); selectChannel('api-test')`);   // API-only channel routes like any other
+    if (dbg().plane !== 'canvas' || dbg().scene !== 'pulse')
+      throw new Error('api channel routing: ' + dbg().plane + '/' + dbg().scene);
     const vj = w.document.getElementById('vjSelect');
     if (vj.options.length !== 1 || vj.options[0].value !== 'house')
       throw new Error('api channel should have house only');
     pump(5, 6300);
   });
 
-  step('channel live audio overrides station songs + falls back', () => {
-    // api-test carries audioUrl → Play must tune the LIVE stream, not a song
-    w.eval(`selectChannel('api-test'); presetPlay()`);
-    if (dbg().playerTid !== 'live:api-test') throw new Error('tid: ' + dbg().playerTid);
+  step('Live channel audio plays via the relay; no skipping live', () => {
+    // still Live on api-test (canvas plane) — its live stream is the audio
+    if (dbg().playerTid !== 'live:api-test') throw new Error('liveTune tid: ' + dbg().playerTid);
+    w.eval(`presetPlay()`);
     if (!/\/api\/channels\/api-test\/audio/.test(dbg().playerSrc)) throw new Error('src: ' + dbg().playerSrc);
     if (!/LIVE AUDIO/.test(w.document.getElementById('tx').textContent))
       throw new Error('tx: ' + w.document.getElementById('tx').textContent);
-    // station switch keeps the channel's stream underneath (visual-only swap)
-    w.eval(`document.getElementById('st-drift').checked = true; selectStation('drift')`);
-    if (dbg().playerTid !== 'live:api-test') throw new Error('station switch dropped stream: ' + dbg().playerTid);
-    // switching to a channel WITHOUT live audio falls back to station songs
-    w.eval(`selectChannel('volt-fm')`);      // house → ambient, which has the uploaded test song
-    if (dbg().playerTid !== 'ambient') throw new Error('fallback tid: ' + dbg().playerTid);
-    if (!/blob:/.test(dbg().playerSrc)) throw new Error('fallback src: ' + dbg().playerSrc);
+    // skip is dead in Live: no station change, no transport message
+    const transportsBefore = dbg().sent.filter(m => m.type === 'transport').length;
+    w.eval(`setTransport('skip')`);
+    if (dbg().sent.filter(m => m.type === 'transport').length !== transportsBefore)
+      throw new Error('skip leaked a transport message in Live');
+    if (dbg().playerTid !== 'live:api-test') throw new Error('skip touched the live stream');
+    // a channel WITHOUT live audio → silence (the visual still runs)
+    w.eval(`selectChannel('volt-fm')`);
+    if (dbg().playerTid !== '') throw new Error('should be silent: ' + dbg().playerTid);
+    if (!dbg().paused) throw new Error('player should be paused with no live audio');
+    // back to Offline → the station songs return
+    w.eval(`setMode('presets'); document.getElementById('st-ambient').checked = true; selectStation('ambient')`);
+    if (dbg().playerTid !== 'ambient') throw new Error('offline song did not return: ' + dbg().playerTid);
+    if (!/blob:/.test(dbg().playerSrc)) throw new Error('offline src: ' + dbg().playerSrc);
     pump(8, 6400);
   });
   step('signed-in account stamps messages + lights the chip', () => {

@@ -11,8 +11,11 @@ Two modes, switched with the **Mode** toggle in the console:
 
 | Mode | What the screen shows | What the music is |
 | --- | --- | --- |
-| **Presets** | A built-in audio-reactive visual per station | Songs you add (see below), played locally in the browser |
-| **Live Station** | Your TouchDesigner WebRTC stream. Until TD connects it holds the **"awaiting signal / TRANSMISSION"** screen — and keeps holding it, no matter how often it's clicked | Whatever TD sends |
+| **Offline** | The station bank: a built-in audio-reactive visual per station. The channel menu is hidden — channels are a Live thing | Songs you add (see below), played locally in the browser |
+| **Live** | The channel world (CH/VJ menu; the station bank hides). A channel on the **canvas plane** (House/scene VJ) shows its scene reacting to the channel's live audio; a **stream VJ** shows the TouchDesigner WebRTC feed — holding the **"awaiting signal / TRANSMISSION"** screen until TD connects, no matter how often it's clicked. **No Skip in Live** — you can't skip a broadcast | The channel's live audio stream, or whatever TD sends |
+
+(The mode messages TD receives keep their original values — `"presets"`
+means Offline; the schema is a public contract and did not change.)
 
 The four standard stations and their visuals:
 
@@ -86,22 +89,25 @@ picks). One song per station; the player loops it.
 
 ### Operating
 
-- **Play / Pause / Skip** drive the local player in Presets mode
-  (Skip advances to the next station). In Live mode the same buttons send
-  `{type:'transport'}` messages to TouchDesigner instead.
-- **Vol** slider sets preset volume. Keys: **1–4** tune stations, **P**
-  play/pause, **H** hides the console, **D** audio diagnostics.
-- **Action keys drive the graphics too**: Q = accent flash, W = punch
-  zoom + shake, E = spark burst, Space = shock ring — instantly in the
-  default scenes, and the same key message reaches TouchDesigner in
-  parallel, stamped with who pressed it.
-- **Channel / VJ dropdowns** (top of the console): pick a channel, then who's
-  driving it. **House** plays the channel's default scene; a scene VJ tunes
-  their scene (station bank stays in sync); a "· live" VJ flips the console to
-  Live Station (per-VJ stream routing arrives with the streaming tiers).
-  Channels live in the `CHANNELS` config at the top of `index.html` — static
-  for now; ROADMAP Tier 1b replaces it with the admin-created list from
-  `/api/channels`. Every pick sends a `channel` message to TD (schema below).
+- **Play / Pause / Skip** drive the local player in Offline mode
+  (Skip advances to the next station). In Live: Play/Pause controls the
+  channel's live audio on the canvas plane, or sends `{type:'transport'}`
+  to TouchDesigner on the video plane — and **Skip disappears** (you can't
+  skip a broadcast).
+- **Vol** slider sets local volume. Keys: **1–4** tune stations in Offline;
+  in Live they're the **live actions** (sent to TD as `scene_1..4`, caps
+  relabel to "Live 1–4"; a permissioned/purchasable action-pack version is
+  planned). **P** play/pause, **H** hides the console, **D** diagnostics.
+- **Action keys drive the graphics in BOTH modes**: Q = accent flash,
+  W = punch zoom + shake, E = spark burst, Space = shock ring — in the
+  scenes, and over the live video as a transparent FX overlay. The same
+  key message reaches TouchDesigner in parallel, stamped with who pressed it.
+- **Channel / VJ dropdowns** (Live mode): pick a channel, then who's driving
+  it. **House** shows the channel's default scene reacting to its live audio;
+  a scene VJ shows their scene; a "· live" VJ switches to the TD/WebRTC video
+  plane (per-VJ stream routing arrives with the streaming tiers). The list
+  comes from `/api/channels` (admin-created), falling back to the built-in
+  seed. Every pick sends a `channel` message to TD (schema below).
 - The whole UI auto-fades after ~4 s idle for a clean capture; move the
   mouse to bring it back.
 
@@ -121,7 +127,7 @@ service's Environment tab), then:
 - **Create channels** — name, optional slug, and the default scene
   (`ambient | pulse | static | drift`) that drives until a VJ is attached.
 - **Attach VJs** — a name plus what they use: a **scene** (one of the four
-  canvas visuals) or a **live stream** (flips the console to Live Station;
+  canvas visuals) or a **live stream** (switches Live mode to the video plane;
   per-VJ stream routing arrives with the streaming tiers).
 - **Change the default scene** or **delete** channels/VJs inline.
 
@@ -129,18 +135,19 @@ Changes appear in every console's dropdowns on their next page load.
 
 **Live channel audio (ROADMAP Tier 3a):** give a channel a **live audio
 stream URL** in `/admin.html` (any Icecast/HTTP audio stream — SomaFM,
-Radio Paradise, your own `butt`/OBS→Icecast ingest). When set, every
-listener tuned to that channel hears the broadcast instead of the station
-songs, and the scene reacts to it — the console plays the stream through
-the server's **same-origin relay** (`/api/channels/<id>/audio`), so it
-works with any stream host, no CORS setup needed. Notes:
+Radio Paradise, your own `butt`/OBS→Icecast ingest). Listeners tuned to
+that channel **in Live mode** hear the broadcast and its scene reacts to
+it — the console plays the stream through the server's **same-origin
+relay** (`/api/channels/<id>/audio`), so it works with any stream host,
+no CORS setup needed. Notes:
 
 - First play takes **~5–10 s** to buffer through the relay — normal.
 - The relay costs the server bandwidth per listener (fine at small scale;
-  the LiveKit tier replaces this). Station songs are the fallback whenever
-  the URL is empty — clear the field + save to go back to songs.
-- Switching stations while live audio plays swaps only the **visual**;
-  the broadcast keeps playing. Play/Pause controls the stream as usual.
+  the LiveKit tier replaces this).
+- A Live channel with **no** stream URL shows its scene in silence —
+  local songs belong to Offline mode. Clear the field + save to remove
+  a channel's live audio.
+- Play/Pause controls the stream; there is no Skip on a live broadcast.
 
 **Storage:** Postgres on Render (`DATABASE_URL`, tables auto-created);
 locally a JSON file at `server/channels.json` (gitignored — delete it to
@@ -314,15 +321,15 @@ Two things to know about **Live mode on a hosted page**:
 - The operator's browser must be able to **reach** the signaling server.
   Same LAN as TouchDesigner: works as-is. From outside your network you'd
   need port-forwarding plus a TURN server in `CONNECTION.iceServers` —
-  visitors without that still get the full Presets experience.
+  visitors without that still get the full Offline experience.
 
 ---
 
 ## Verifying / dev notes
 
-- Open the page: Presets mode, Ambient's bedroom scene idling. Add a song,
+- Open the page: Offline mode, Ambient's bedroom scene idling. Add a song,
   press Play — the VU meters and the room should move with it.
-- Click **Live Station**: music cuts, "awaiting signal / TRANSMISSION"
+- Click **Live** and pick a "· live" VJ: music cuts, "awaiting signal / TRANSMISSION"
   holds until TD connects.
 - `.smoke-test.cjs` is a headless test of the whole console
   (`npm i jsdom && node .smoke-test.cjs`) — handy after editing.
