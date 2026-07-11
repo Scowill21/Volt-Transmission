@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Full-screen TouchDesigner WebRTC livestream with a labeled keystroke control panel that sends actions back over the data channel.",
   "scripts": {
-    "start": "node server/index.js",
+    "start": "node --env-file-if-exists=.env server/index.js",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview --host"

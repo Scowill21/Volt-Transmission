@@ -39,6 +39,11 @@ export function httpError(status, message){
   const e = new Error(message); e.status = status; return e;
 }
 
+// The live pg pool when running on Postgres (null in JSON-file mode).
+// auth.js shares it for the profiles table instead of opening a second pool.
+let sharedPool = null;
+export const getPool = () => sharedPool;
+
 /* ── JSON-file backend (local dev) ────────────────────────────────── */
 class FileStore {
   constructor(file){
@@ -122,7 +127,10 @@ class PgStore {
       connectionString: this.url,
       // Render Postgres requires TLS; local Postgres usually doesn't.
       ssl: /localhost|127\.0\.0\.1/.test(this.url) ? false : { rejectUnauthorized: false },
+      // Polite sizing for pooled providers (Supabase session pooler etc.).
+      max: 5,
     });
+    sharedPool = this.pool;
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS channels (
         id            TEXT PRIMARY KEY,

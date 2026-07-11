@@ -77,10 +77,14 @@ lands with auth in Tier 2a.
 
 ### Tier 2 — Standard product work (accounts + payments)
 
-**2a. Accounts + roles.** Use a hosted auth provider (Supabase Auth or
-Clerk) — never hand-roll. Roles: `listener`, `vj` (approved), `radio`
-(approved), `admin`. Approval = an admin flips a flag; the UI shows
-"apply to be a VJ/station" forms.
+**2a. Accounts + roles. ✓ shipped** — Supabase Auth, server-mediated
+(httpOnly cookies via `server/auth.js`; the console stays dependency-free
+and stamps every TD message with the signed-in id/name/role). Roles
+`listener | vj | radio | admin` on a `profiles` table in the same
+Supabase Postgres that now also holds channels (Render PG retired).
+`/account.html` = sign in/up + apply-to-broadcast; `/admin.html` gained
+an Applications queue (approve = the role flips). Ops note: Supabase
+"Confirm email" should be OFF until real SMTP exists (SETUP.md).
 
 **2b. Paid song requests.** Stripe Checkout (hosted page — you never touch
 cards) + a webhook that inserts into a `song_requests` table with status

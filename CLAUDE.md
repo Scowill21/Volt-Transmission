@@ -3,10 +3,15 @@
 Interactive radio/VJ platform. Today it's a self-contained broadcast console
 (`index.html`, no build step) with audio-reactive scenes, per-station music,
 and a WebRTC link to TouchDesigner — plus a small Node service (`server/`,
-Express + Postgres-or-JSON-file) that serves the site and the `/api/channels`
-API behind the CH/VJ dropdowns, with `admin.html` (X-Admin-Key) to manage
-channels. `npm start` runs site + API on :8787. `src/` + `react-app.html` is
-an archived React variant — reference only, don't extend it.
+Express) that serves the site and the API: `/api/channels` behind the CH/VJ
+dropdowns (`admin.html`, X-Admin-Key) and Tier-2a accounts (`server/auth.js`
+→ Supabase Auth, server-mediated httpOnly cookies; `account.html` sign-in +
+role applications; approvals in admin.html). Storage = Supabase Postgres via
+DATABASE_URL (JSON-file fallback for zero-setup dev; accounts need the env).
+Secrets live in `.env` (gitignored) — SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY,
+DATABASE_URL (session-pooler string), ADMIN_KEY. `npm start` runs site + API
+on :8787. `src/` + `react-app.html` is an archived React variant — reference
+only, don't extend it.
 
 ## Golden rules
 

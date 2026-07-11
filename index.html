@@ -306,6 +306,10 @@
   .ctl-btn:hover{ color:var(--signal); border-color:color-mix(in srgb, var(--signal) 38%, transparent); }
   .ctl-btn:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
   .ctl-btn[aria-pressed="true"]{ color:var(--signal); border-color:var(--signal); }
+  /* account chip (an <a> wearing .ctl-btn) — amber once signed in */
+  .acct{ text-decoration:none; display:inline-flex; align-items:center; max-width:14rem;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .acct.on{ color:var(--signal); border-color:color-mix(in srgb, var(--signal) 45%, transparent); }
 
   /* re-show tab when console is hidden */
   .reshow{
@@ -566,6 +570,7 @@
         </div>
       </div>
       <div class="foot-btns">
+        <a class="ctl-btn acct" id="acct" href="/account.html" title="Your account — sign in / apply to broadcast">guest</a>
         <button class="ctl-btn" data-contact-open title="Contact us for custom transmissions">Contact</button>
         <button class="ctl-btn" id="diagBtn" aria-pressed="false" title="Audio diagnostics (D)">Diag · D</button>
         <button class="ctl-btn" id="hideBtn" title="Hide controls (H)">Hide · H</button>
@@ -676,13 +681,16 @@ const CHANNELS = [
 
 /* ── Who is pressing the keys ─────────────────────────────────────
    EVERY message to TouchDesigner carries a `user` object + `ts`, so
-   the TD side can route, rank, or rate-limit by person once paying
-   users are in play. Until real accounts exist, identity comes from
-   URL params — hand a viewer a link like:
-       https://your-site/?name=Ada&role=listener&uid=cus_123
-   and their key presses arrive attributed. No params = anonymous
-   operator. `sid` is fresh per page load so TD can tell two tabs
-   with the same name apart.                                        */
+   the TD side can route, rank, or rate-limit by person. Identity
+   resolves in layers (strongest last):
+     1. anonymous operator (no params, signed out)
+     2. URL params — ?name=Ada&role=listener&uid=cus_123 — still the
+        quick way to hand someone an attributed link, and the TD-side
+        testing escape hatch
+     3. a signed-in ACCOUNT (Tier 2a): /api/me answers with the real
+        id/name/role from Supabase and overrides the fields below.
+        Signed-out or API-less (file://, static hosting) → layers 1–2.
+   `sid` is fresh per page load so TD can tell two tabs apart.       */
 const IDENTITY = (() => {
   const p = new URLSearchParams(location.search);
   const sid = (window.crypto && crypto.randomUUID)
@@ -691,10 +699,25 @@ const IDENTITY = (() => {
   return {
     id:   p.get('uid')  || 'anon-' + sid,
     name: p.get('name') || 'operator',
-    role: p.get('role') || 'operator',   // future: listener | vj | radio | admin
+    role: p.get('role') || 'operator',   // listener | vj | radio | admin | operator
     sid,
   };
 })();
+
+/* Account hydration — mutates IDENTITY in place so every later message
+   is stamped with the signed-in user. The footer chip mirrors it. */
+if (typeof fetch === 'function'){
+  fetch('/api/me')
+    .then(r => (r.ok ? r.json() : null))
+    .then(data => {
+      const u = data && data.user;
+      if (!u) return;
+      Object.assign(IDENTITY, { id: u.id, name: u.name || u.email, role: u.role });
+      const chip = document.getElementById('acct');
+      if (chip){ chip.textContent = `${IDENTITY.name} · ${IDENTITY.role}`; chip.classList.add('on'); }
+    })
+    .catch(() => {});   // no API → URL-param / anonymous identity stands
+}
 
 /* ── Audio robustness config ──────────────────────────────────────
    jitterBufferMs: receive-side buffer that smooths NETWORK jitter/loss

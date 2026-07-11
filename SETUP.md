@@ -144,6 +144,38 @@ re-seed from the defaults).
 
 ---
 
+## Accounts & roles (ROADMAP Tier 2a)
+
+Supabase Auth behind the scenes; the console stays dependency-free because the
+server mediates everything through httpOnly cookies. Configure three env vars
+(local `.env`, or Render's Environment tab — see `render.yaml`):
+`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `DATABASE_URL` (the **session
+pooler** string — the direct `db.<ref>` host is IPv6-only and won't resolve
+from most networks, including Render). Missing any → accounts quietly disable
+and everything else runs as before.
+
+- **Sign in / sign up: [`/account.html`](account.html).** Listeners sign up
+  freely (role `listener`). The signed-in name + role ride every control
+  message to TouchDesigner, and the console footer shows an account chip.
+- **Roles:** `listener | vj | radio | admin`. Signed-in users apply for
+  `vj`/`radio` on the account page (with an optional note); an admin approves
+  or declines in [`/admin.html`](admin.html) → **Applications** (same
+  `X-Admin-Key`). Approval flips their role on the spot.
+- **URL-param identity still works** (`?name=Ada&role=listener&uid=cus_123`)
+  as the quick attributed-link / TD-testing path — a signed-in session simply
+  overrides it.
+- **One Supabase setting to flip:** *Authentication → Sign In / Providers →
+  Email → **Confirm email***. ON (the default) means new accounts must click
+  the confirmation email before signing in — with no custom SMTP configured,
+  Supabase's built-in mailer is fine for testing but rate-limited (~a few
+  per hour). **Turn it OFF for now** for instant signups; re-enable it with
+  real SMTP when the platform grows up.
+- Profiles live in a `profiles` table (auto-created) in the same Postgres as
+  channels — since 2a that Postgres **is Supabase**, so one database serves
+  channels, profiles, and (Tier 2b+) song requests.
+
+---
+
 ## Connecting TouchDesigner
 
 The WebRTC handshake in `index.html` is fully implemented (same signaling
@@ -198,8 +230,9 @@ Leave the `[SIGNALING_SERVER_URL]` placeholder in place to run standalone
 
 ### Knowing who pressed the key (paid users)
 
-Until real accounts exist, identity rides on the URL. Hand an approved
-user a link like:
+Identity comes from the signed-in **account** when there is one (Tier 2a —
+`/account.html`; the session's real id/name/role stamp every message). With
+no session, identity rides on the URL. Hand an approved user a link like:
 
 ```
 https://your-site.onrender.com/?name=Ada&role=listener&uid=cus_123
@@ -223,9 +256,9 @@ if msg.get('type') == 'key' and who.get('role') == 'listener':
     fire(msg['action'], who.get('name'))
 ```
 
-When the account system lands (ROADMAP Tier 2), the backend will set
-these fields from the real session instead of the URL — the TD-side
-schema won't change.
+Since Tier 2a these fields come from the real session whenever the user is
+signed in (accounts section above) — the URL params remain as the override-free
+fallback, and the TD-side schema is unchanged either way.
 
 ### Audio breakup?
 
@@ -238,22 +271,24 @@ under the audio buffer duration).
 
 ## Deploying on Render
 
-Since Tier 1b the blueprint deploys **one Node web service** (it serves the
-static site *and* the channels API) plus a **managed Postgres** for channels.
+The blueprint deploys **one Node web service** (it serves the static site
+*and* the API). Since Tier 2a the database is **Supabase** (auth + Postgres
+together — no expiring Render Postgres).
 
 1. Push this repo to GitHub/GitLab.
-2. Render → **New → Blueprint** → pick the repo (`render.yaml` defines the
-   web service + database). Already linked? It syncs on push.
-3. After the first deploy, open the service's **Environment** tab and copy
-   **`ADMIN_KEY`** (auto-generated) — that's your key for `/admin.html`.
+2. Render → **New → Blueprint** → pick the repo. Already linked? It syncs on
+   push — approve the removal of the old `volt-transmission-db` if prompted
+   (channels live in Supabase now and re-seed there automatically).
+3. In the service's **Environment** tab set `DATABASE_URL` (Supabase
+   **session-pooler** string), `SUPABASE_URL`, and `SUPABASE_PUBLISHABLE_KEY`
+   — same values as your local `.env`. Copy the auto-generated **`ADMIN_KEY`**
+   while you're there — that's your key for `/admin.html`.
 4. If the old *static site* service from pre-1b still exists, delete it in
    the dashboard so only the web service serves the site.
 5. Every push redeploys. Songs in `audio/` + `PRESET_TRACKS` ship with it.
 
-Heads-up: Render's **free Postgres expires after ~30 days** — move it to a
-paid plan (or point `DATABASE_URL` at Supabase) when this needs to live
-long-term. And static-only hosting still works fine — without the API the
-console simply falls back to the built-in channel list.
+Static-only hosting still works fine — without the API the console simply
+falls back to the built-in channel list and runs accountless.
 
 Two things to know about **Live mode on a hosted page**:
 

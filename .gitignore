@@ -11,3 +11,7 @@ dist-ssr
 
 # Local dev channel store (server falls back to this when DATABASE_URL is unset)
 server/channels.json
+
+# Secrets — env only, never committed
+.env
+.env.*

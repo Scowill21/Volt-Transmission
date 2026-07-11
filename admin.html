@@ -89,6 +89,11 @@
   </section>
 
   <section>
+    <div class="eyebrow">Applications</div>
+    <div id="apps" style="display:flex; flex-direction:column; gap:.8rem"></div>
+  </section>
+
+  <section>
     <div class="eyebrow">New channel</div>
     <form class="card row" id="createForm">
       <input id="cName" placeholder="name — e.g. Night Bus" required style="flex:2; min-width:10rem" />
@@ -118,7 +123,35 @@ const keyEl = $('key');
 keyEl.value = sessionStorage.getItem('adminKey') || '';
 
 function setStatus(msg, cls){ statusEl.textContent = msg; statusEl.className = 'status ' + (cls || ''); }
-$('keySave').onclick = () => { sessionStorage.setItem('adminKey', keyEl.value); setStatus('key set for this tab', 'ok'); };
+$('keySave').onclick = () => { sessionStorage.setItem('adminKey', keyEl.value); setStatus('key set for this tab', 'ok'); refreshApps(); };
+
+/* ── VJ / radio applications (Tier 2a) ── */
+async function refreshApps(){
+  try {
+    const apps = await api('GET', '/api/admin/applications');
+    $('apps').innerHTML = apps.map(a => `
+      <div class="card row" data-uid="${esc(a.id)}">
+        <div style="flex:1">
+          <div class="chan-name">${esc(a.name || a.email || a.id)}</div>
+          <div class="slug">${esc(a.email || '')} · wants <b>${esc(a.appliedRole)}</b>${a.note ? ' · “' + esc(a.note) + '”' : ''}</div>
+        </div>
+        <button data-app="approve">Approve</button>
+        <button class="danger" data-app="decline">Decline</button>
+      </div>`).join('') || '<div class="empty card">no pending applications</div>';
+  } catch (e){
+    $('apps').innerHTML = '<div class="empty card">' + esc('applications unavailable — ' + e.message) + '</div>';
+  }
+}
+$('apps').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-app]'); if (!btn) return;
+  const uid = e.target.closest('[data-uid]').dataset.uid;
+  try {
+    await api('POST', '/api/admin/applications/' + uid, { action: btn.dataset.app });
+    setStatus('application ' + btn.dataset.app + 'd', 'ok');
+    refreshApps();
+  } catch (err){ setStatus('failed: ' + err.message, 'err'); }
+});
+refreshApps();
 
 async function api(method, url, body){
   const res = await fetch(url, {

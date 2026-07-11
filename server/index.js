@@ -16,11 +16,18 @@
      DELETE /api/channels/:id
      POST   /api/channels/:id/vjs                { name, plane, scene? }
      DELETE /api/channels/:id/vjs/:vjId
+   Accounts (Tier 2a — server/auth.js, Supabase Auth behind cookies):
+     POST   /api/auth/signup | login | logout
+     GET    /api/me                              { user | null } — never errors
+     POST   /api/apply                           { role: vj|radio, note? }
+     GET    /api/admin/applications              pending applications
+     POST   /api/admin/applications/:userId      { action: approve|decline }
 */
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createStore } from './store.js';
+import { initAuth, mountAuth, authConfigured } from './auth.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.PORT || 8787;
@@ -29,6 +36,8 @@ const ADMIN_KEY = process.env.ADMIN_KEY || 'dev';
 if (!process.env.ADMIN_KEY) console.warn('[admin] ADMIN_KEY not set — using the dev default ("dev"). Set it in production.');
 
 const store = await createStore();
+await initAuth();
+console.log('[auth]', authConfigured() ? 'supabase configured' : 'not configured — accounts disabled, console runs as before');
 const app = express();
 app.use(express.json({ limit: '32kb' }));
 
@@ -59,6 +68,9 @@ app.post('/api/channels/:id/vjs', requireAdmin, async (req, res, next) => {
 app.delete('/api/channels/:id/vjs/:vjId', requireAdmin, async (req, res, next) => {
   try { await store.removeVJ(req.params.id, req.params.vjId); res.status(204).end(); } catch (e) { next(e); }
 });
+
+/* ── accounts + roles (Tier 2a) ── */
+mountAuth(app, requireAdmin);
 
 /* ── the site itself (console + admin + audio/) ── */
 app.use(express.static(ROOT, { extensions: ['html'] }));

@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Volt Transmission — Account</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  /* Same broadcast-console tokens as index.html / admin.html. */
+  :root{
+    --bg:#141009; --ink:#f3ebdd; --ink-dim:#9a8f7c;
+    --signal:#ffb24a; --signal-dim:#6f532a;
+    --glow:rgba(255,178,74,.55); --edge:rgba(255,178,74,.16);
+    --panel:rgba(255,255,255,.015); --warn:#ff7a4a;
+    --mono:'IBM Plex Mono', ui-monospace, Menlo, monospace;
+    --disp:'Space Grotesk', system-ui, sans-serif;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; min-height:100vh; background:var(--bg); color:var(--ink);
+    font-family:var(--mono); font-size:.82rem; -webkit-font-smoothing:antialiased;
+    padding:2.2rem 1.2rem 4rem;
+  }
+  .wrap{ max-width:460px; margin:0 auto; display:flex; flex-direction:column; gap:1.6rem; }
+  h1{ font-family:var(--disp); font-weight:500; font-size:1.35rem; letter-spacing:.06em; margin:0; }
+  h1 small{ display:block; font-family:var(--mono); font-size:.62rem; letter-spacing:.3em; text-transform:uppercase; color:var(--ink-dim); margin-top:.4rem; }
+  .eyebrow{
+    display:flex; align-items:center; gap:.7rem; margin-bottom:.7rem;
+    font-size:.62rem; letter-spacing:.34em; text-transform:uppercase; color:var(--ink-dim);
+  }
+  .eyebrow::after{ content:""; flex:1; height:1px; background:linear-gradient(90deg,var(--edge),transparent); }
+  .card{ border:1px solid var(--edge); border-radius:9px; background:var(--panel); padding:1.1rem; display:flex; flex-direction:column; gap:.6rem; }
+
+  input, textarea{
+    font-family:var(--mono); font-size:.8rem; color:var(--ink); width:100%;
+    background:rgba(255,255,255,.02); border:1px solid var(--edge); border-radius:7px;
+    padding:.55rem .65rem;
+  }
+  input::placeholder, textarea::placeholder{ color:var(--signal-dim); }
+  input:focus-visible, textarea:focus-visible, button:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
+
+  button{
+    font-family:var(--mono); font-size:.66rem; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--ink); background:none; border:1px solid var(--edge); border-radius:7px;
+    padding:.55rem .9rem; cursor:pointer; transition:color .15s, border-color .15s;
+  }
+  button:hover{ color:var(--signal); border-color:color-mix(in srgb, var(--signal) 40%, transparent); }
+  button.primary{ color:var(--bg); background:var(--signal); border-color:var(--signal); font-weight:600; }
+  button.primary:hover{ color:var(--bg); box-shadow:0 0 14px var(--glow); }
+
+  .tabs{ display:flex; gap:.5rem; }
+  .tabs button[aria-selected="true"]{ color:var(--signal); border-color:var(--signal); }
+
+  .who{ display:flex; align-items:center; gap:.7rem; }
+  .who .dot{ width:8px; height:8px; border-radius:50%; background:var(--signal); box-shadow:0 0 10px var(--glow); flex:none; }
+  .who .name{ font-family:var(--disp); font-weight:500; font-size:1.05rem; }
+  .role{ display:inline-block; font-size:.62rem; letter-spacing:.22em; text-transform:uppercase;
+    color:var(--signal); border:1px solid var(--edge); border-radius:20px; padding:.25rem .7rem; }
+  .meta{ color:var(--ink-dim); font-size:.7rem; line-height:1.7; }
+  .status{ min-height:1.1em; font-size:.68rem; letter-spacing:.05em; color:var(--ink-dim); }
+  .status.err{ color:var(--warn); }
+  .status.ok{ color:var(--signal); }
+  .hint{ color:var(--ink-dim); font-size:.68rem; line-height:1.6; }
+  a{ color:var(--signal); }
+  [hidden]{ display:none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Account<small>Volt Transmission</small></h1>
+
+  <!-- signed OUT -->
+  <section id="authBox" hidden>
+    <div class="eyebrow">Sign in / sign up</div>
+    <div class="card">
+      <div class="tabs" role="tablist">
+        <button id="tabIn" role="tab" aria-selected="true">Sign in</button>
+        <button id="tabUp" role="tab" aria-selected="false">Sign up</button>
+      </div>
+      <input id="name" placeholder="display name" autocomplete="nickname" hidden />
+      <input id="email" type="email" placeholder="email" autocomplete="email" />
+      <input id="password" type="password" placeholder="password" autocomplete="current-password" />
+      <button class="primary" id="go">Sign in</button>
+      <div class="status" id="authStatus"></div>
+      <div class="hint">Listeners sign up freely. Want to broadcast? Sign up, then apply below — an admin approves VJ and radio accounts.</div>
+    </div>
+  </section>
+
+  <!-- signed IN -->
+  <section id="meBox" hidden>
+    <div class="eyebrow">Signed in</div>
+    <div class="card">
+      <div class="who"><span class="dot"></span><span class="name" id="meName"></span></div>
+      <div><span class="role" id="meRole"></span></div>
+      <div class="meta" id="meMeta"></div>
+      <div class="status" id="meStatus"></div>
+      <button id="logout">Sign out</button>
+    </div>
+
+    <div class="eyebrow" style="margin-top:1.2rem">Broadcast on Volt</div>
+    <div class="card" id="applyCard">
+      <div class="hint">Apply for an approved role — an admin reviews applications in the ops room.</div>
+      <textarea id="applyNote" rows="2" placeholder="what would you play / show? (optional)"></textarea>
+      <div class="tabs">
+        <button id="applyVj">Apply · VJ</button>
+        <button id="applyRadio">Apply · Radio host</button>
+      </div>
+      <div class="status" id="applyStatus"></div>
+    </div>
+  </section>
+
+  <div class="hint">← <a href="/">back to the console</a>. Your name and role ride every control message to TouchDesigner.</div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let mode = 'in';   // 'in' | 'up'
+
+function setStatus(el, msg, cls){ el.textContent = msg; el.className = 'status ' + (cls || ''); }
+
+async function api(path, body){
+  const res = await fetch(path, {
+    method: body ? 'POST' : 'GET',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.status);
+  return data;
+}
+
+function setTab(m){
+  mode = m;
+  $('tabIn').setAttribute('aria-selected', String(m === 'in'));
+  $('tabUp').setAttribute('aria-selected', String(m === 'up'));
+  $('name').hidden = m === 'in';
+  $('password').autocomplete = m === 'in' ? 'current-password' : 'new-password';
+  $('go').textContent = m === 'in' ? 'Sign in' : 'Create account';
+}
+$('tabIn').onclick = () => setTab('in');
+$('tabUp').onclick = () => setTab('up');
+
+$('go').onclick = async () => {
+  try {
+    setStatus($('authStatus'), '…');
+    if (mode === 'up'){
+      const r = await api('/api/auth/signup', { email: $('email').value, password: $('password').value, name: $('name').value });
+      if (r.pendingConfirmation){
+        setStatus($('authStatus'), 'account created — check your email to confirm, then sign in', 'ok');
+        setTab('in');
+        return;
+      }
+    } else {
+      await api('/api/auth/login', { email: $('email').value, password: $('password').value });
+    }
+    refresh();
+  } catch (e){ setStatus($('authStatus'), String(e.message || e), 'err'); }
+};
+$('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('go').click(); });
+
+$('logout').onclick = async () => { await api('/api/auth/logout', {}); refresh(); };
+
+async function apply(role){
+  try {
+    await api('/api/apply', { role, note: $('applyNote').value });
+    setStatus($('applyStatus'), 'application sent — pending admin approval', 'ok');
+    refresh();
+  } catch (e){ setStatus($('applyStatus'), String(e.message || e), 'err'); }
+}
+$('applyVj').onclick = () => apply('vj');
+$('applyRadio').onclick = () => apply('radio');
+
+async function refresh(){
+  let user = null;
+  try { user = (await api('/api/me')).user; } catch {}
+  $('authBox').hidden = !!user;
+  $('meBox').hidden = !user;
+  if (!user) return;
+  $('meName').textContent = user.name || user.email;
+  $('meRole').textContent = user.role;
+  $('meMeta').textContent = user.email;
+  if (user.appliedRole){
+    setStatus($('meStatus'), `application pending: ${user.appliedRole}`, 'ok');
+  } else if (user.role !== 'listener'){
+    setStatus($('meStatus'), 'approved — your role rides every control message', 'ok');
+  } else setStatus($('meStatus'), '');
+  $('applyCard').style.display = user.role === 'listener' && !user.appliedRole ? '' : 'none';
+}
+refresh();
+</script>
+</body>
+</html>

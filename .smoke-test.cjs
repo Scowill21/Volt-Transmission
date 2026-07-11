@@ -78,9 +78,15 @@ const API_CHANNELS = [
     vjs: [ { id: 'moss', name: 'Moss', uses: { plane: 'scene', scene: 'static' } } ] },
   { id: 'api-test', name: 'API Test FM', slug: 'api-test', defaultScene: 'pulse', vjs: [] },
 ];
-w.fetch = (url) => String(url).endsWith('/api/channels')
-  ? Promise.resolve({ ok: true, json: () => Promise.resolve(API_CHANNELS) })
-  : Promise.resolve({ ok: false, json: () => Promise.resolve(null) });
+// /api/me (Tier 2a): a signed-in account — the console must stamp messages
+// with it (IDENTITY hydration) and light the footer account chip.
+const API_ME = { user: { id: 'u-test-1', email: 't@example.com', name: 'Test Account', role: 'vj', appliedRole: null } };
+w.fetch = (url) => {
+  const u = String(url);
+  if (u.endsWith('/api/channels')) return Promise.resolve({ ok: true, json: () => Promise.resolve(API_CHANNELS) });
+  if (u.endsWith('/api/me'))       return Promise.resolve({ ok: true, json: () => Promise.resolve(API_ME) });
+  return Promise.resolve({ ok: false, json: () => Promise.resolve(null) });
+};
 w.indexedDB = { open(){ return {}; } };
 w.URL.createObjectURL = () => 'blob:fake-' + Math.random();
 w.URL.revokeObjectURL = () => {};
@@ -230,6 +236,18 @@ step('VU + station cards present', () => {
     if (vj.options.length !== 1 || vj.options[0].value !== 'house')
       throw new Error('api channel should have house only');
     pump(5, 6300);
+  });
+
+  step('signed-in account stamps messages + lights the chip', () => {
+    w.eval(`fireKey('trigger')`);
+    const sent = dbg().lastSent;
+    if (!sent || sent.user.id !== 'u-test-1' || sent.user.name !== 'Test Account' || sent.user.role !== 'vj')
+      throw new Error('identity not hydrated: ' + JSON.stringify(sent && sent.user));
+    if (!sent.user.sid) throw new Error('sid dropped by hydration');
+    const chip = w.document.getElementById('acct');
+    if (!/Test Account · vj/.test(chip.textContent) || !chip.classList.contains('on'))
+      throw new Error('account chip: "' + chip.textContent + '" on=' + chip.classList.contains('on'));
+    pump(5, 6600);
   });
 
   pump(30, 6000);
