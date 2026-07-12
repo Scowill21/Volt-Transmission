@@ -138,8 +138,10 @@ class PgStore {
       ssl: /localhost|127\.0\.0\.1/.test(this.url) ? false : { rejectUnauthorized: false },
       // Polite sizing for pooled providers (Supabase session pooler etc.).
       max: 5,
+      // Fail fast instead of hanging boot forever on a bad URL/password —
+      // createStore() catches this and falls back to the JSON store.
+      connectionTimeoutMillis: 10000,
     });
-    sharedPool = this.pool;
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS channels (
         id            TEXT PRIMARY KEY,
@@ -171,6 +173,9 @@ class PgStore {
           [c.id, v.id, v.uses.plane, v.uses.scene]);
       }
     }
+    // Only hand the pool to auth once the schema is confirmed reachable —
+    // a failed init must leave authConfigured() false, not half-wired.
+    sharedPool = this.pool;
   }
 
   async list(){
@@ -260,9 +265,17 @@ class PgStore {
 export async function createStore(){
   if (process.env.DATABASE_URL){
     const store = new PgStore(process.env.DATABASE_URL);
-    await store.init();
-    console.log('[store] postgres');
-    return store;
+    try {
+      await store.init();
+      console.log('[store] postgres');
+      return store;
+    } catch (e){
+      // Never take the site down over a bad database URL — boot on the JSON
+      // store (seed channels, accounts disabled) and say exactly what to fix.
+      console.error('[store] POSTGRES UNREACHABLE — falling back to the JSON file store.');
+      console.error('[store] check DATABASE_URL (rotated password? wrong pooler string?):', e.message);
+      await store.pool?.end().catch(() => {});
+    }
   }
   const file = path.join(path.dirname(fileURLToPath(import.meta.url)), 'channels.json');
   console.log('[store] json file:', file);
