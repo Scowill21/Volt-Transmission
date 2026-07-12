@@ -57,13 +57,20 @@ variant — reference only, don't extend it.
 ## Test (run after every change)
 
 ```bash
-npm i jsdom          # once
-node .smoke-test.cjs # headless run of every console path — keep it green
+npm i jsdom              # once
+node .smoke-test.cjs     # client: headless run of every console path (jsdom)
+node .smoke-server.cjs   # server: the paid control gate (in-process, auth-unconfigured)
+node .smoke-failclosed.cjs  # server: fail-closed on DB outage (boots a child w/ Supabase env set + DB down)
 ```
 
-It evals the whole page script (also catches syntax errors) and exercises
-scenes, uploads, transport, modes, action-key FX, and message stamping.
-Extend it when adding features.
+`.smoke-test.cjs` evals the whole page script (also catches syntax errors) and
+exercises scenes, uploads, transport, modes, action-key FX, message stamping,
+the paid-takeover client mirror, and Drive Mode. `.smoke-server.cjs` proves the
+server-side permission gate (non-holder denied, holder passes, admin bypass,
+forged-type rejected, no create-on-read). `.smoke-failclosed.cjs` guards the
+headline security invariant: with Supabase env set but Postgres down, the
+payload-identity escape hatch stays CLOSED (bids 401). Keep all three green and
+extend them when adding features.
 
 ## Deploy
 
