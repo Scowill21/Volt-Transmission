@@ -611,7 +611,7 @@
     </div>
   </div>
 
-<input type="file" id="fileIn" accept="audio/*" hidden>
+<input type="file" id="fileIn" accept="audio/*" multiple hidden>
 <div class="dropzone" id="dropzone" aria-hidden="true"><span id="dropLabel">Drop audio → assign to station</span></div>
 
 <script>
@@ -646,18 +646,24 @@ const STATIONS = [
 ];
 
 /* ── Preset music ─────────────────────────────────────────────────
-   Two ways to give a station its song (uploads override defaults):
+   Each Offline station is a PLAYLIST — one or more songs that play
+   through and wrap. Skip advances to the next song; auto-advances at
+   the end of each track. Two ways to fill a station's playlist
+   (uploads override the deployed defaults):
 
    1. DEFAULT TRACKS (everyone hears these): put audio files in an
-      `audio/` folder next to this page and reference them here. They
-      deploy with the site (e.g. on Render) and load for every visitor.
-        e.g.  ambient: 'audio/ambient.mp3',
+      `audio/` folder next to this page and reference them here — a
+      single path, OR an array for a multi-song playlist. They deploy
+      with the site (e.g. on Render) and load for every visitor.
+        one song:  ambient: 'audio/ambient.mp3',
+        playlist:  ambient: ['audio/a1.mp3', 'audio/a2.mp3'],
    2. BROWSER UPLOADS (operator-side): the ↥ button on a station card
-      — or dragging a file onto the page — assigns a song to a station.
-      Stored in THIS browser (IndexedDB), persists across reloads, and
-      overrides the default until cleared with ✕.                      */
+      — or dragging files onto the page — adds song(s) to a station's
+      playlist (pick several at once). Stored in THIS browser
+      (IndexedDB), persists across reloads, and overrides the defaults
+      until cleared with ✕.                                            */
 const PRESET_TRACKS = {
-  ambient: '',   // e.g. 'audio/ambient.mp3'
+  ambient: '',   // '' | 'audio/a.mp3' | ['audio/a1.mp3', 'audio/a2.mp3']
   pulse:   '',
   static:  '',
   drift:   '',
@@ -987,15 +993,7 @@ function setTransport(action){
 
   // PRESETS mode: transport drives the LOCAL player (uploaded/default songs).
   if (mode === 'presets'){
-    if (action === 'skip'){
-      const i = STATIONS.findIndex(s => s.id === currentStation);
-      const next = STATIONS[(i + 1) % STATIONS.length].id;
-      const input = document.getElementById(`st-${next}`);
-      if (input) input.checked = true;
-      selectStation(next);
-      pulse();
-      return;
-    }
+    if (action === 'skip'){ advanceTrack(1); pulse(); return; }   // next song in this station's playlist
     if (action === 'play') presetPlay(); else presetPause();
     return;                                   // player events sync the lit pair
   }
@@ -1194,7 +1192,10 @@ if (typeof fetch === 'function'){
 
 /* ── Local player + Web Audio analysis chain ── */
 const player = new Audio();
-player.loop = true; player.preload = 'auto'; player.crossOrigin = 'anonymous';
+player.preload = 'auto'; player.crossOrigin = 'anonymous';
+// loop is managed per-track: a single-song playlist loops seamlessly (loop=true);
+// a multi-song playlist uses loop=false so 'ended' can advance to the next track.
+let loadedTrack = '';   // url currently loaded into the element (station tracks change within a station)
 
 let actx = null, analyser = null, masterGain = null;
 function ensureAudio(){
@@ -1288,12 +1289,24 @@ function updateVU(){
 }
 
 /* ── Preset music library ──
-   tracks[id] = { name, url } — url is a blob: URL (browser upload) or a
-   path from PRESET_TRACKS (deployed default). Uploads persist in THIS
-   browser via IndexedDB and override the deployed default until cleared. */
-const tracks = {};
-let uploadTarget = null;
-let presetDb = null;
+   Each station is a PLAYLIST. Two sources per station:
+     defaults[id] = [{ name, url }]   from PRESET_TRACKS (deployed paths)
+     uploads[id]  = [{ name, url, file }]   browser uploads (blob: URLs)
+   The EFFECTIVE playlist = uploads if any, else defaults (uploads override,
+   as before — just for a whole list now). playIdx[id] tracks the current
+   song. Uploads persist per-station in IndexedDB as an array of blobs. */
+const defaults = {}, uploads = {}, playIdx = {};
+let uploadTarget = null, presetDb = null;
+
+STATIONS.forEach(s => {
+  const raw = PRESET_TRACKS[s.id];
+  const arr = (Array.isArray(raw) ? raw : (raw ? [raw] : [])).map(u => String(u).trim()).filter(Boolean);
+  defaults[s.id] = arr.map(u => ({ name: u.split('/').pop(), url: u }));
+  playIdx[s.id] = 0;
+});
+
+const playlist     = (id) => (uploads[id] && uploads[id].length) ? uploads[id] : (defaults[id] || []);
+const currentTrack = (id) => { const pl = playlist(id); return pl.length ? pl[(playIdx[id] || 0) % pl.length] : null; };
 
 try {
   const rq = indexedDB.open('td-preset-audio', 1);
@@ -1308,51 +1321,64 @@ function restoreUploads(){
       const g = store.get(s.id);
       g.onsuccess = () => {
         const r = g.result;
-        if (r && r.blob) setTrack(s.id, URL.createObjectURL(r.blob), r.name, { persistBlob: null });
+        const items = Array.isArray(r) ? r : (r && r.blob ? [r] : []);   // migrate old single-blob format
+        if (!items.length) return;
+        uploads[s.id] = items.filter(it => it.blob).map(it => ({ name: it.name, url: URL.createObjectURL(it.blob), file: it.blob }));
+        playIdx[s.id] = 0;
+        updateStationCard(s.id);
+        if (currentStation === s.id && mode === 'presets') presetTune(s.id);   // cue, don't autoplay on restore
       };
     });
   } catch (_) {}
 }
-function persistUpload(id, file){
-  try { presetDb && presetDb.transaction('tracks', 'readwrite').objectStore('tracks').put({ name: file.name, blob: file }, id); } catch (_) {}
+function persistUploads(id){
+  try {
+    const items = (uploads[id] || []).filter(u => u.file).map(u => ({ name: u.name, blob: u.file }));
+    presetDb && presetDb.transaction('tracks', 'readwrite').objectStore('tracks').put(items, id);
+  } catch (_) {}
 }
-function removeUpload(id){
+
+/* Add one or more songs to a station's playlist. items: [{ url, name, file }] */
+function addUploads(id, items){
+  if (!items.length) return;
+  if (!uploads[id]) uploads[id] = [];
+  const wasEmpty = uploads[id].length === 0;
+  uploads[id].push(...items);
+  persistUploads(id);
+  if (currentStation === id){
+    if (wasEmpty) playIdx[id] = 0;                               // switched defaults → uploads
+    updateStationCard(id);
+    presetTune(id, { autoplay: wasEmpty && mode === 'presets' });
+  } else updateStationCard(id);
+}
+/* Clear a station's uploaded playlist → revert to the deployed defaults. */
+function clearTracks(id){
+  (uploads[id] || []).forEach(u => u.url.startsWith('blob:') && URL.revokeObjectURL(u.url));
+  uploads[id] = []; playIdx[id] = 0;
   try { presetDb && presetDb.transaction('tracks', 'readwrite').objectStore('tracks').delete(id); } catch (_) {}
-}
-
-// Deployed defaults from PRESET_TRACKS (uploads restored above win later).
-STATIONS.forEach(s => {
-  const url = (PRESET_TRACKS[s.id] || '').trim();
-  if (url) tracks[s.id] = { name: url.split('/').pop(), url, isDefault: true };
-});
-
-function setTrack(id, url, name, opts = {}){
-  if (tracks[id] && tracks[id].url.startsWith('blob:')) URL.revokeObjectURL(tracks[id].url);
-  tracks[id] = { name, url };
-  if (opts.persistBlob) persistUpload(id, opts.persistBlob);
-  updateStationCard(id);
-  if (mode === 'presets' && currentStation === id) presetTune(id, { autoplay: !!opts.persistBlob });
-}
-function clearTrack(id){
-  if (tracks[id] && tracks[id].url.startsWith('blob:')) URL.revokeObjectURL(tracks[id].url);
-  delete tracks[id];
-  removeUpload(id);
-  const def = (PRESET_TRACKS[id] || '').trim();                 // fall back to the deployed default
-  if (def) tracks[id] = { name: def.split('/').pop(), url: def, isDefault: true };
   updateStationCard(id);
   if (currentStation === id) presetTune(id);
 }
 function updateStationCard(id){
   const chip = document.getElementById('trk-' + id);
   const clr  = stationsEl.querySelector(`[data-clear="${id}"]`);
-  const tr = tracks[id];
+  const pl = playlist(id);
   if (chip){
-    chip.textContent = tr ? '♪ ' + tr.name : 'no track — upload ↥';
-    chip.classList.toggle('loaded', !!tr);
+    if (!pl.length) chip.textContent = 'no tracks — upload ↥';
+    else {
+      const i = (playIdx[id] || 0) % pl.length;
+      chip.textContent = pl.length > 1 ? `♪ ${i + 1}/${pl.length} · ${pl[i].name}` : '♪ ' + pl[0].name;
+    }
+    chip.classList.toggle('loaded', pl.length > 0);
   }
-  if (clr) clr.hidden = !(tr && !tr.isDefault);                 // ✕ only for browser uploads
+  if (clr) clr.hidden = !(uploads[id] && uploads[id].length);    // ✕ only when uploads exist
 }
 STATIONS.forEach(s => updateStationCard(s.id));
+
+const AUDIO_RE = /\.(mp3|m4a|aac|ogg|oga|wav|flac|webm)$/i;
+const toItems  = (files) => [...files]
+  .filter(f => f.type.startsWith('audio') || AUDIO_RE.test(f.name))
+  .map(f => ({ url: URL.createObjectURL(f), name: f.name, file: f }));
 
 /* Upload / clear buttons live inside the station <label>: preventDefault
    stops the click from also re-tuning the radio underneath. */
@@ -1362,29 +1388,27 @@ stationsEl.addEventListener('click', (e) => {
   if (!up && !cl) return;
   e.preventDefault();
   if (up){ uploadTarget = up.dataset.upload; fileIn.click(); }
-  if (cl) clearTrack(cl.dataset.clear);
+  if (cl) clearTracks(cl.dataset.clear);
 });
 fileIn.addEventListener('change', () => {
-  const f = fileIn.files && fileIn.files[0];
-  if (f && uploadTarget) setTrack(uploadTarget, URL.createObjectURL(f), f.name, { persistBlob: f });
+  if (uploadTarget) addUploads(uploadTarget, toItems(fileIn.files || []));
   fileIn.value = ''; uploadTarget = null;
 });
 
-/* Drag-drop anywhere on the page → assign to the current station. */
+/* Drag-drop anywhere on the page → add to the current station's playlist. */
 let dragDepth = 0;
 window.addEventListener('dragenter', (e) => {
   if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
   e.preventDefault(); dragDepth++;
   const st = STATIONS.find(s => s.id === currentStation);
-  dropLb.textContent = `Drop audio → ${st ? st.name : 'station'}`;
+  dropLb.textContent = `Drop audio → ${st ? st.name : 'station'} playlist`;
   dropEl.classList.add('show');
 });
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('dragleave', () => { if (--dragDepth <= 0){ dragDepth = 0; dropEl.classList.remove('show'); } });
 window.addEventListener('drop', (e) => {
   e.preventDefault(); dragDepth = 0; dropEl.classList.remove('show');
-  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-  if (f && f.type.startsWith('audio')) setTrack(currentStation, URL.createObjectURL(f), f.name, { persistBlob: f });
+  addUploads(currentStation, toItems(e.dataTransfer?.files || []));
 });
 
 /* ── Playback routing ──
@@ -1407,11 +1431,19 @@ function liveTune(){
   const wasPlaying = !player.paused && player.src;
   const live = currentLiveAudio();
   if (live){
-    ensureAudio();
-    if (player.dataset.tid !== 'live:' + live.id){ player.src = live.url; player.dataset.tid = 'live:' + live.id; }
+    ensureAudio(); player.loop = false;
+    if (player.dataset.tid !== 'live:' + live.id){ player.src = live.url; loadedTrack = live.url; player.dataset.tid = 'live:' + live.id; }
     if (wasPlaying) player.play().catch(() => {});
   } else {                             // channel has no live audio — silence
-    player.pause(); player.removeAttribute('src'); player.dataset.tid = '';
+    player.pause(); player.removeAttribute('src'); player.dataset.tid = ''; loadedTrack = '';
+  }
+}
+// Load `tr` into the element under station `id` (reloads only when the track changes).
+function loadTrack(id, tr){
+  ensureAudio();
+  player.loop = playlist(id).length <= 1;      // single-song playlists loop seamlessly
+  if (player.dataset.tid !== id || loadedTrack !== tr.url){
+    player.src = tr.url; loadedTrack = tr.url; player.dataset.tid = id;
   }
 }
 function presetTune(id, opts = {}){
@@ -1419,36 +1451,57 @@ function presetTune(id, opts = {}){
   if (mode !== 'presets') return;
   const wasPlaying = !player.paused && player.src;
   if ((player.dataset.tid || '').startsWith('live:')){   // back from Live — drop the stream
-    player.pause(); player.removeAttribute('src'); player.dataset.tid = '';
+    player.pause(); player.removeAttribute('src'); player.dataset.tid = ''; loadedTrack = '';
   }
-  const tr = tracks[id];
+  if ((playIdx[id] || 0) >= playlist(id).length) playIdx[id] = 0;
+  const tr = currentTrack(id);
   if (tr){
-    ensureAudio();
-    if (player.dataset.tid !== id){ player.src = tr.url; player.dataset.tid = id; }
+    loadTrack(id, tr);
     if (wasPlaying || opts.autoplay) player.play().catch(() => {});
   } else {
-    player.pause(); player.removeAttribute('src'); player.dataset.tid = '';
+    player.pause(); player.removeAttribute('src'); player.dataset.tid = ''; loadedTrack = '';
   }
 }
 function presetPlay(){
   if (mode === 'live'){
     const live = currentLiveAudio();
     if (plane !== 'canvas' || !live) return;     // video plane: TD owns audio
-    ensureAudio();
-    if (player.dataset.tid !== 'live:' + live.id){ player.src = live.url; player.dataset.tid = 'live:' + live.id; }
+    ensureAudio(); player.loop = false;
+    if (player.dataset.tid !== 'live:' + live.id){ player.src = live.url; loadedTrack = live.url; player.dataset.tid = 'live:' + live.id; }
     player.play().catch(() => {});
     txEl.innerHTML = `LIVE AUDIO → <b>play</b> · ${live.id}`;
     return;
   }
-  const tr = tracks[currentStation];
+  const tr = currentTrack(currentStation);
   if (!tr){ txEl.innerHTML = `PRESET → <b>no track</b> · upload a song to ${currentStation}`; return; }
-  ensureAudio();
-  if (player.dataset.tid !== currentStation){ player.src = tr.url; player.dataset.tid = currentStation; }
+  loadTrack(currentStation, tr);
   player.play().catch(() => {});
   txEl.innerHTML = `PRESET → <b>play</b> · ${currentStation}`;
 }
 function presetPause(){ player.pause(); }
 function presetToggle(){ (player.paused || !player.src) ? presetPlay() : presetPause(); }
+
+/* Advance the current station's playlist by `d` (Skip = +1). Keeps playing
+   if it was playing; wraps at the ends; a 1-song playlist re-cues itself. */
+function advanceTrack(d = 1){
+  if (mode !== 'presets') return;
+  const pl = playlist(currentStation);
+  if (!pl.length) return;
+  playIdx[currentStation] = ((playIdx[currentStation] || 0) + d + pl.length) % pl.length;
+  updateStationCard(currentStation);
+  presetTune(currentStation);
+}
+// End of a track → next in the station's playlist (loop=true single songs never fire this).
+player.addEventListener('ended', () => {
+  const id = player.dataset.tid;
+  if (mode !== 'presets' || !id || id.startsWith('live:')) return;
+  const pl = playlist(id);
+  if (!pl.length) return;
+  playIdx[id] = ((playIdx[id] || 0) + 1) % pl.length;
+  updateStationCard(id);
+  const tr = currentTrack(id);
+  if (tr){ player.src = tr.url; loadedTrack = tr.url; player.play().catch(() => {}); }
+});
 
 player.addEventListener('play',  () => { if (mode === 'presets'){ transportState = 'playing'; syncTransport(); } });
 player.addEventListener('pause', () => { if (mode === 'presets'){ transportState = 'paused';  syncTransport(); } });

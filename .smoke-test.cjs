@@ -117,10 +117,12 @@ const script = html.match(/<script>([\s\S]*)<\/script>/)[1] +
      fxCount: FX.sparks.length + FX.shocks.length + (FX.flash > .5 ? 1 : 0),
      lastSent: window.__lastSent, sent: window.__sent,
      channel: channelState.channel + '/' + channelState.vj,
-     playerSrc: player.src || '', playerTid: player.dataset.tid || '',
+     playerSrc: player.src || '', playerTid: player.dataset.tid || '', loop: player.loop,
+     plLen: playlist(currentStation).length, playIdx: (playIdx[currentStation] || 0),
      chip: (id) => document.getElementById('trk-' + id).textContent });
    const __origSend = sendToTD;
    window.__resetFire = (a) => { lastFire[a] = 0; };   // step re-fires within the 70ms lockout
+   window.__ended = () => player.dispatchEvent(new Event('ended'));   // player is a page-scope const
    window.__lastSent = null;
    window.__sent = [];
    sendToTD = (p) => { window.__lastSent = { ...p, user: IDENTITY, ts: Date.now() };
@@ -160,19 +162,31 @@ step('preset play w/o track shows hint', () => {
   const tx = w.document.getElementById('tx').textContent;
   if (!/no track/.test(tx)) throw new Error('tx: ' + tx);
 });
-step('upload → track set + autoplay', () => {
-  w.eval(`setTrack('ambient', URL.createObjectURL(new Blob(['x'])), 'test-song.mp3', {})`);
-  if (!/test-song/.test(dbg().chip('ambient'))) throw new Error('chip: ' + dbg().chip('ambient'));
-  w.eval(`document.getElementById('st-ambient').checked = true; selectStation('ambient'); presetPlay()`);
+step('upload a 2-song playlist → queued, counted, autoplays', () => {
+  w.eval(`document.getElementById('st-ambient').checked = true; selectStation('ambient')`);
+  w.eval(`addUploads('ambient', [
+    { url: URL.createObjectURL(new Blob(['a'])), name: 'song-a.mp3', file: new Blob(['a']) },
+    { url: URL.createObjectURL(new Blob(['b'])), name: 'song-b.mp3', file: new Blob(['b']) },
+  ])`);
+  if (dbg().plLen !== 2) throw new Error('playlist length: ' + dbg().plLen);
+  if (!/1\/2.*song-a/.test(dbg().chip('ambient'))) throw new Error('chip: ' + dbg().chip('ambient'));
+  if (dbg().loop !== false) throw new Error('multi-song playlist should not loop the element');
   pump(20, 2000);
-  if (!dbg().playing) throw new Error('SIG.playing false after play');
+  if (!dbg().playing) throw new Error('SIG.playing false after upload autoplay');
 });
-step('transport pause/play/skip routing', () => {
+step('skip advances the playlist and wraps; station stays', () => {
   w.eval(`setTransport('pause')`);
   if (dbg().transportState !== 'paused') throw new Error('pause did not sync');
   w.eval(`setTransport('play')`);
   w.eval(`setTransport('skip')`);
-  if (dbg().currentStation !== 'pulse') throw new Error('skip went to: ' + dbg().currentStation);
+  if (dbg().currentStation !== 'ambient') throw new Error('skip changed station: ' + dbg().currentStation);
+  if (dbg().playIdx !== 1) throw new Error('skip did not advance: idx ' + dbg().playIdx);
+  if (!/2\/2.*song-b/.test(dbg().chip('ambient'))) throw new Error('chip after skip: ' + dbg().chip('ambient'));
+  w.eval(`setTransport('skip')`);              // wrap back to the top
+  if (dbg().playIdx !== 0) throw new Error('skip did not wrap: idx ' + dbg().playIdx);
+  // 'ended' auto-advances too
+  w.eval(`__ended()`);
+  if (dbg().playIdx !== 1) throw new Error('ended did not advance: idx ' + dbg().playIdx);
   pump(10, 3000);
 });
 step('Live mode: plane follows the channel, placeholder on video plane', () => {

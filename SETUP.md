@@ -49,16 +49,22 @@ Songs referenced in `PRESET_TRACKS` (below) need the page to be **served**
 
 ## Adding songs (admin side)
 
-Two ways — uploads override defaults.
+Each Offline station is a **playlist** — one or more songs that play through
+and wrap. **Skip** jumps to the next song; each track auto-advances at its
+end (a single-song playlist just loops). Two ways to fill a station's
+playlist — uploads override the deployed defaults.
 
 ### 1. Browser upload — instant, per-browser
 
-- Click **↥** on a station card and pick an audio file, **or** drag a file
-  onto the page (it's assigned to the currently selected station).
-- The song is stored in that browser (IndexedDB): it survives reloads and
-  restarts, plays from disk, and never uploads anywhere.
-- **✕** removes it (and reverts to the deployed default, if one exists).
-- Caveat: it lives only in that browser on that machine. Your uploads on
+- Click **↥** on a station card and pick **one or more** audio files (⌘/Ctrl-
+  click to multi-select), **or** drag files onto the page (they're added to
+  the currently selected station's playlist). Upload again to add more.
+- The card shows the queue — e.g. **♪ 2/3 · song.mp3** (now-playing of total).
+- Songs are stored in that browser (IndexedDB): they survive reloads and
+  restarts, play from disk, and never upload anywhere.
+- **✕** clears the station's whole uploaded playlist (reverting to the
+  deployed defaults, if any).
+- Caveat: uploads live only in that browser on that machine. Your uploads on
   your laptop won't appear for visitors on your Render URL.
 
 ### 2. Deployed defaults — permanent, for everyone
@@ -68,29 +74,31 @@ Two ways — uploads override defaults.
    td-stream-control/
      index.html
      audio/
-       ambient.mp3
+       ambient-1.mp3
+       ambient-2.mp3
        pulse.mp3
-       static.mp3
-       drift.mp3
+       …
    ```
-2. Point `PRESET_TRACKS` (top of the `<script>` in `index.html`) at them:
+2. Point `PRESET_TRACKS` (top of the `<script>` in `index.html`) at them —
+   a single path for one song, or an **array** for a multi-song playlist:
    ```js
    const PRESET_TRACKS = {
-     ambient: 'audio/ambient.mp3',
-     pulse:   'audio/pulse.mp3',
-     static:  'audio/static.mp3',
-     drift:   'audio/drift.mp3',
+     ambient: ['audio/ambient-1.mp3', 'audio/ambient-2.mp3'],  // a playlist
+     pulse:   'audio/pulse.mp3',                               // one song
+     static:  '',                                              // none
+     drift:   '',
    };
    ```
 3. Commit + push. Render redeploys and every visitor gets those songs.
 
 MP3, M4A/AAC, OGG, and WAV all work (MP3/M4A are the safe cross-browser
-picks). One song per station; the player loops it.
+picks). One song per station just loops; multiple cycle in order.
 
 ### Operating
 
 - **Play / Pause / Skip** drive the local player in Offline mode
-  (Skip advances to the next station). In Live: Play/Pause controls the
+  (Skip = next song in the current station's playlist; switch stations with
+  the cards or keys 1–4). In Live: Play/Pause controls the
   channel's live audio on the canvas plane, or sends `{type:'transport'}`
   to TouchDesigner on the video plane — and **Skip disappears** (you can't
   skip a broadcast).
