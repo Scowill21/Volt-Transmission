@@ -1565,16 +1565,19 @@ function drawFX(g, dt){
 }
 
 /* ── AMBIENT · a lofi bedroom at night ──
-   Lamp glow swells with BASS · monitor EQ + city windows ride MIDS ·
-   rain speed + dust motes ride TREBLE · a string-light flashes and the
-   cat's tail flicks on the SNARE · vinyl spins with overall level.   */
+   Lamp glow swells with BASS (string lights sway with it too) · monitor
+   EQ + city windows ride MIDS · rain speed + dust motes ride TREBLE ·
+   a string-light flashes and the cat's tail flicks on the SNARE (a hard
+   snare can send a shooting star past the window) · the cat's ears perk
+   on the KICK · vinyl spins and the monitor glow spills with LEVEL.   */
 function makeAmbient(){
   const stars = [...Array(46)].map(() => ({ x: rnd(154, 458), y: rnd(104, 290), r: rnd(.6, 1.5), p: rnd(TAU) }));
   const rain  = [...Array(44)].map(() => ({ x: rnd(152, 460), y: rnd(100, 410), s: rnd(150, 270), l: rnd(8, 17) }));
   const motes = [...Array(20)].map(() => ({ x: rnd(980, 1170), y: rnd(0, 330), s: rnd(14, 30), p: rnd(TAU) }));
   const BULB = ['#ffd27f', '#ff8fa3', '#8fd0ff', '#b5ff9e'];
   const qpt = (u, a, b, c) => (1-u)*(1-u)*a + 2*(1-u)*u*b + u*u*c;
-  let discA = 0, flashI = 2, lastSn = 0, tailKick = 0;
+  const shoot = { life: 0, x: 0, y: 0 };        // one star at a time — reused, never reallocated
+  let discA = 0, flashI = 2, lastSn = 0, tailKick = 0, earKick = 0, lastShoot = -9;
   return { draw(g, t, dt, S){
     let gr = g.createLinearGradient(0, 0, 0, 720);
     gr.addColorStop(0, '#251b31'); gr.addColorStop(.75, '#1b1322'); gr.addColorStop(1, '#130d19');
@@ -1615,6 +1618,20 @@ function makeAmbient(){
       if (d.y > 414){ d.y = 92; d.x = rnd(152, 460); }
       g.beginPath(); g.moveTo(d.x, d.y); g.lineTo(d.x - 2, d.y + d.l); g.stroke();
     }
+    // a hard snare can send a shooting star past the window (rare)
+    if (S.snare > .95 && t - lastShoot > 7 && Math.random() < .5){
+      lastShoot = t; shoot.life = 1; shoot.x = rnd(170, 300); shoot.y = rnd(112, 190);
+    }
+    if (shoot.life > 0){
+      shoot.life -= dt * 1.3; shoot.x += 250 * dt; shoot.y += 88 * dt;
+      g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = Math.max(0, shoot.life);
+      const tg = g.createLinearGradient(shoot.x - 46, shoot.y - 16, shoot.x, shoot.y);
+      tg.addColorStop(0, 'rgba(207,228,255,0)'); tg.addColorStop(1, 'rgba(255,255,255,.9)');
+      g.strokeStyle = tg; g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(shoot.x - 46, shoot.y - 16); g.lineTo(shoot.x, shoot.y); g.stroke();
+      g.fillStyle = '#ffffff'; g.fillRect(shoot.x - 1, shoot.y - 1, 2.4, 2.4);
+      g.restore();
+    }
     g.restore();
     g.fillStyle = '#332643'; g.fillRect(298, 100, 14, 312); g.fillRect(150, 248, 312, 14);
     g.fillStyle = '#3d2e50'; g.fillRect(124, 424, 364, 14);
@@ -1622,14 +1639,16 @@ function makeAmbient(){
     g.beginPath(); g.ellipse(174, 412, 11, 18, -.4, 0, TAU); g.fill();
     g.fillStyle = '#7a4a3a'; g.fillRect(154, 424, 26, 14);
 
-    // string lights — SNARE picks a bulb and flashes it
+    // string lights — SNARE picks a bulb and flashes it; the strand SWAYS with bass
     if (S.snare > .9 && t - lastSn > .2){ flashI = (Math.random() * 10) | 0; lastSn = t; tailKick = 1; }
     tailKick *= Math.pow(.5, dt * 6);
+    earKick = Math.max(earKick * Math.pow(.5, dt * 8), S.kick);
+    const swayY = 118 + Math.sin(t * .9) * (3 + S.bass * 24);
     g.strokeStyle = 'rgba(255,255,255,.16)'; g.lineWidth = 1.5;
-    g.beginPath(); g.moveTo(60, 40); g.quadraticCurveTo(640, 118, 1220, 36); g.stroke();
+    g.beginPath(); g.moveTo(60, 40); g.quadraticCurveTo(640, swayY, 1220, 36); g.stroke();
     for (let i = 0; i < 10; i++){
       const u = (i + .5) / 10;
-      const bx = qpt(u, 60, 640, 1220), by = qpt(u, 40, 118, 36) + 8;
+      const bx = qpt(u, 60, 640, 1220), by = qpt(u, 40, swayY, 36) + 8;
       const col = BULB[i % 4];
       const tw = .45 + .55 * Math.sin(t * 2 + i * 1.7);
       const boost = i === flashI ? S.snare * 1.3 : 0;
@@ -1655,6 +1674,13 @@ function makeAmbient(){
     }
     g.fillStyle = 'rgba(255,255,255,.045)';
     for (let y = 280; y < 436; y += 4) g.fillRect(800, y, 280, 1);
+    // the screen's light spills onto the desk with the music's LEVEL
+    g.save(); g.globalCompositeOperation = 'lighter';
+    const spill = g.createRadialGradient(940, 452, 8, 940, 452, 120 + S.level * 110);
+    spill.addColorStop(0, `rgba(127,216,200,${.08 + S.level * .2})`);
+    spill.addColorStop(1, 'rgba(127,216,200,0)');
+    g.fillStyle = spill; g.fillRect(760, 436, 360, 90);
+    g.restore();
     g.fillStyle = '#191521'; g.fillRect(925, 454, 30, 16); g.fillRect(880, 468, 120, 6);
     g.fillStyle = '#241b2b'; g.fillRect(830, 500, 200, 18);
     g.fillStyle = '#7a4a3a'; g.fillRect(700, 478, 34, 30); g.fillRect(732, 486, 10, 12);
@@ -1702,8 +1728,9 @@ function makeAmbient(){
     g.fillStyle = '#15121c';
     g.beginPath(); g.ellipse(400, 610, 46, 26, 0, 0, TAU); g.fill();
     g.beginPath(); g.arc(360, 576, 20, 0, TAU); g.fill();
-    g.beginPath(); g.moveTo(348, 562); g.lineTo(343, 541); g.lineTo(358, 552); g.closePath(); g.fill();
-    g.beginPath(); g.moveTo(366, 560); g.lineTo(372, 539); g.lineTo(379, 554); g.closePath(); g.fill();
+    const ep = earKick * 7;   // ears perk on the kick
+    g.beginPath(); g.moveTo(348, 562); g.lineTo(343, 541 - ep); g.lineTo(358, 552); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(366, 560); g.lineTo(372, 539 - ep); g.lineTo(379, 554); g.closePath(); g.fill();
     g.strokeStyle = '#15121c'; g.lineWidth = 7; g.lineCap = 'round';
     g.beginPath(); g.moveTo(444, 612);
     g.quadraticCurveTo(488, 596 + Math.sin(t * 2) * 14 - tailKick * 26, 470, 564 + Math.sin(t * 2.3) * 10 - tailKick * 18);
@@ -1724,9 +1751,11 @@ function makeAmbient(){
 }
 
 /* ── PULSE · Tokyo at night ──
-   Skyline blooms + streaks thicken with BASS · window grids ride MIDS ·
-   neon flicker rides TREBLE · a sign flashes white (and may re-letter)
-   on the SNARE · the frame shakes on the KICK · traffic with level.  */
+   Skyline blooms + streaks thicken with BASS (searchlight beams brighten
+   with it, sweeping faster on MIDS) · window grids ride MIDS · neon
+   flicker + drone strobes ride TREBLE · a sign flashes white (and may
+   re-letter) on the SNARE · the frame shakes and the wet road ripples
+   on the KICK · traffic with LEVEL · one tower is a giant equalizer. */
 function makePulse(){
   const KATA = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワンパルス東京';
   const kchar = () => KATA[(Math.random() * KATA.length) | 0];
@@ -1754,10 +1783,13 @@ function makePulse(){
     ch: [...Array(6)].map(kchar), ph: rnd(TAU), vert: Math.random() < .78,
   }));
   const ants = [2, 7, 12].map(i => midl[Math.min(i, midl.length - 1)]);
-  const cars = [];
-  let flashI = 0, lastSn = 0, scroll = 0;
+  const beams = [4, 9].map((i, k) => ({ b: midl[Math.min(i, midl.length - 1)], ph: rnd(TAU), dir: k ? -1 : 1, a: 0 }));
+  const eqTower = midl[Math.min(6, midl.length - 1)];
+  const cars = [], drones = [], puddles = [];
+  let flashI = 0, lastSn = 0, scroll = 0, lastKkP = 0;
   return { draw(g, t, dt, S){
     g.save();
+    const bars = S.bars(12);                     // one spectrum read — billboard + EQ tower share it
     if (S.kick > .05) g.translate(rnd(-1, 1) * 7 * S.kick, rnd(-1, 1) * 4 * S.kick);
     let gr = g.createLinearGradient(0, 0, 0, 720);
     gr.addColorStop(0, '#07031a'); gr.addColorStop(.6, '#140636'); gr.addColorStop(1, '#1c0a3e');
@@ -1784,6 +1816,17 @@ function makePulse(){
       g.fillRect(w.x, w.y, 7, 10);
     }
     g.globalAlpha = 1;
+    // one tower is a giant equalizer — each floor is a spectrum band
+    {
+      const fh = Math.min(eqTower.h - 14, 190) / 9;
+      for (let r = 0; r < 9; r++){
+        const v = bars[(r + 1) % 12];
+        g.globalAlpha = .10 + v * .75;
+        g.fillStyle = `hsl(${265 + r * 9},90%,${48 + v * 18}%)`;
+        g.fillRect(eqTower.x + 5, 600 - 8 - (r + 1) * fh, eqTower.w - 10, fh - 3);
+      }
+      g.globalAlpha = 1;
+    }
     g.strokeStyle = '#0c0620'; g.lineWidth = 3;
     ants.forEach((b, i) => {
       const cx = b.x + b.w / 2, topY = 600 - b.h;
@@ -1792,6 +1835,40 @@ function makePulse(){
         g.fillStyle = '#ff3b5c'; g.beginPath(); g.arc(cx, topY - 48, 3 + S.bass * 3.5, 0, TAU); g.fill();
       }
     });
+
+    // searchlights sweep the sky — MIDS drive the sweep, BASS the brightness
+    g.save(); g.globalCompositeOperation = 'lighter';
+    for (const s of beams){
+      const cx = s.b.x + s.b.w / 2, topY = 600 - s.b.h;
+      s.a += dt * (.22 + S.mid * .5) * s.dir;    // integrate phase — stays smooth as mids move
+      const ang = Math.sin(s.a + s.ph) * .52;
+      g.save(); g.translate(cx, topY); g.rotate(ang);
+      const bg2 = g.createLinearGradient(0, 0, 0, -560);
+      bg2.addColorStop(0, `rgba(200,225,255,${.10 + S.bass * .14})`);
+      bg2.addColorStop(1, 'rgba(200,225,255,0)');
+      g.fillStyle = bg2;
+      g.beginPath(); g.moveTo(-3, 0); g.lineTo(-34, -560); g.lineTo(34, -560); g.lineTo(3, 0); g.closePath(); g.fill();
+      g.restore();
+    }
+    g.restore();
+
+    // a drone crosses the sky now and then — its strobes ride the TREBLE
+    if (drones.length < 2 && Math.random() < dt * .09){
+      const east = Math.random() < .5;
+      drones.push({ x: east ? -30 : 1310, y: rnd(56, 250), v: (east ? 1 : -1) * rnd(46, 84), sp: rnd(1) });
+    }
+    for (let i = drones.length - 1; i >= 0; i--){
+      const d = drones[i]; d.x += d.v * (1 + S.level * .9) * dt;
+      if (d.x < -60 || d.x > 1340){ drones.splice(i, 1); continue; }
+      g.fillStyle = '#1a1030'; g.fillRect(d.x - 5, d.y - 1.5, 10, 3);
+      d.sp += dt * (4 + S.treb * 9);             // integrated strobe phase — treble sets the rate
+      if ((d.sp % 1) < .28){
+        g.save(); g.globalCompositeOperation = 'lighter';
+        g.fillStyle = d.v > 0 ? '#ff3b5c' : '#4fd8ff';
+        g.shadowColor = g.fillStyle; g.shadowBlur = 8 + S.treb * 10;
+        g.beginPath(); g.arc(d.x + (d.v > 0 ? 6 : -6), d.y, 2.2, 0, TAU); g.fill(); g.restore();
+      }
+    }
 
     // neon signs
     if (S.snare > .9 && t - lastSn > .18){
@@ -1819,7 +1896,6 @@ function makePulse(){
     g.save(); g.strokeStyle = '#4fd8ff'; g.lineWidth = 2;
     g.shadowColor = '#4fd8ff'; g.shadowBlur = 12 + S.bass * 22;
     g.strokeRect(880, 150, 240, 130); g.restore();
-    const bars = S.bars(12);
     for (let i = 0; i < 12; i++){
       const bh = 4 + bars[i] * 96;
       g.fillStyle = `hsl(${190 + i * 11},100%,${52 + bars[i] * 22}%)`;
@@ -1853,6 +1929,18 @@ function makePulse(){
       if (c.x < -140 || c.x > 1420) cars.splice(i, 1);
     }
 
+    // KICK slaps a ripple out of the wet road
+    if (S.kick > .9 && t - lastKkP > .22){ lastKkP = t; puddles.push({ x: rnd(120, 1160), y: rnd(652, 706), life: 1 }); }
+    for (let i = puddles.length - 1; i >= 0; i--){
+      const p = puddles[i]; p.life -= dt * 1.5;
+      if (p.life <= 0){ puddles.splice(i, 1); continue; }
+      const rr = (1 - p.life) * 74;
+      g.save(); g.globalCompositeOperation = 'lighter';
+      g.strokeStyle = '#8c78ff'; g.globalAlpha = p.life * .5; g.lineWidth = 1.6;
+      g.beginPath(); g.ellipse(p.x, p.y, rr, rr * .22, 0, 0, TAU); g.stroke();
+      g.restore();
+    }
+
     // bass bloom over the whole skyline
     g.save(); g.globalCompositeOperation = 'lighter';
     const bl = g.createRadialGradient(640, 660, 50, 640, 660, 620);
@@ -1868,7 +1956,10 @@ function makePulse(){
    lava-lamp blobs under soft aurora ribbons, with only a whisper of the
    old grain. BASS swells the blobs and pushes the flow · MIDS steer the
    drift · TREBLE shimmers fine motes · SNARE sends a soft ring through
-   the haze · KICK nudges the current. The oscilloscope is the wave.   */
+   the haze (and rattles the chrome text) · KICK nudges the current and
+   tears colored glitch slices across the field · a ghost spectrum
+   breathes behind everything · the Lissajous figure tightens with MIDS
+   and swells with BASS · the oscilloscope is the wave.                */
 function makeStatic(){
   const TONES = [[127,208,224], [155,127,224], [224,143,176], [127,224,190]];  // cyan · violet · rose · teal
   const blobs = [...Array(8)].map((_, i) => ({
@@ -1879,13 +1970,24 @@ function makeStatic(){
     r: rnd(170, 300),
   }));
   const motes = [...Array(50)].map(() => ({ x: rnd(1280), y: rnd(720), p: rnd(TAU), v: rnd(5, 16) }));
-  const rings = [];
-  let lastSn = 0, flow = 0;
+  const rings = [], glitches = [];
+  let lastSn = 0, flow = 0, lastKkG = 0, lissPh = 0;
   return { draw(g, t, dt, S){
     flow += dt * (.5 + S.kick * 2 + S.bass * .7);          // the current — kicks push it
     let gr = g.createLinearGradient(0, 0, 0, 720);
     gr.addColorStop(0, '#0a0e1c'); gr.addColorStop(.6, '#101426'); gr.addColorStop(1, '#0a0d18');
     g.fillStyle = gr; g.fillRect(0, 0, 1280, 720);
+
+    // ghost spectrum — the whole field stands on a breathing analog EQ
+    const bars = S.bars(24);
+    g.save(); g.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 24; i++){
+      const [cr, cg, cb] = TONES[i % 4];
+      const bh = 24 + bars[i] * 330;
+      g.fillStyle = `rgba(${cr},${cg},${cb},${.03 + bars[i] * .09})`;
+      g.fillRect(i * 53.4, 720 - bh, 44, bh);
+    }
+    g.restore();
 
     // drifting color blobs (Lissajous paths, breathing with bass)
     g.save(); g.globalCompositeOperation = 'lighter';
@@ -1960,13 +2062,48 @@ function makeStatic(){
     }
     g.stroke(); g.restore();
 
-    // chrome, kept quiet
+    // Lissajous figure — the lab's other scope. MIDS bend the ratio, BASS the size
+    lissPh += dt * (.5 + S.mid * 1.6);
+    g.save(); g.globalCompositeOperation = 'lighter';
+    g.strokeStyle = '#9bd8e8'; g.globalAlpha = .10 + S.level * .3;
+    g.lineWidth = 1.6; g.shadowColor = '#7fdcff';
+    g.shadowBlur = S.level > .35 ? 7 : 0;        // blur only when loud — idle frames stay cheap
+    g.beginPath();
+    const lfx = 2 + Math.sin(t * .06) * .9, lrx = 180 + S.bass * 170, lry = 105 + S.bass * 115;
+    for (let i = 0; i <= 88; i++){
+      const u = i / 88 * TAU;
+      const x = 640 + Math.sin(u * lfx + lissPh) * lrx;
+      const y = 360 + Math.sin(u * 3 + lissPh * .7) * lry;
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    }
+    g.stroke(); g.restore(); g.globalAlpha = 1;
+
+    // KICK tears colored glitch slices across the field
+    if (S.kick > .9 && t - lastKkG > .22){
+      lastKkG = t;
+      for (let k = 0; k < 3; k++)
+        glitches.push({ y: rnd(40, 680), h: rnd(2, 7), off: rnd(-46, 46), life: .4, tone: TONES[(Math.random() * 4) | 0] });
+    }
+    for (let i = glitches.length - 1; i >= 0; i--){
+      const gl = glitches[i]; gl.life -= dt * 2.4;
+      if (gl.life <= 0){ glitches.splice(i, 1); continue; }
+      const [cr, cg, cb] = gl.tone;
+      g.save(); g.globalCompositeOperation = 'lighter';
+      g.fillStyle = `rgba(${cr},${cg},${cb},${gl.life * .7})`;    // kept soft — this scene whispers
+      g.fillRect(gl.off * gl.life * 2.5, gl.y, 1280, gl.h);
+      g.fillStyle = `rgba(255,255,255,${gl.life * .25})`;
+      g.fillRect(-gl.off * gl.life * 2.5, gl.y + gl.h, 1280, 1);
+      g.restore();
+    }
+
+    // chrome, kept quiet — a hard snare rattles it
+    const jx = S.snare > .5 ? (Math.random() - .5) * S.snare * 8 : 0;
     g.font = '600 20px "IBM Plex Mono", monospace'; g.textBaseline = 'alphabetic';
     g.fillStyle = 'rgba(255,255,255,.5)'; g.textAlign = 'left';
-    if ((t % 1.4) < .9) g.fillText('▶ PLAY', 40, 54);
-    g.fillText('CH 03 · STATIC', 40, 690);
+    if ((t % 1.4) < .9) g.fillText('▶ PLAY', 40 + jx, 54);
+    g.fillText('CH 03 · STATIC', 40 - jx, 690);
     g.textAlign = 'right';
-    g.fillText(new Date().toTimeString().slice(0, 8), 1240, 54);
+    g.fillText(new Date().toTimeString().slice(0, 8), 1240 + jx, 54);
 
     // a whisper of the old grain + faint scanlines, for texture only
     drawGrain(g, .22);
@@ -1978,13 +2115,18 @@ function makeStatic(){
 
 /* ── DRIFT · open water under a low moon ──
    The whole swell surges with BASS · moon-path shimmer + drift speed
-   ride MIDS · crest sparkles ride TREBLE · SNARE drops a ripple ring
-   out on the water, KICK a quick one near the bow.                   */
+   ride MIDS · crest sparkles + plankton glow ride TREBLE · SNARE drops
+   a ripple ring out on the water (a hard one can send a shooting star
+   over it), KICK a quick ring near the bow — the biggest hits flash
+   heat lightning on the horizon · a buoy rides the actual swell, its
+   lamp swelling with LEVEL.                                          */
 function makeDrift(){
   const rowY = []; for (let r = 0; r <= 26; r++) rowY.push(384 + Math.pow(r / 26, 1.6) * 330);
   const sparks = [...Array(70)].map(() => ({ r: 4 + ((Math.random() * 22) | 0), u: Math.random(), p: rnd(TAU) }));
+  const plank = [...Array(26)].map(() => ({ u: Math.random(), r: 18 + ((Math.random() * 8) | 0), p: rnd(TAU) }));
+  const shoot = { life: 0, x: 0, y: 0 };        // one star at a time — reused
   const ripples = [];
-  let lastSn = 0, lastKk = 0;
+  let lastSn = 0, lastKk = 0, bolt = 0, boltX = 640, lastBolt = -9, lastShoot = -9;
   return { draw(g, t, dt, S){
     let gr = g.createLinearGradient(0, 0, 0, 720);
     gr.addColorStop(0, '#050d1f'); gr.addColorStop(.52, '#0a2233');
@@ -2009,6 +2151,36 @@ function makeDrift(){
     gr = g.createLinearGradient(0, 358, 0, 410);
     gr.addColorStop(0, 'rgba(160,220,255,0)'); gr.addColorStop(.5, 'rgba(160,220,255,.09)'); gr.addColorStop(1, 'rgba(160,220,255,0)');
     g.fillStyle = gr; g.fillRect(0, 358, 1280, 52);
+
+    // the biggest hits flash heat lightning on the horizon (rare)
+    if (S.kick > .95 && S.bass > .45 && t - lastBolt > 4 && Math.random() < .6){ lastBolt = t; bolt = 1; boltX = rnd(140, 760); }
+    bolt *= Math.pow(.5, dt * 7);
+    if (bolt > .02){
+      g.save(); g.globalCompositeOperation = 'lighter';
+      const lg2 = g.createRadialGradient(boltX, 352, 8, boltX, 352, 300);
+      lg2.addColorStop(0, `rgba(198,224,255,${bolt * .32})`);
+      lg2.addColorStop(1, 'rgba(198,224,255,0)');
+      g.fillStyle = lg2; g.fillRect(boltX - 320, 60, 640, 300);
+      g.restore();
+    }
+
+    // a hard snare can send a shooting star over the water (rare)
+    if (S.snare > .95 && t - lastShoot > 9 && Math.random() < .4){
+      lastShoot = t; shoot.life = 1; shoot.x = rnd(80, 640); shoot.y = rnd(46, 170);
+    }
+    if (shoot.life > 0){
+      shoot.life -= dt * 1.1; shoot.x += 300 * dt; shoot.y += 100 * dt;
+      const sa = Math.max(0, shoot.life);
+      g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = sa;
+      const tg = g.createLinearGradient(shoot.x - 60, shoot.y - 20, shoot.x, shoot.y);
+      tg.addColorStop(0, 'rgba(191,224,255,0)'); tg.addColorStop(1, 'rgba(255,255,255,.95)');
+      g.strokeStyle = tg; g.lineWidth = 1.8;
+      g.beginPath(); g.moveTo(shoot.x - 60, shoot.y - 20); g.lineTo(shoot.x, shoot.y); g.stroke();
+      g.fillStyle = '#ffffff'; g.fillRect(shoot.x - 1.2, shoot.y - 1.2, 2.8, 2.8);
+      g.globalAlpha = sa * .12;                    // faint glimmer on the water below it
+      g.fillStyle = '#dffaff'; g.fillRect(shoot.x - 8, 396, 16, 200);
+      g.restore(); g.globalAlpha = 1;
+    }
 
     // the wave field — amplitude surges with bass
     const amp = .55 + S.bass * 1.7;
@@ -2046,6 +2218,35 @@ function makeDrift(){
       g.fillRect(x - 1.3, y - 1.3, 2.6, 2.6); g.fillRect(x - 4, y - .5, 8, 1);
     }
     g.restore(); g.globalAlpha = 1;
+
+    // bioluminescent plankton in the near water — TREBLE glow, KICK flare
+    g.save(); g.globalCompositeOperation = 'lighter';
+    for (const p of plank){
+      const a = (.06 + S.treb * .42) * (.5 + .5 * Math.sin(t * 1.3 + p.p)) + S.kick * .3;
+      if (a < .04) continue;
+      const u = p.r / 26, x = p.u * 1280, y = waveY(x, p.r, u) + 3;
+      g.globalAlpha = Math.min(.85, a);
+      g.fillStyle = '#59ffd2';
+      g.fillRect(x - 1.2, y - 1.2, 2.4, 2.4); g.fillRect(x - 4, y - .4, 8, .9);
+    }
+    g.restore(); g.globalAlpha = 1;
+
+    // the buoy rides the actual swell — its lamp swells with LEVEL
+    {
+      const u = 14 / 26, by = waveY(320, 14, u);
+      const tilt = Math.atan2(waveY(338, 14, u) - waveY(302, 14, u), 36) * .8;
+      g.save(); g.translate(320, by - 4); g.rotate(tilt);
+      g.fillStyle = '#0a1a24'; g.beginPath(); g.ellipse(0, 4, 15, 5.5, 0, 0, TAU); g.fill();
+      g.fillStyle = '#122b38'; g.fillRect(-1.5, -14, 3, 15);
+      const on = (t % 1.8) < .14;                // a steady beacon — the water does the reacting
+      const lr2 = (5 + S.level * 9) * (on ? 2.4 : 1);
+      const bg3 = g.createRadialGradient(0, -17, .5, 0, -17, lr2);
+      bg3.addColorStop(0, `rgba(255,138,92,${on ? .9 : .3})`); bg3.addColorStop(1, 'rgba(255,138,92,0)');
+      g.save(); g.globalCompositeOperation = 'lighter';
+      g.fillStyle = bg3; g.beginPath(); g.arc(0, -17, lr2, 0, TAU); g.fill(); g.restore();
+      g.fillStyle = on ? '#ffb37a' : '#5a3a2c'; g.beginPath(); g.arc(0, -17, 2.2, 0, TAU); g.fill();
+      g.restore();
+    }
 
     // ripple rings on the hits
     if (S.snare > .9 && t - lastSn > .16){ lastSn = t; ripples.push({ x: rnd(140, 1140), row: 8 + ((Math.random() * 15) | 0), life: 1, big: true }); }

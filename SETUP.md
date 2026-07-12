@@ -21,10 +21,10 @@ The four standard stations and their visuals:
 
 | Station | Visual | Reacts how |
 | --- | --- | --- |
-| **Ambient** | Lofi bedroom at night | Lamp glow breathes with **bass** · monitor EQ + city windows ride **mids** · rain + dust ride **treble** · a string-light flashes and the cat's tail flicks on the **snare** |
-| **Pulse** | Tokyo neon skyline | Skyline bloom + light streaks with **bass** · window grids with **mids** · neon flicker with **treble** · a sign flashes white on the **snare** · frame shakes on the **kick** |
-| **Static** | Flowing analog haze | Drifting color blobs + aurora ribbons swell and speed up with **bass/kick** · drift steers with **mids** · fine motes shimmer with **treble** · a soft ring ripples through on the **snare** · the oscilloscope line is the actual waveform |
-| **Drift** | Open water under a low moon | The swell surges with **bass** · moon-path shimmer with **mids** · crest sparkles with **treble** · **snare** drops a ripple ring out on the water, **kick** a quick one up close |
+| **Ambient** | Lofi bedroom at night | Lamp glow breathes and the string lights sway with **bass** · monitor EQ + city windows ride **mids** · rain + dust ride **treble** · a string-light flashes and the cat's tail flicks on the **snare** (a hard one can send a shooting star past the window) · the cat's ears perk on the **kick** · vinyl spins and the monitor light spills onto the desk with **level** |
+| **Pulse** | Tokyo neon skyline | Skyline bloom, light streaks + searchlight beams with **bass** · window grids + searchlight sweep with **mids** · neon flicker + drone strobes with **treble** · a sign flashes white on the **snare** · frame shakes and the wet road ripples on the **kick** · one tower is a giant equalizer, traffic thickens with **level** |
+| **Static** | Flowing analog haze | Drifting color blobs, aurora ribbons + the Lissajous figure swell with **bass/kick** · drift + Lissajous ratio steer with **mids** · fine motes shimmer with **treble** · a soft ring ripples through and the chrome text rattles on the **snare** · **kick** tears soft glitch slices across the field · a ghost spectrum breathes behind everything · the oscilloscope line is the actual waveform |
+| **Drift** | Open water under a low moon | The swell surges with **bass** · moon-path shimmer with **mids** · crest sparkles + plankton glow with **treble** · **snare** drops a ripple ring out on the water (a hard one can send a shooting star over it), **kick** a quick ring up close — the biggest hits flash heat lightning on the horizon · a buoy rides the swell, its lamp swelling with **level** |
 
 Bass/snare/treble are read live from whatever song is playing (snare and kick
 are onset-detected — they fire on the hit, not on sustained level). The three
