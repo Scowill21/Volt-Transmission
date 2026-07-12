@@ -123,6 +123,8 @@ const script = html.match(/<script>([\s\S]*)<\/script>/)[1] +
    const __origSend = sendToTD;
    window.__resetFire = (a) => { lastFire[a] = 0; };   // step re-fires within the 70ms lockout
    window.__ended = () => player.dispatchEvent(new Event('ended'));   // player is a page-scope const
+   window.__setRole = (r) => { IDENTITY.role = r; };                  // IDENTITY is a page-scope const
+   window.__setVerified = (v) => { IDENTITY.verified = v; };          // only /api/me sets this for real
    window.__lastSent = null;
    window.__sent = [];
    sendToTD = (p) => { window.__lastSent = { ...p, user: IDENTITY, ts: Date.now() };
@@ -340,6 +342,50 @@ step('VU + station cards present', () => {
     if (!/Test Account · vj/.test(chip.textContent) || !chip.classList.contains('on'))
       throw new Error('account chip: "' + chip.textContent + '" on=' + chip.classList.contains('on'));
     pump(5, 6600);
+  });
+
+  step('paid takeover: queue renders + locks live actions for non-holders', () => {
+    w.eval(`setMode('live')`);
+    w.eval(`__setRole('listener')`);             // listeners are gated; vj/radio/admin bypass
+    const ch = dbg().channel.split('/')[0];      // page consts aren't reachable across evals
+    w.eval(`applyQueues({ channel: '${ch}',
+      control: { active: { userId: 'u-rex', name: 'Rex', endsAt: Date.now() + 90000 },
+                 queue: [{ userId: 'u-test-1', name: 'Test Account', position: 1 }] },
+      songs: [{ id: 1, title: 'Flim', name: 'Rex' }] })`);
+    const head = w.document.getElementById('qCtlHead').textContent;
+    if (!/Rex.*has the controls/.test(head)) throw new Error('head: ' + head);
+    if (!/1\. Test Account \(you\)/.test(w.document.getElementById('qCtlList').textContent))
+      throw new Error('queue list: ' + w.document.getElementById('qCtlList').textContent);
+    if (!/Leave the queue/.test(w.document.getElementById('qBid').textContent))
+      throw new Error('bid button: ' + w.document.getElementById('qBid').textContent);
+    if (!/Flim/.test(w.document.getElementById('qSongList').textContent)) throw new Error('song list missing request');
+    const cap1 = w.document.querySelector('.keycap[data-action="scene_1"]');
+    if (!cap1.classList.contains('locked')) throw new Error('live-action caps not locked');
+    const sentBefore = dbg().sent.length;
+    w.eval(`__resetFire('scene_2'); fireKey('scene_2')`);          // locked → nothing may leave
+    if (dbg().sent.length !== sentBefore) throw new Error('locked live action leaked a message');
+    if (!/has the controls/.test(w.document.getElementById('tx').textContent))
+      throw new Error('tx: ' + w.document.getElementById('tx').textContent);
+    // my slot starts → unlocked, actions flow again
+    w.eval(`applyQueues({ channel: '${ch}',
+      control: { active: { userId: 'u-test-1', name: 'Test Account', endsAt: Date.now() + 90000 }, queue: [] }, songs: [] })`);
+    if (cap1.classList.contains('locked')) throw new Error('caps still locked for the slot holder');
+    if (!/Release controls/.test(w.document.getElementById('qBid').textContent))
+      throw new Error('holder button: ' + w.document.getElementById('qBid').textContent);
+    w.eval(`__resetFire('scene_2'); fireKey('scene_2')`);
+    if (dbg().lastSent.action !== 'scene_2') throw new Error('holder action did not send');
+    // Privileged bypass must require a VERIFIED session: an unverified ?role=vj
+    // stays LOCKED (the server would deny it), a verified vj bypasses.
+    w.eval(`__setRole('vj'); __setVerified(false);
+      applyQueues({ channel: '${ch}',
+        control: { active: { userId: 'u-rex', name: 'Rex', endsAt: Date.now() + 90000 }, queue: [] }, songs: [] })`);
+    if (!cap1.classList.contains('locked')) throw new Error('unverified vj role wrongly bypassed the lock');
+    w.eval(`__setVerified(true); renderQueues()`);
+    if (cap1.classList.contains('locked')) throw new Error('verified vj should bypass the lock');
+    w.eval(`__setRole('operator'); __setVerified(false);
+      applyQueues({ channel: '${ch}', control: { active: null, queue: [] }, songs: [] });
+      setMode('presets')`);
+    pump(5, 6700);
   });
 
   pump(30, 6000);

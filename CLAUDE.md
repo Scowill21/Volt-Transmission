@@ -16,7 +16,11 @@ never CORS-blocked — scenes react to the live broadcast. Tier 4 slice: the
 **action bus** (`server/bus.js`, ws dep) — in Live mode the console publishes
 every stamped message to `wss://…/api/bus?channel=<id>`; VJ rigs subscribe
 (TD WebSocket DAT natively, OSC software via `tools/bus-to-osc.mjs`), and
-`POST /api/channels/:id/actions` injects test actions. `src/` +
+`POST /api/channels/:id/actions` injects test actions. Paid test tier
+(`server/paid.js`, Stripe stubbed at marked seams): per-channel control
+takeover queue — the bus verifies the session per socket and only passes
+the slot holder's Live 1–4 actions — plus song requests; queues render in
+the console (Live) and the host manages them in admin.html. `src/` +
 `react-app.html` is an archived React variant — reference only, don't
 extend it.
 

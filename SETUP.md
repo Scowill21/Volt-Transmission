@@ -394,6 +394,51 @@ takeover work.
 
 ---
 
+## Paid features — test tier (control bids + song requests)
+
+The **mechanics** of the paid products are live and testable; only the money
+is stubbed (each "bid" succeeds instantly — Stripe Checkout drops into the
+marked seams in `server/paid.js` when Tier 2b lands).
+
+**Control queue (the takeover product).** In Live mode the console shows a
+**Queue** panel. A signed-in user bids for the visual controls ($5 / 2 min
+display prices in `PAID`, `server/paid.js`); first bid takes the slot, later
+bids queue up. While a slot is active:
+
+- Everyone sees **who holds the controls and the countdown**; the holder's
+  button becomes *Release controls*, queued users see their position.
+- **Only the holder's Live 1–4 actions reach VJ rigs.** This is enforced on
+  the server: the bus binds the *verified session* to each socket at the
+  WebSocket handshake and drops non-holders' live actions (they get a
+  `denied` notice; the console also locks the caps visually). Signed-in
+  **vj / radio / admin** roles always bypass. The overlay actions
+  (Q/W/E/Space) and everything else stay open.
+- When the slot expires the next bidder is promoted automatically. The host
+  can end a slot early: `/admin.html` → Paid queues → **End control slot**.
+
+**Song requests.** The same panel takes paid song requests ($3 stub).
+Everyone sees the queue (top few); the host works it in `/admin.html` →
+Paid queues → **Played** / **Refund**.
+
+**Testing it:**
+
+- **Production** (auth configured): sign in two browsers via
+  `/account.html`, bid in one, watch the other lock. Anonymous visitors
+  can't bid ("sign in to bid…") and never bypass the lock.
+- **Local dev** (JSON store, auth degraded): the documented URL-param
+  escape hatch applies — requests may carry `{"user":{"id":…,"name":…}}`,
+  so you can simulate rival bidders with curl:
+  ```bash
+  curl -X POST localhost:8787/api/channels/volt-fm/control/request \
+    -H 'Content-Type: application/json' \
+    -d '{"minutes":0.1,"user":{"id":"u-ada","name":"Ada"}}'
+  ```
+  That path switches off automatically wherever real auth is configured.
+- Queues are **in-memory** at this tier (they reset on server restart);
+  the Tier 2b Stripe pass moves them into Postgres.
+
+---
+
 ## Sending your feed to the site (going live)
 
 Two kinds of feed, matching the two Live planes:

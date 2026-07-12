@@ -27,6 +27,12 @@ export const APPLY_ROLES = ['vj', 'radio'];
 
 export const authConfigured = () => !!(SUPABASE_URL && SUPABASE_KEY && getPool());
 
+// Is the local-dev URL-param / payload identity escape hatch allowed?
+// Keyed on INTENT (Supabase env absent), NOT on live DB reachability — so a
+// transient Postgres outage on a real deploy fails CLOSED (401 / deny) instead
+// of silently trusting client-declared identity.
+export const devIdentityAllowed = () => !(SUPABASE_URL && SUPABASE_KEY);
+
 /* ── GoTrue REST ─────────────────────────────────────────────────── */
 async function gotrue(path, { method = 'POST', token, body } = {}){
   const res = await fetch(`${SUPABASE_URL}/auth/v1${path}`, {
@@ -116,6 +122,22 @@ async function resolveUser(req, res){
       if (session.user?.id) return publicUser(await ensureProfile(session.user));
     } catch { setSession(req, res, null); }   // dead refresh token — clear
   }
+  return null;
+}
+
+/* Read-only session check for non-Express contexts (WebSocket upgrades,
+   paid-feature requests): verifies the volt_at cookie against GoTrue and
+   returns the profile, WITHOUT attempting the refresh-token dance (there is
+   no response to set cookies on). Expired token → null; the console's
+   normal /api/me polling refreshes the session out-of-band. */
+export async function userFromRequest(req){
+  if (!authConfigured()) return null;
+  const { volt_at } = readCookies(req);
+  if (!volt_at) return null;
+  try {
+    const user = await gotrue('/user', { method: 'GET', token: volt_at });
+    if (user?.id) return publicUser(await ensureProfile(user));
+  } catch { /* expired/invalid — treat as signed out */ }
   return null;
 }
 

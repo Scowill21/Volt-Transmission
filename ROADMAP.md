@@ -131,9 +131,17 @@ into TD's WebRTC DAT / OSC — your existing `{type:'key'}` schema already
 fits). **First slice shipped:** `server/bus.js` fans Live-mode actions to
 per-channel subscribers over `wss://…/api/bus?channel=<id>`; VJ rigs
 consume it via TD's WebSocket DAT or `tools/bus-to-osc.mjs` (OSC), and
-`POST /api/channels/:id/actions` injects test events. Still open here:
-viewers CONSUMING the bus (pooled FX from other people's keys), per-user
-rate limits tied to accounts, and the takeover product. Two modes worth building: **pooled** (everyone's hits spawn effects,
+`POST /api/channels/:id/actions` injects test events.
+**Second slice shipped — the TAKEOVER mechanics (test tier):**
+`server/paid.js` runs a per-channel control queue (bid → timed slot →
+countdown → auto-promote) with REAL enforcement: the bus binds the
+verified session to each socket at the WS handshake and only passes the
+slot holder's Live 1–4 actions (vj/radio/admin bypass); the console shows
+the queue, locks the caps, and a Paid-queues host view lives in
+admin.html. Song requests ride the same panel (queued → played/refund).
+Payment is stubbed at marked STRIPE seams — Tier 2b turns stubPay() into
+Checkout + webhook and moves the in-memory queues to Postgres. Still
+open here: pooled FX from other viewers' keys, account-tied rate limits. Two modes worth building: **pooled** (everyone's hits spawn effects,
 rate-limited per user) and **takeover** (one paid user holds the controls
 for N minutes — this is a *product*, pairs beautifully with Stripe from
 Tier 2). The console is already staged for it: keys 1–4 are the **live

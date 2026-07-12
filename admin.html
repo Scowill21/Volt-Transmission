@@ -94,6 +94,20 @@
   </section>
 
   <section>
+    <div class="eyebrow">Paid queues</div>
+    <div class="card" style="display:flex; flex-direction:column; gap:.6rem">
+      <div class="row">
+        <select id="pqChan" aria-label="Channel"></select>
+        <button id="pqRefresh" type="button">Refresh</button>
+        <button id="pqSkip" type="button" class="danger" title="End the current control slot; the next bidder takes over">End control slot</button>
+      </div>
+      <div class="slug" id="pqCtl">—</div>
+      <ul class="vjs" id="pqSongs"></ul>
+      <div class="hint">Control slots and song requests are the paid test tier (payment stubbed — see SETUP.md). Listeners' consoles update instantly; this panel auto-refreshes every few seconds (or hit Refresh). Mark requests played as you take them.</div>
+    </div>
+  </section>
+
+  <section>
     <div class="eyebrow">New channel</div>
     <form class="card row" id="createForm">
       <input id="cName" placeholder="name — e.g. Night Bus" required style="flex:2; min-width:10rem" />
@@ -207,6 +221,10 @@ async function refresh(){
         </form>
       </div>`).join('') || '<div class="empty card">no channels yet</div>';
     setStatus(channels.length + ' channel' + (channels.length === 1 ? '' : 's'));
+    const keep = $('pqChan').value;                                  // paid-queues picker
+    $('pqChan').innerHTML = channels.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+    if (channels.some(c => c.id === keep)) $('pqChan').value = keep;
+    refreshPaid();
   } catch (e){ setStatus('load failed: ' + e.message + ' — is the API running? (node server/index.js)', 'err'); }
 }
 
@@ -240,6 +258,47 @@ $('list').addEventListener('change', async (e) => {
   const id = e.target.closest('[data-id]').dataset.id;
   try { await api('PATCH', '/api/channels/' + id, { defaultScene: sel.value }); setStatus('default scene saved', 'ok'); }
   catch (err){ setStatus('failed: ' + err.message, 'err'); refresh(); }
+});
+
+/* ── Paid queues (test tier): host view ── */
+async function refreshPaid(){
+  const id = $('pqChan').value;
+  if (!id) return;
+  try {
+    const q = await (await fetch('/api/channels/' + encodeURIComponent(id) + '/queues')).json();
+    const a = q.control.active;
+    $('pqCtl').innerHTML = (a
+      ? `◉ <b>${esc(a.name)}</b> holds the controls until ${new Date(a.endsAt).toLocaleTimeString()}`
+      : 'controls open') +
+      (q.control.queue.length ? ' · queue: ' + q.control.queue.map(x => esc(x.name)).join(', ') : '');
+    const more = (q.songsQueued || q.songs.length) - q.songs.length;
+    $('pqSongs').innerHTML = (q.songs.map(s => `
+      <li data-song="${s.id}">
+        <span class="dot"></span>
+        <span>♪ ${esc(s.title)}</span>
+        <span class="use">${esc(s.name)}</span>
+        <button data-pq="played" style="margin-left:auto">Played</button>
+        <button data-pq="refund" class="danger">Refund</button>
+      </li>`).join('') || '<li class="empty">no queued requests</li>')
+      + (more > 0 ? `<li class="empty">+${more} more queued…</li>` : '');
+  } catch (e){ $('pqCtl').textContent = 'queues unavailable — ' + e.message; }
+}
+$('pqRefresh').onclick = refreshPaid;
+$('pqChan').onchange = refreshPaid;
+// Keep the host view live without a manual click (paid queues change mid-show).
+setInterval(() => { if ($('pqChan').value) refreshPaid(); }, 7000);
+$('pqSkip').onclick = async () => {
+  try { await api('POST', '/api/channels/' + $('pqChan').value + '/control/skip', {}); setStatus('control slot ended', 'ok'); refreshPaid(); }
+  catch (e){ setStatus('failed: ' + e.message, 'err'); }
+};
+$('pqSongs').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-pq]'); if (!btn) return;
+  const sid = e.target.closest('[data-song]').dataset.song;
+  try {
+    await api('POST', `/api/channels/${$('pqChan').value}/songs/${sid}`, { action: btn.dataset.pq });
+    setStatus('request ' + (btn.dataset.pq === 'played' ? 'marked played' : 'refunded'), 'ok');
+    refreshPaid();
+  } catch (err){ setStatus('failed: ' + err.message, 'err'); }
 });
 
 $('list').addEventListener('submit', async (e) => {

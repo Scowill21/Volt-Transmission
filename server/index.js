@@ -25,6 +25,13 @@
    Live-action bus (Tier 4 slice — server/bus.js):
      WS     /api/bus?channel=<id>[&as=vj]        subscribe + publish actions
      POST   /api/channels/:id/actions            inject a message by HTTP
+   Paid features, test tier (server/paid.js — Stripe stubbed at the seams):
+     GET    /api/channels/:id/queues             control + song queues (public)
+     POST   /api/channels/:id/control/request    bid for the visual controls
+     POST   /api/channels/:id/control/cancel     leave queue / release slot
+     POST   /api/channels/:id/songs/request      { title } song request
+     POST   /api/channels/:id/songs/:songId      { action: played|refund }  (admin)
+     POST   /api/channels/:id/control/skip       end current slot            (admin)
 */
 import express from 'express';
 import path from 'node:path';
@@ -33,6 +40,7 @@ import { fileURLToPath } from 'node:url';
 import { createStore, httpError } from './store.js';
 import { initAuth, mountAuth, authConfigured } from './auth.js';
 import { attachBus } from './bus.js';
+import { attachPaid } from './paid.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.PORT || 8787;
@@ -105,6 +113,9 @@ app.delete('/api/channels/:id/vjs/:vjId', requireAdmin, async (req, res, next) =
 
 /* ── accounts + roles (Tier 2a) ── */
 mountAuth(app, requireAdmin);
+
+/* ── paid features, test tier: control queue + song requests (server/paid.js) ── */
+attachPaid(app, requireAdmin);
 
 /* ── the site itself (console + admin + audio/) ── */
 app.use(express.static(ROOT, { extensions: ['html'] }));

@@ -153,6 +153,25 @@
   .console.mode-live [data-transport="skip"]{ display:none; }
   /* One consolidated actions line: transport + vol + key caps */
   .actions-row{ display:flex; flex-wrap:wrap; gap:.55rem 1.1rem; align-items:flex-end; }
+
+  /* ── Paid queues (Live mode): control takeover + song requests ── */
+  .console:not(.mode-live) .zone-queue{ display:none; }
+  .queuebox{ display:flex; flex-wrap:wrap; gap:1.1rem; align-items:flex-start; }
+  .qcol{ display:flex; flex-direction:column; gap:.4rem; min-width:15rem; }
+  .qhead{ font-size:.66rem; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-dim); }
+  .qhead b{ color:var(--signal); font-weight:600; letter-spacing:.06em; text-transform:none; }
+  .qlist{ display:flex; flex-direction:column; gap:.15rem; font-size:.66rem; color:var(--ink-dim); min-height:1em; }
+  .qlist .me{ color:var(--signal); }
+  .qsong{ display:flex; gap:.4rem; }
+  .qsong input{
+    flex:1; min-width:9rem; font-family:var(--mono); font-size:.7rem; color:var(--ink);
+    background:rgba(255,255,255,.02); border:1px solid var(--edge); border-radius:6px; padding:.35rem .55rem;
+  }
+  .qsong input::placeholder{ color:var(--signal-dim); }
+  .qsong input:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
+  /* live-action caps while someone else holds the controls */
+  .keycap.locked{ opacity:.35; }
+  .keycap.locked:hover{ border-color:var(--edge); color:var(--ink); }
   .eyebrow{
     display:flex; align-items:center; gap:.7rem;
     font-size:.62rem; letter-spacing:.34em; text-transform:uppercase; color:var(--ink-dim);
@@ -546,6 +565,24 @@
         <div class="eyebrow">Stations</div>
         <div class="stations" id="stations" role="radiogroup" aria-label="Choose a station"></div>
       </div>
+
+      <div class="zone zone-queue">
+        <div class="eyebrow">Queue</div>
+        <div class="queuebox">
+          <div class="qcol">
+            <div class="qhead" id="qCtlHead">controls open</div>
+            <div class="qlist" id="qCtlList" aria-live="polite"></div>
+            <button class="ctl-btn" id="qBid" type="button">Bid for control</button>
+          </div>
+          <div class="qcol">
+            <form class="qsong" id="qSongForm">
+              <input id="qSongIn" placeholder="request a song…" maxlength="120" aria-label="Song request" />
+              <button class="ctl-btn" type="submit" id="qSongBtn">Request</button>
+            </form>
+            <div class="qlist" id="qSongList" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="zone zone-actions">
@@ -719,6 +756,7 @@ const IDENTITY = (() => {
     id:   p.get('uid')  || 'anon-' + sid,
     name: p.get('name') || 'operator',
     role: p.get('role') || 'operator',   // listener | vj | radio | admin | operator
+    verified: false,   // true only after /api/me confirms a real signed-in session
     sid,
   };
 })();
@@ -731,9 +769,10 @@ if (typeof fetch === 'function'){
     .then(data => {
       const u = data && data.user;
       if (!u) return;
-      Object.assign(IDENTITY, { id: u.id, name: u.name || u.email, role: u.role });
+      Object.assign(IDENTITY, { id: u.id, name: u.name || u.email, role: u.role, verified: true });
       const chip = document.getElementById('acct');
       if (chip){ chip.textContent = `${IDENTITY.name} · ${IDENTITY.role}`; chip.classList.add('on'); }
+      renderQueues();   // (you)/lock markers key off the real account id
     })
     .catch(() => {});   // no API → URL-param / anonymous identity stands
 }
@@ -858,7 +897,12 @@ function busSync(){
     busWS = null;
     if (mode === 'live'){ clearTimeout(busTimer); busTimer = setTimeout(busSync, 3000); }
   };
-  busWS.onmessage = () => {};   // other viewers' actions arrive here — Tier 4 pooled FX hook
+  busWS.onmessage = (e) => {
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.type === 'queues') applyQueues(m);                       // live queue updates
+    else if (m.type === 'denied') txEl.innerHTML = `LIVE → <b>locked</b> · ${esc(m.reason || 'denied')}`;
+    // other viewers' actions also arrive here — Tier 4 pooled FX hook
+  };
 }
 
 /* ── Send: TD data channel + (in Live) the action bus; echoes to the TX readout ── */
@@ -902,6 +946,14 @@ function fireKey(action){
     blackoutOn = !blackoutOn;
     sendToTD({ type: 'key', action: 'blackout', state: blackoutOn ? 'on' : 'off' });
     applyBlackout();
+    return;
+  }
+
+  // Paid takeover (Live): while someone else holds the controls the live
+  // actions are locked here for honest UX — and enforced again on the bus,
+  // so bypassing this check still goes nowhere.
+  if (mode === 'live' && /^scene_[1-4]$/.test(action) && controlsLockedForMe()){
+    txEl.innerHTML = `LIVE → <b>locked</b> · ${esc(queueState.control.active.name)} has the controls — bid to take over`;
     return;
   }
 
@@ -1083,6 +1135,7 @@ function setMode(m){
     presetTune(currentStation);    // back to the tuned station's scene + song cue
     busSync();                     // Offline → leave the action bus
   }
+  renderQueues();                  // repaint the queue panel + drop any stale cap locks
   applyStage();
 }
 document.querySelectorAll('#macro .mbtn').forEach(b =>
@@ -1149,6 +1202,9 @@ function routeChannelVJ(){
   const c = channelById(channelState.channel);
   if (!c) return;
   busSync();                                     // join/switch the channel's action bus (Live only)
+  queueState = { control: { active: null, queue: [] }, songs: [], prices: queueState.prices };
+  renderQueues();                                // drop the previous channel's queue/locks at once
+  fetchQueues();                                 // pull the channel's control/song queues
   sendToTD({ type: 'channel', channel: c.id, vj: channelState.vj });
   if (mode !== 'live') return;                   // channels only drive Live mode
   const v = (c.vjs || []).find(v => v.id === channelState.vj);
@@ -1191,6 +1247,104 @@ if (typeof fetch === 'function'){
     })
     .catch(() => {});
 }
+
+/* ── Paid queues (test tier — Stripe stubbed server-side) ──
+   Live mode shows two per-channel queues everyone can see:
+     CONTROL — bid to hold the visual controls (keys 1–4) for a timed
+       slot; the server's bus only passes the holder's live actions, so
+       the lock here is real, not cosmetic. vj/radio/admin bypass.
+     REQUESTS — paid song requests; the host works the list in /admin.html.
+   State arrives via GET /queues on tune-in and {type:'queues'} bus
+   pushes after. Names/titles are user input — always escaped.        */
+let queueState = { control: { active: null, queue: [] }, songs: [],
+                   prices: { controlCents: 500, controlMinutes: 2, songCents: 300 } };
+
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+function iHaveControls(){ const a = queueState.control.active; return !!(a && a.userId === IDENTITY.id); }
+function iAmQueued(){ return queueState.control.queue.some(q => q.userId === IDENTITY.id); }
+function controlsLockedForMe(){
+  const a = queueState.control.active;
+  if (mode !== 'live' || !a || a.userId === IDENTITY.id) return false;
+  // Matches the server's bus gate exactly: only a VERIFIED vj/radio/admin
+  // session bypasses a takeover. IDENTITY.verified is set only after /api/me
+  // confirms a real account — an unverified ?role=vj URL param does NOT
+  // bypass (the server would deny it anyway, so the caps stay locked to
+  // match). Hosts override via their signed-in role or "End control slot".
+  return !(IDENTITY.verified && ['vj', 'radio', 'admin'].includes(IDENTITY.role));
+}
+
+function applyQueues(d){
+  if (!d || !d.control || (d.channel && d.channel !== channelState.channel)) return;   // stale / other channel
+  queueState = { control: d.control, songs: d.songs || [], prices: d.prices || queueState.prices };
+  renderQueues();
+}
+function fetchQueues(){
+  if (typeof fetch !== 'function' || !channelState.channel) return;
+  fetch(`/api/channels/${encodeURIComponent(channelState.channel)}/queues`)
+    .then(r => (r.ok ? r.json() : null)).then(applyQueues).catch(() => {});
+}
+function fmtLeft(endsAt){
+  const s = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+  return `${(s / 60) | 0}:${String(s % 60).padStart(2, '0')}`;
+}
+function renderQueues(){
+  const head = document.getElementById('qCtlHead');
+  if (!head) return;
+  const { active, queue } = queueState.control;
+  head.innerHTML = active
+    ? `◉ <b>${esc(active.name)}</b> has the controls · ${fmtLeft(active.endsAt)}`
+    : 'controls open — first bid takes them';
+  document.getElementById('qCtlList').innerHTML = queue.map(q =>
+    `<span class="${q.userId === IDENTITY.id ? 'me' : ''}">${q.position}. ${esc(q.name)}${q.userId === IDENTITY.id ? ' (you)' : ''}</span>`).join('');
+  document.getElementById('qBid').textContent =
+    iHaveControls() ? `Release controls · ${fmtLeft(active.endsAt)}` :
+    iAmQueued()     ? 'Leave the queue' :
+    `Bid for control · $${(queueState.prices.controlCents / 100).toFixed(0)} / ${queueState.prices.controlMinutes} min`;
+  document.getElementById('qSongBtn').textContent = `Request · $${(queueState.prices.songCents / 100).toFixed(0)}`;
+  document.getElementById('qSongList').innerHTML =
+    queueState.songs.slice(0, 4).map(s => `<span>♪ ${esc(s.title)} — ${esc(s.name)}</span>`).join('')
+    || '<span>no requests yet</span>';
+  const locked = controlsLockedForMe();          // the lock is enforced server-side too
+  keysEl.querySelectorAll('.keycap').forEach(cap => {
+    if (/^scene_[1-4]$/.test(cap.dataset.action || '')) cap.classList.toggle('locked', locked);
+  });
+}
+setInterval(() => { if (mode === 'live' && queueState.control.active) renderQueues(); }, 1000);  // countdown
+
+let qInFlight = false;   // one paid action at a time — blocks double-clicks / double-submits
+async function qPost(path, body, onOk, retried){
+  if (typeof fetch !== 'function' || !channelState.channel) return;
+  if (qInFlight && !retried) return;
+  qInFlight = true;
+  try {
+    const r = await fetch(`/api/channels/${encodeURIComponent(channelState.channel)}/${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      // `user` is the local-dev escape hatch — the server ignores it wherever
+      // real auth (Tier 2a sessions) is configured.
+      body: JSON.stringify({ ...body, user: { id: IDENTITY.id, name: IDENTITY.name } }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 401 && !retried){
+      // A tab left open past the access-token TTL 401s here. Re-hit /api/me
+      // (its refresh-token path rotates the cookies) and retry the action once
+      // before surfacing an error, so a live session doesn't drop mid-slot.
+      const me = await fetch('/api/me').then(x => (x.ok ? x.json() : null)).catch(() => null);
+      const u = me && me.user;
+      if (u) Object.assign(IDENTITY, { id: u.id, name: u.name || u.email, role: u.role, verified: true });
+      return await qPost(path, body, onOk, true);
+    }
+    if (!r.ok){ txEl.innerHTML = `QUEUE → <b>${esc(d.error || r.status)}</b>`; return; }
+    applyQueues(d); if (onOk) onOk();
+  } catch { /* network hiccup — leave the panel as-is */ }
+  finally { qInFlight = false; }
+}
+document.getElementById('qBid').addEventListener('click', () =>
+  qPost(`control/${(iHaveControls() || iAmQueued()) ? 'cancel' : 'request'}`, {}));
+document.getElementById('qSongForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const title = document.getElementById('qSongIn').value.trim();
+  if (title) qPost('songs/request', { title }, () => { document.getElementById('qSongIn').value = ''; });
+});
 
 /* ── Local player + Web Audio analysis chain ── */
 const player = new Audio();

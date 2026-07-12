@@ -18,11 +18,23 @@
    is rate-limited per socket. Subscribing is open for now; role-gating
    lands with the Tier 4 hardening. */
 import { WebSocketServer } from 'ws';
+import { userFromRequest } from './auth.js';
 
 const rooms = new Map();                       // channelId -> Set<ws>
 const RATE = { burst: 20, perSec: 8 };         // per-socket publish budget
+const ADMIN_KEY = process.env.ADMIN_KEY || 'dev';   // single source (mirrors index.js)
 
-function publish(channel, msg, exceptWs){
+// Control-plane message types the SERVER originates (paid.js broadcasts these).
+// Clients may never inject them — otherwise any peer could forge queue/lock
+// state or fake "denied" notices to the whole room.
+const RESERVED = new Set(['queues', 'denied']);
+
+// Pluggable permission check for LIVE ACTIONS (keys scene_1..4) — installed
+// by server/paid.js (takeover sessions). Returns { ok } or { ok:false, reason }.
+let keyGate = null;
+export function setKeyGate(fn){ keyGate = fn; }
+
+export function publish(channel, msg, exceptWs){
   const room = rooms.get(channel);
   if (!room || !room.size) return 0;
   const data = JSON.stringify(msg);
@@ -43,17 +55,45 @@ export function attachBus(server, app){
     if (!channel){ ws.close(4000, 'channel query param required'); return; }
     ws._tokens = RATE.burst;
     ws._alive = true;
+    ws._user = undefined;                      // undefined = session bind in flight
+    ws._pending = [];                          // messages that arrived before the bind settled
     if (!rooms.has(channel)) rooms.set(channel, new Set());
     rooms.get(channel).add(ws);
 
-    ws.on('pong', () => { ws._alive = true; });
-    ws.on('message', (data) => {
+    // Bind the VERIFIED account (session cookie on the upgrade request) to the
+    // socket — takeover permission checks trust this, never the payload. Until
+    // it resolves, gated messages are BUFFERED so a reconnecting slot holder's
+    // first keypress isn't wrongly denied during the bind round-trip.
+    userFromRequest(req)
+      .then(u => { ws._user = u || null; }, () => { ws._user = null; })
+      .then(() => { const q = ws._pending || []; ws._pending = null; for (const d of q) handleMessage(d); });
+
+    function handleMessage(data){
       if (ws._tokens <= 0) return;             // over budget — drop silently
       ws._tokens--;
       let msg;
       try { msg = JSON.parse(String(data).slice(0, 4096)); } catch { return; }
       if (!msg || typeof msg.type !== 'string') return;
+      if (RESERVED.has(msg.type)) return;      // clients can't forge server control-plane types
+      // Takeover gating: live actions only pass for whoever holds the controls.
+      if (keyGate && msg.type === 'key' && /^scene_[1-4]$/.test(msg.action || '')){
+        const verdict = keyGate(channel, ws, msg);
+        if (!verdict.ok){
+          try { ws.send(JSON.stringify({ type: 'denied', action: msg.action, reason: verdict.reason })); } catch {}
+          return;
+        }
+      }
       publish(channel, msg, ws);
+    }
+
+    ws.on('pong', () => { ws._alive = true; });
+    ws.on('message', (data) => {
+      // Still binding? Buffer (bounded by the burst budget) and replay on bind.
+      if (ws._user === undefined && ws._pending){
+        if (ws._pending.length < RATE.burst) ws._pending.push(data);
+        return;
+      }
+      handleMessage(data);
     });
     ws.on('close', () => {
       const room = rooms.get(channel);
@@ -81,6 +121,14 @@ export function attachBus(server, app){
     const msg = req.body;
     if (!msg || typeof msg.type !== 'string')
       return res.status(400).json({ error: 'body must be a message with a "type"' });
+    if (RESERVED.has(msg.type))
+      return res.status(400).json({ error: 'reserved (server-originated) message type' });
+    // Same takeover gate as the socket path (X-Admin-Key acts as privileged).
+    if (keyGate && msg.type === 'key' && /^scene_[1-4]$/.test(msg.action || '')){
+      const admin = req.get('x-admin-key') === ADMIN_KEY;
+      const verdict = keyGate(req.params.id, { _user: admin ? { role: 'admin' } : null }, msg);
+      if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
+    }
     const delivered = publish(req.params.id, { ts: Date.now(), ...msg }, null);
     res.json({ ok: true, delivered });
   });
