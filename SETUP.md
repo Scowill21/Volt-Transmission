@@ -473,7 +473,8 @@ Two things to know about **Live mode on a hosted page**:
 
 ## Verifying / dev notes
 
-- Open the page: Offline mode, Ambient's bedroom scene idling. Add a song,
+- Open the page: Offline mode, Ambient's bedroom scene idling. Add a song
+  (or several — each station is a playlist),
   press Play — the VU meters and the room should move with it.
 - Click **Live** and pick a "· live" VJ: music cuts, "awaiting signal / TRANSMISSION"
   holds until TD connects.

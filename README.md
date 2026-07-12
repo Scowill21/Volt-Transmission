@@ -283,12 +283,14 @@ This is what loads at `localhost`. A self-contained, single-file app (no build
 step — open it directly or serve the folder). It's a broadcast/tuner console
 with **two modes** (see **[SETUP.md](SETUP.md)** for the full operator guide):
 
-- **Presets** — each station has a built-in audio-reactive visual (Ambient →
-  lofi bedroom, Pulse → Tokyo neon, Static → broadcast noise, Drift → open
-  water) driven by live bass / snare-onset / treble analysis of songs you add:
-  per-station browser uploads (↥ / drag-drop, persisted in IndexedDB) or
-  deployed defaults via `PRESET_TRACKS` + an `audio/` folder.
-- **Live Station** — the full-screen TD WebRTC stream; holds the "awaiting
+- **Offline** — each station has a built-in audio-reactive visual (Ambient →
+  lofi bedroom, Pulse → Tokyo neon, Static → analog haze, Drift → open
+  water) driven by live bass / snare-onset / treble analysis of that
+  station's **playlist**: browser uploads (↥ / drag-drop, multiple files,
+  persisted in IndexedDB; Skip = next song) or deployed defaults via
+  `PRESET_TRACKS` (string or array) + an `audio/` folder.
+- **Live** — the channel world: CH/VJ menu, live channel audio through the
+  server relay, or the full-screen TD WebRTC stream holding the "awaiting
   signal / TRANSMISSION" screen until TouchDesigner connects.
 
 Plus the station preset bank, labeled key caps, transport + volume, a

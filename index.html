@@ -612,7 +612,7 @@
   </div>
 
 <input type="file" id="fileIn" accept="audio/*" multiple hidden>
-<div class="dropzone" id="dropzone" aria-hidden="true"><span id="dropLabel">Drop audio → assign to station</span></div>
+<div class="dropzone" id="dropzone" aria-hidden="true"><span id="dropLabel">Drop audio → add to station playlist</span></div>
 
 <script>
 /* ════════════════════════════════════════════════════════════════
@@ -679,8 +679,8 @@ const PRESET_TRACKS = {
        scene ids: ambient | pulse | static | drift.
      vj.uses: { plane:'scene', scene:<id> }  → browser-rendered plane
               { plane:'stream', peer:'' }    → live/TD plane (per-VJ
-                stream routing lands in Tier 3b; today it flips the
-                console to Live Station).
+                stream routing lands in Tier 3b; today it switches Live
+                mode to the TD video plane).
    Seed data below is placeholder — rename freely.                   */
 const CHANNELS = [
   { id: 'volt-fm', name: 'Volt FM', slug: 'volt-fm', defaultScene: 'ambient',
@@ -965,10 +965,10 @@ STATIONS.forEach((s, i) => {
   label.innerHTML =
     `<span class="tuner" aria-hidden="true"></span>` +
     `<span class="meta"><span class="name">${s.name}</span><span class="note">${s.note}</span>` +
-    `<span class="track" id="trk-${s.id}">no track — upload ↥</span></span>` +
+    `<span class="track" id="trk-${s.id}">no tracks — upload ↥</span></span>` +
     `<span class="st-actions">` +
-    `<button type="button" class="st-icon" data-upload="${s.id}" title="Upload a song to ${s.name} (this browser)">↥</button>` +
-    `<button type="button" class="st-icon" data-clear="${s.id}" title="Clear uploaded song" hidden>✕</button>` +
+    `<button type="button" class="st-icon" data-upload="${s.id}" title="Add songs to ${s.name}'s playlist (this browser; pick several at once)">↥</button>` +
+    `<button type="button" class="st-icon" data-clear="${s.id}" title="Clear this station's uploaded playlist" hidden>✕</button>` +
     `</span>`;
 
   wrap.append(input, label);
@@ -1098,15 +1098,17 @@ function applyStage(){
   consoleEl.classList.toggle('mode-live', mode === 'live');
 }
 
-/* ── Channel / VJ dropdowns (ROADMAP Tier 1a) ──
+/* ── Channel / VJ dropdowns (Live mode only) ──
    Pick a channel, then who's driving it. Routing keeps the two visual
-   planes separate (ROADMAP finding #1):
-     "House" / scene VJ → presets plane: tune the mapped canvas scene
-     stream VJ          → live plane: flip to Live Station (the actual
-                          per-VJ stream selection arrives with Tier 3b)
-   Every pick sends { type:'channel', channel, vj } to TD, then the
-   station/mode messages from the routing follow — so TD always hears
-   WHY the mode/station changed before it changes.                    */
+   planes separate (ROADMAP finding #1) WITHIN Live mode:
+     "House" / scene VJ → canvas plane: the channel's scene, reacting to
+                          its live audio stream (if it has one)
+     stream VJ          → video plane: the TD/WebRTC feed (per-VJ stream
+                          selection arrives with Tier 3b)
+   Picks made in Offline just update the selection (and tell TD) — they
+   apply when Live mode is entered. Every pick sends
+   { type:'channel', channel, vj } to TD before the scene/plane messages
+   it causes — so TD always hears WHY before the change.              */
 const channelSel = document.getElementById('channelSelect');
 const vjSel      = document.getElementById('vjSelect');
 let channelState = { channel: CHANNELS[0]?.id ?? null, vj: 'house' };
@@ -1473,7 +1475,7 @@ function presetPlay(){
     return;
   }
   const tr = currentTrack(currentStation);
-  if (!tr){ txEl.innerHTML = `PRESET → <b>no track</b> · upload a song to ${currentStation}`; return; }
+  if (!tr){ txEl.innerHTML = `PRESET → <b>no tracks</b> · add songs to ${currentStation} with ↥ or drag-drop`; return; }
   loadTrack(currentStation, tr);
   player.play().catch(() => {});
   txEl.innerHTML = `PRESET → <b>play</b> · ${currentStation}`;
