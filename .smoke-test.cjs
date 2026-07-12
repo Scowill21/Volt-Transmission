@@ -119,12 +119,15 @@ const script = html.match(/<script>([\s\S]*)<\/script>/)[1] +
      channel: channelState.channel + '/' + channelState.vj,
      playerSrc: player.src || '', playerTid: player.dataset.tid || '', loop: player.loop,
      plLen: playlist(currentStation).length, playIdx: (playIdx[currentStation] || 0),
+     drive: driveOn, frames, sceneFrames, signalFrames,
+     driveSuggest: !document.getElementById('driveSuggest').hidden,
      chip: (id) => document.getElementById('trk-' + id).textContent });
    const __origSend = sendToTD;
    window.__resetFire = (a) => { lastFire[a] = 0; };   // step re-fires within the 70ms lockout
    window.__ended = () => player.dispatchEvent(new Event('ended'));   // player is a page-scope const
    window.__setRole = (r) => { IDENTITY.role = r; };                  // IDENTITY is a page-scope const
    window.__setVerified = (v) => { IDENTITY.verified = v; };          // only /api/me sets this for real
+   window.__forceDrivePhone = (v) => { driveForce = v; syncDriveSuggest(); };  // v: true|false|null(auto)
    window.__lastSent = null;
    window.__sent = [];
    sendToTD = (p) => { window.__lastSent = { ...p, user: IDENTITY, ts: Date.now() };
@@ -290,6 +293,86 @@ step('VU + station cards present', () => {
   for (const id of ['vuBass', 'vuSnr', 'vuTrb', 'macro', 'dropzone', 'fileIn']) {
     if (!w.document.getElementById(id)) throw new Error('missing #' + id);
   }
+});
+step('Drive Mode: phone-gated, audio-only, hides both planes + restores on exit', () => {
+  // land in a known Offline state with a REAL playing track ('ambient' has the
+  // 2-song upload from the earlier step; leave it playing).
+  w.eval(`setMode('presets'); document.getElementById('st-ambient').checked = true; selectStation('ambient'); presetPlay()`);
+  pump(10, 7000);
+  if (!dbg().playing) throw new Error('setup: ambient not playing');
+  const mode0 = dbg().mode, plane0 = dbg().plane;
+
+  // jsdom is NOT a phone → suggestion hidden and enterDrive() is a no-op.
+  if (dbg().driveSuggest) throw new Error('suggestion shown on non-phone');
+  w.eval(`enterDrive()`);
+  if (dbg().drive) throw new Error('Drive engaged on a non-phone');
+
+  // force phone eligibility → the one-tap suggestion appears.
+  w.eval(`__forceDrivePhone(true)`);
+  if (!dbg().driveSuggest) throw new Error('suggestion not shown when phone-eligible');
+
+  // open Drive Mode.
+  const sf0 = dbg().sceneFrames, fr0 = dbg().frames, sig0 = dbg().signalFrames;
+  w.eval(`enterDrive()`);
+  if (!dbg().drive) throw new Error('Drive did not engage');
+  if (!w.document.getElementById('vis').hidden) throw new Error('canvas not hidden in Drive');
+  if (w.document.getElementById('drive').hidden) throw new Error('Drive overlay not visible');
+  if (w.document.getElementById('stream').style.display !== 'none') throw new Error('video plane not hidden');
+  if (w.document.getElementById('placeholder').style.display !== 'none') throw new Error('placeholder not hidden');
+  if (dbg().driveSuggest) throw new Error('suggestion still shown while Drive is on');
+  if (!/ambient/i.test(w.document.getElementById('driveStation').textContent))
+    throw new Error('station text: ' + w.document.getElementById('driveStation').textContent);
+  if (!/song-/.test(w.document.getElementById('driveTrack').textContent))
+    throw new Error('track text: ' + w.document.getElementById('driveTrack').textContent);
+  if (!dbg().playing || dbg().paused) throw new Error('audio not playing in Drive');
+
+  // canvas draw AND the per-frame analyser/VU work are gated (battery) but the
+  // RAF loop stays alive. signalFrames is frozen ONLY by the driveOn gate, so it
+  // uniquely proves the gate fires (unlike sceneFrames, which visEl.hidden also freezes).
+  pump(12, 7200);
+  if (dbg().sceneFrames !== sf0) throw new Error('scene still drawing in Drive (not gated)');
+  if (dbg().signalFrames !== sig0) throw new Error('analyser/VU still running in Drive (battery gate not firing)');
+  if (dbg().frames <= fr0) throw new Error('RAF stalled in Drive');
+
+  // the big play/pause routes through the existing transport.
+  w.eval(`document.getElementById('driveToggle').click()`);  // playing → pause
+  if (!dbg().paused) throw new Error('Drive pause failed');
+  w.eval(`document.getElementById('driveToggle').click()`);  // → play
+  pump(4, 7400);
+  if (dbg().paused) throw new Error('Drive resume failed');
+
+  // exit → both planes + prior mode/plane restored, per-frame work resumes.
+  const sf1 = dbg().sceneFrames, sig1 = dbg().signalFrames;
+  w.eval(`exitDrive()`);
+  if (dbg().drive) throw new Error('Drive still on after exit');
+  if (dbg().mode !== mode0 || dbg().plane !== plane0) throw new Error('mode/plane not restored: ' + dbg().mode + '/' + dbg().plane);
+  if (w.document.getElementById('vis').hidden) throw new Error('canvas still hidden after exit');
+  if (!w.document.getElementById('drive').hidden) throw new Error('Drive overlay stuck after exit');
+  pump(12, 7600);
+  if (dbg().sceneFrames <= sf1) throw new Error('scene draw did not resume after exit');
+  if (dbg().signalFrames <= sig1) throw new Error('analyser/VU did not resume after exit');
+
+  // dismiss the suggestion → it collapses to the entry pill (never stranded).
+  w.eval(`__forceDrivePhone(true); document.getElementById('driveDismiss').click()`);
+  if (dbg().driveSuggest) throw new Error('suggestion still shown after dismiss');
+  if (w.document.getElementById('drivePill').hidden) throw new Error('entry pill not shown after dismiss');
+
+  // Live VIDEO channel: a video channel's audio is the TD stream, not the local
+  // player. Entering Drive there must NOT emit a transport command to TD/bus, and
+  // the big toggle is disabled (nothing local to control).
+  w.eval(`setMode('live'); selectChannel('volt-fm'); selectVJ('nova')`);   // VJ Nova = stream → video plane
+  pump(4, 7700);
+  if (dbg().plane !== 'video') throw new Error('expected video plane for stream VJ, got ' + dbg().plane);
+  const txBefore = dbg().sent.filter(m => m.type === 'transport').length;
+  w.eval(`enterDrive()`);
+  if (!dbg().drive) throw new Error('Drive did not engage on a video channel');
+  if (dbg().sent.filter(m => m.type === 'transport').length !== txBefore)
+    throw new Error('entering Drive on a video channel emitted a transport command to the broadcast');
+  if (!w.document.getElementById('driveToggle').disabled) throw new Error('Drive toggle not disabled on a video channel');
+  w.eval(`exitDrive()`);
+
+  // restore a clean desktop env for the async steps that follow.
+  w.eval(`__forceDrivePhone(null); setMode('presets'); presetPause()`);
 });
 
 // The /api/channels fetch resolves through microtasks, and everything above is

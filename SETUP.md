@@ -32,6 +32,35 @@ small meters in the footer (BAS / SNR / TRB) show the live signal.
 
 ---
 
+## Drive Mode (phone users)
+
+**Drive Mode** is a stripped-down, audio-only view for listening on a phone —
+in the car, in a pocket, anywhere you don't want the visuals. It **only appears
+on phones**; desktop never sees it.
+
+- On a phone, a **"Drive Mode?"** bar auto-suggests it. Tap **Start** to enter,
+  or **✕** to dismiss (a small **◐ Drive** pill stays in the corner so you can
+  enter later — you're never stranded).
+- Inside, the screen is just: the **station/channel name**, the **current
+  track**, one big **play/pause**, a **volume** slider, and **Exit Drive Mode**.
+  The reactive canvas scenes are **switched off** — easier on the eyes and the
+  battery. It keeps playing whatever's tuned: your Offline station's playlist,
+  or a Live channel's broadcast.
+- It changes nothing else — exit and you're back exactly where you were
+  (same mode, channel, and audio still playing).
+
+Notes for testing/ops:
+- **It's phone-only by design.** Detection is `pointer:coarse` + `hover:none` +
+  a ≤500px short side (so phones qualify in either orientation; tablets and
+  desktops don't). A desktop browser — even resized narrow — won't show it,
+  because a mouse/trackpad reports a *fine* pointer.
+- To preview it on a desktop, add **`?drive=1`** to the URL (forces eligibility;
+  `?drive=0` forces it off). This is the only persisted lever — there's no
+  stored setting (the console keeps its no-localStorage rule), so a dismissal
+  just re-suggests on the next load.
+
+---
+
 ## Running it locally
 
 Two ways, depending on whether you want the channels API:

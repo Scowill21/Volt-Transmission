@@ -494,6 +494,75 @@
   @media (prefers-reduced-motion:reduce){
     *{ animation:none !important; transition:none !important; }
   }
+
+  /* ── Drive Mode: phone-only, audio-only ───────────────────────────────
+     A full-screen minimal view for phone users — kills the canvas scenes
+     (battery + eyes-on-road) and shows only station/track + a big play/pause
+     + volume. Auto-suggested on phones, easily dismissed; desktop never sees
+     any of it (gated in JS on isPhone()). Styled from the amber tokens. */
+  .drive{
+    position:fixed; inset:0; z-index:90; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:clamp(1.1rem,4.5vh,2.4rem);
+    text-align:center; color:var(--ink); -webkit-user-select:none; user-select:none;
+    padding:max(1.2rem, env(safe-area-inset-top)) 1.4rem max(1.2rem, env(safe-area-inset-bottom));
+    background:
+      radial-gradient(120% 75% at 50% 0%, color-mix(in srgb, var(--signal) 11%, transparent), transparent 60%),
+      var(--bg);
+  }
+  .drive[hidden]{ display:none; }
+  .drive__eyebrow{ font-family:var(--mono); font-size:.72rem; letter-spacing:.32em; text-transform:uppercase; color:var(--signal); }
+  .drive__station{ font-family:var(--disp); font-weight:600; font-size:clamp(2.1rem,11vw,3.8rem); line-height:1.04; letter-spacing:.01em; overflow-wrap:anywhere; }
+  .drive__track{ font-family:var(--mono); font-size:clamp(.88rem,4.2vw,1.12rem); color:var(--ink-dim); max-width:24ch; overflow-wrap:anywhere; }
+  .drive__toggle{
+    -webkit-appearance:none; appearance:none; cursor:pointer; color:var(--ink);
+    width:min(56vw,210px); height:min(56vw,210px); border-radius:50%;
+    border:2px solid color-mix(in srgb, var(--signal) 55%, transparent);
+    background:color-mix(in srgb, var(--signal) 12%, transparent);
+    font-family:var(--disp); font-size:clamp(1.05rem,5.6vw,1.6rem); letter-spacing:.05em;
+    display:grid; place-items:center; transition:transform .08s ease, background .15s ease;
+  }
+  .drive__toggle:active{ transform:scale(.96); background:color-mix(in srgb, var(--signal) 22%, transparent); }
+  .drive__toggle[disabled]{ opacity:.5; cursor:default; border-color:rgba(243,235,221,.22); }
+  .drive__vol{ width:min(82vw,420px); display:flex; align-items:center; gap:.8rem; font-family:var(--mono); font-size:.72rem; letter-spacing:.16em; color:var(--ink-dim); }
+  .drive__vol input{ flex:1; height:44px; accent-color:var(--signal); }   /* >=44px touch target */
+  .drive__exit{
+    -webkit-appearance:none; appearance:none; cursor:pointer; margin-top:.3rem; min-height:48px;
+    background:transparent; border:1px solid rgba(243,235,221,.22); color:var(--ink-dim);
+    font-family:var(--mono); font-size:.8rem; letter-spacing:.16em; text-transform:uppercase;
+    padding:.85rem 1.5rem; border-radius:999px;
+  }
+  .drive__exit:active{ color:var(--ink); border-color:var(--signal); }
+
+  /* auto-suggest bar (phone only). Docked at the TOP so it never covers the
+     console's own bottom controls or the collapsed-console re-show pill. */
+  .drive-suggest{
+    position:fixed; left:50%; transform:translateX(-50%); z-index:80;
+    top:max(.9rem, env(safe-area-inset-top)); width:min(93vw,430px);
+    display:flex; align-items:center; gap:.7rem; font-family:var(--mono);
+    background:var(--panel); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    border:1px solid color-mix(in srgb, var(--signal) 32%, transparent); border-radius:16px;
+    padding:.7rem .75rem .7rem 1rem; box-shadow:0 10px 30px rgba(0,0,0,.42);
+  }
+  .drive-suggest[hidden]{ display:none; }
+  .drive-suggest .ds-copy{ flex:1; text-align:left; font-size:.82rem; line-height:1.3; color:var(--ink); }
+  .drive-suggest .ds-copy small{ display:block; margin-top:.15rem; color:var(--ink-dim); font-size:.66rem; letter-spacing:.01em; }
+  .drive-suggest button{ -webkit-appearance:none; appearance:none; cursor:pointer; font-family:var(--mono); min-height:44px; border-radius:11px; }
+  .drive-suggest .ds-go{ background:var(--signal); color:#1a1206; border:none; font-weight:600; padding:.6rem 1rem; letter-spacing:.04em; }
+  .drive-suggest .ds-no{ background:transparent; border:1px solid rgba(243,235,221,.2); color:var(--ink-dim); width:44px; font-size:1rem; }
+
+  /* minimized entry pill after the suggestion is dismissed (phone only).
+     Top-center — same slot as the bar (they're mutually exclusive), clear of
+     the top-right status LED and the console's bottom chrome. */
+  .drive-pill{
+    position:fixed; top:max(.9rem, env(safe-area-inset-top)); left:50%; transform:translateX(-50%); z-index:80;
+    -webkit-appearance:none; appearance:none; cursor:pointer;
+    background:var(--panel); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    border:1px solid color-mix(in srgb, var(--signal) 34%, transparent); color:var(--signal);
+    font-family:var(--mono); font-size:.74rem; letter-spacing:.12em; text-transform:uppercase;
+    padding:.7rem 1rem; border-radius:999px; min-height:44px; box-shadow:0 6px 18px rgba(0,0,0,.35);
+  }
+  .drive-pill[hidden]{ display:none; }
+  @media (prefers-reduced-motion:reduce){ .drive__toggle{ transition:none; } }
 </style>
 </head>
 <body>
@@ -518,6 +587,22 @@
 
   <!-- Blackout overlay (toggled by the Blackout control) -->
   <div class="blackout" id="blackout" aria-hidden="true"><span>◼ Blackout</span></div>
+
+  <!-- Drive Mode (phone only): auto-suggest bar, minimized entry pill, and the full-screen audio-only view -->
+  <div class="drive-suggest" id="driveSuggest" role="dialog" aria-label="Drive Mode suggestion" hidden>
+    <div class="ds-copy">Drive Mode?<small>Audio only · big controls · easy on the eyes &amp; battery</small></div>
+    <button type="button" class="ds-go" id="driveAccept">Start</button>
+    <button type="button" class="ds-no" id="driveDismiss" aria-label="Not now">✕</button>
+  </div>
+  <button type="button" class="drive-pill" id="drivePill" hidden>◐ Drive</button>
+  <section class="drive" id="drive" role="dialog" aria-modal="true" aria-label="Drive Mode — audio only" hidden>
+    <div class="drive__eyebrow">Drive Mode · Radio</div>
+    <div class="drive__station" id="driveStation">—</div>
+    <div class="drive__track" id="driveTrack"></div>
+    <button type="button" class="drive__toggle" id="driveToggle" aria-label="Play or pause" aria-pressed="false">▶ Play</button>
+    <div class="drive__vol"><span>Vol</span><input type="range" id="driveVol" min="0" max="100" value="80" aria-label="Volume"></div>
+    <button type="button" class="drive__exit" id="driveExit">Exit Drive Mode</button>
+  </section>
 
   <div class="status" id="status"><span class="led"></span><span id="statusText">Offline</span></div>
 
@@ -851,6 +936,7 @@ const STORE = {
 
 const videoEl   = document.getElementById('stream');
 const placeEl   = document.getElementById('placeholder');
+const driveEl   = document.getElementById('drive');   // Drive Mode audio-only overlay
 const statusEl  = document.getElementById('status');
 const statusTxt = document.getElementById('statusText');
 const txEl      = document.getElementById('tx');
@@ -1144,12 +1230,54 @@ document.querySelectorAll('#macro .mbtn').forEach(b =>
 /* One place decides what the stage shows. The canvas never hides — on the
    video plane the render loop draws only the transparent FX overlay. */
 function applyStage(){
+  if (driveOn){                       // Drive Mode: hide BOTH planes behind the audio-only overlay
+    visEl.hidden = true;
+    videoEl.style.display = 'none';
+    placeEl.style.display = 'none';
+    driveEl.hidden = false;
+    consoleEl.classList.toggle('mode-live', mode === 'live');
+    return;                           // mode/plane are untouched → exitDrive restores this exact view
+  }
+  driveEl.hidden = true;
   const video = mode === 'live' && plane === 'video';
   visEl.hidden = false;
   videoEl.style.display = video ? '' : 'none';
   placeEl.style.display = (video && !isLive) ? '' : 'none';
   consoleEl.classList.toggle('mode-live', mode === 'live');
 }
+
+/* ── Drive Mode (phone-only, audio-only) ──────────────────────────────
+   A minimal full-screen view for phone users: kills the canvas scenes
+   (battery + minimal distraction) and shows only the current station/track
+   plus a big play/pause + volume. Auto-suggested on phones and easily
+   dismissed; desktop never sees it. No localStorage (CLAUDE.md golden rule)
+   — dismissal is in-memory (re-suggests next load) and the only persisted
+   lever is ?drive=1|0, mirroring how IDENTITY reads ?role=. */
+let driveOn = false;          // is the audio-only view engaged
+let driveForce = null;        // override: null = auto(isPhone), true/false = forced (URL/test)
+let driveDismissed = false;   // suggestion dismissed this session
+
+// Phone-only predicate. Anchored on matchMedia so it is reliably FALSE under
+// jsdom (the smoke test stubs matchMedia→matches:false) and on desktop —
+// screen.* is 0 in jsdom and 'ontouchstart' is true there, so neither is safe
+// to gate on. The 500px SHORT-SIDE boundary separates phones from tablets
+// (iPad mini portrait = 768). Coarse+no-hover must gate FIRST so a narrow
+// desktop window or a touch laptop (fine primary pointer) is never included.
+const PHONE_MAX_SIDE = 500;
+function isPhone(){
+  const p = new URLSearchParams(location.search).get('drive');
+  if (p === '0') return false;                                     // explicit off (desktop/test escape hatch)
+  if (p === '1') return true;                                      // explicit on (bookmarkable "always Drive")
+  if (typeof matchMedia !== 'function') return false;             // no CSSOM (jsdom/headless) → desktop
+  const mm = (q) => matchMedia(q).matches;
+  if (!(mm('(pointer: coarse)') && mm('(hover: none)'))) return false;                    // touch-first primary pointer
+  if (!(mm(`(max-width:${PHONE_MAX_SIDE}px)`) || mm(`(max-height:${PHONE_MAX_SIDE}px)`))) return false;  // phone-sized, either orientation
+  const ua = navigator.userAgent || '';
+  if (/\biPad\b/.test(ua)) return false;                          // older iPadOS UA token
+  if (/Android/.test(ua) && !/\bMobile\b/.test(ua)) return false; // Android tablets omit "Mobile"
+  return true;
+}
+function driveEligible(){ return driveForce !== null ? driveForce : isPhone(); }
 
 /* ── Channel / VJ dropdowns (Live mode only) ──
    Pick a channel, then who's driving it. Routing keeps the two visual
@@ -1668,6 +1796,101 @@ player.addEventListener('error', () => {
 });
 
 volEl.addEventListener('input', () => { if (masterGain) masterGain.gain.value = volEl.value / 100; });
+
+/* ── Drive Mode wiring (state + isPhone() are defined above, near applyStage).
+   enterDrive only toggles the overlay and re-runs applyStage — it never mutates
+   mode/plane or the audio source, so exit restores the exact prior view and the
+   tuned radio keeps playing. "The radio station" = whatever the transport already
+   drives: the Offline station playlist or the Live channel's live audio. */
+const driveStationEl = document.getElementById('driveStation');
+const driveTrackEl   = document.getElementById('driveTrack');
+const driveToggleEl  = document.getElementById('driveToggle');
+const driveVolEl     = document.getElementById('driveVol');
+
+function syncDriveReadout(){
+  if (!driveStationEl) return;
+  let src, tr;
+  if (mode === 'live'){
+    const c = channelById(channelState.channel);
+    src = c ? c.name : 'Live';
+    tr = currentLiveAudio() ? 'live broadcast'
+       : (plane === 'video' ? 'video channel — no radio audio' : 'no live audio on this channel');
+  } else {
+    const st = STATIONS.find(s => s.id === currentStation);
+    src = st ? st.name : 'Offline';
+    const t = currentTrack(currentStation);
+    tr = t ? t.name : 'no songs yet — add them on desktop';
+  }
+  driveStationEl.textContent = src;
+  driveTrackEl.textContent = tr;
+  if (mode === 'live' && plane === 'video'){      // a video channel's audio is the TD stream — no local control
+    driveToggleEl.disabled = true;
+    driveToggleEl.setAttribute('aria-disabled', 'true');
+    driveToggleEl.textContent = '◉ Live stream';
+  } else {
+    driveToggleEl.disabled = false;
+    driveToggleEl.removeAttribute('aria-disabled');
+    const playing = !!(player.src && !player.paused);
+    driveToggleEl.textContent = playing ? '⏸ Pause' : '▶ Play';
+    driveToggleEl.setAttribute('aria-pressed', String(playing));
+  }
+  if (driveVolEl && document.activeElement !== driveVolEl) driveVolEl.value = volEl.value;
+}
+
+function syncDriveSuggest(){
+  const elig = driveEligible() && !driveOn;
+  const bar  = document.getElementById('driveSuggest');
+  const pill = document.getElementById('drivePill');
+  if (bar)  bar.hidden  = !(elig && !driveDismissed);   // full auto-suggest until dismissed
+  if (pill) pill.hidden = !(elig && driveDismissed);    // then a small entry pill so they're never stranded
+}
+
+function enterDrive(){
+  if (!driveEligible()) return;                 // phone-only guard (belt & suspenders)
+  driveOn = true;
+  ensureAudio();                                // this tap is a user gesture → OK to start/resume audio
+  // Start the radio if idle — but NEVER on a Live video channel: there the audio
+  // is the TD stream and setTransport('play') would emit a transport command to
+  // the shared broadcast (TD + bus), not play anything on the phone.
+  if (!(mode === 'live' && plane === 'video') && (player.paused || !player.src)) setTransport('play');
+  syncDriveReadout();
+  syncDriveSuggest();
+  applyStage();
+  if (driveToggleEl.focus) driveToggleEl.focus();   // move focus into the modal (a11y)
+}
+function exitDrive(){
+  driveOn = false;
+  syncDriveSuggest();
+  applyStage();                                 // restores prior mode/plane; renderLoop resumes drawing next tick
+  const back = document.getElementById(driveDismissed ? 'drivePill' : 'driveAccept');
+  if (back && !back.hidden && back.focus) back.focus();   // return focus to the entry control
+}
+
+// Keep the big readout live while driving (track advances, external play/pause).
+['play', 'pause', 'ended', 'loadeddata', 'emptied'].forEach(ev =>
+  player.addEventListener(ev, () => { if (driveOn) syncDriveReadout(); }));
+
+document.getElementById('driveAccept').addEventListener('click', enterDrive);
+document.getElementById('driveDismiss').addEventListener('click', () => { driveDismissed = true; syncDriveSuggest(); });
+document.getElementById('drivePill').addEventListener('click', enterDrive);
+document.getElementById('driveExit').addEventListener('click', exitDrive);
+driveToggleEl.addEventListener('click', () => {
+  if (mode === 'live' && plane === 'video') return;   // no local radio audio to control on a video channel
+  setTransport((player.paused || !player.src) ? 'play' : 'pause');
+  syncDriveReadout();
+});
+driveVolEl.addEventListener('input', () => {
+  volEl.value = driveVolEl.value;
+  if (masterGain) masterGain.gain.value = driveVolEl.value / 100;
+});
+
+// Eligibility shifts with orientation / window size — re-evaluate the suggestion.
+if (typeof matchMedia === 'function'){
+  const mq = matchMedia('(pointer: coarse)');
+  if (mq.addEventListener) mq.addEventListener('change', syncDriveSuggest);
+}
+window.addEventListener('resize', syncDriveSuggest);
+syncDriveSuggest();   // initial phone auto-suggest on load
 
 /* ── Idle auto-hide: 4 s without input fades the whole chrome ── */
 let idleTimer = null;
@@ -2495,9 +2718,12 @@ function fitCanvas(){
 window.addEventListener('resize', fitCanvas);
 fitCanvas();
 
-let lastT = 0;
+let lastT = 0, frames = 0, sceneFrames = 0, signalFrames = 0;
 function renderLoop(now){
   requestAnimationFrame(renderLoop);
+  frames++;
+  if (driveOn) return;             // Drive Mode: audio-only — skip all per-frame canvas work (battery)
+  signalFrames++;                  // per-frame analyser/VU work — uniquely gated by driveOn (smoke witness)
   const t = now / 1000;
   const dt = Math.min(.05, t - lastT || .016);
   lastT = t; perfT = t;
@@ -2520,7 +2746,7 @@ function renderLoop(now){
     vctx.translate(640, 360); vctx.scale(z, z); vctx.translate(-640, -360);
     vctx.translate(rnd(-1, 1) * 8 * FX.punch, rnd(-1, 1) * 6 * FX.punch);
   }
-  if (!overlayOnly) currentScene.draw(vctx, t, dt, SIG);
+  if (!overlayOnly){ sceneFrames++; currentScene.draw(vctx, t, dt, SIG); }
   drawFX(vctx, dt);
   vctx.restore();
 }
@@ -2531,6 +2757,7 @@ transportState = 'paused'; syncTransport();   // presets start cued, not playing
 /* ── Physical keyboard ── */
 window.addEventListener('keydown', (e) => {
   if (e.repeat) return;                                  // ignore auto-repeat
+  if (driveOn){ if (e.key === 'Escape'){ e.preventDefault(); exitDrive(); } return; }   // Drive Mode swallows shortcuts
   if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]')) return;
   const k = e.key.toLowerCase();
 

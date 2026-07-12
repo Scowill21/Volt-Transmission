@@ -20,9 +20,13 @@ every stamped message to `wss://…/api/bus?channel=<id>`; VJ rigs subscribe
 (`server/paid.js`, Stripe stubbed at marked seams): per-channel control
 takeover queue — the bus verifies the session per socket and only passes
 the slot holder's Live 1–4 actions — plus song requests; queues render in
-the console (Live) and the host manages them in admin.html. `src/` +
-`react-app.html` is an archived React variant — reference only, don't
-extend it.
+the console (Live) and the host manages them in admin.html. **Drive Mode**
+(phone-only, audio-only): on phones an auto-suggested, dismissible view
+that kills the canvas scenes (battery) and shows only station/track + big
+play/pause + volume; detection is `isPhone()` (matchMedia coarse+hover:none
++ ≤500px short side, `?drive=1|0` override), it never mutates mode/plane/
+audio and restores on exit. `src/` + `react-app.html` is an archived React
+variant — reference only, don't extend it.
 
 ## Golden rules
 
