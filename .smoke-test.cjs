@@ -145,6 +145,7 @@ const script = html.match(/<script>([\s\S]*)<\/script>/)[1] +
    window.__player = () => ({ src: player.src, tid: player.dataset.tid || '' });
    window.__setRole = (r) => { IDENTITY.role = r; };                  // IDENTITY is a page-scope const
    window.__setVerified = (v) => { IDENTITY.verified = v; };          // only /api/me sets this for real
+   window.__setCabinetDemo = (v) => { CABINET_DEMO = v; };            // page-scope let
    window.__forceDrivePhone = (v) => { driveForce = v; syncDriveSuggest(); };  // v: true|false|null(auto)
    window.__lastSent = null;
    window.__sent = [];
@@ -502,6 +503,22 @@ step('Drive Mode: phone-gated, audio-only, hides both planes + restores on exit'
   step('shop: buying marks the item owned', () => {
     if (!/IN CABINET/.test(w.document.getElementById('shopRecords').innerHTML)) throw new Error('owned mark missing after buy');
   });
+  w.document.querySelector('[data-cabinet-open]').click();
+  await new Promise((r) => setImmediate(r));
+  step('cabinet DEMO look: furnished shelf, records non-functional', () => {
+    // demo flag ships ON: fixed records + prints render, nothing fetched
+    if (!/First Pressing/.test(w.document.getElementById('cabRecords').innerHTML))
+      throw new Error('demo records missing: ' + w.document.getElementById('cabRecords').textContent.slice(0, 60));
+    if (w.document.querySelectorAll('#cabArt canvas').length !== 12) throw new Error('expected 12 demo prints');
+    if (!/demo preview/.test(w.document.getElementById('cabStatus').textContent)) throw new Error('demo status missing');
+    const tidBefore = w.eval('__player().tid');
+    w.document.querySelector('[data-play="demo-first-pressing"]').click();      // must NOT play
+    if (w.eval('__player().tid') !== tidBefore) throw new Error('demo record must not play');
+    if (!/records will play/.test(w.document.getElementById('cabStatus').textContent))
+      throw new Error('demo click note missing');
+  });
+  // flip the demo off ("remove demo") → the REAL cabinet flow
+  w.eval('__setCabinetDemo(false)');
   w.document.querySelector('[data-cabinet-open]').click();
   await new Promise((r) => setImmediate(r));
   step('cabinet: record card + art prints render, record plays through the deck', () => {

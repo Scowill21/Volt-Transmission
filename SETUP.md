@@ -489,6 +489,12 @@ through the console's audio chain, so **the scenes react to it** (Skip/Play/
 Pause work; tuning a station takes it off). Scroll the art strip to browse
 your prints.
 
+> **Demo look (current state):** the cabinet ships with `CABINET_DEMO = true`
+> in `index.html` — a furnished, NON-functional preview (fixed records +
+> prints; clicking a record just explains it's a demo). To switch to the real
+> purchases-driven cabinet, flip that one flag to `false` (search
+> "CABINET DEMO LOOK").
+
 **Identity & testing:** buying needs a signed-in account in production; in
 local unconfigured-auth dev the same escape hatch as the paid queues applies
 (`{"user":{id,name}}` body on POSTs, `?uid=&name=` on GETs). Purchases persist

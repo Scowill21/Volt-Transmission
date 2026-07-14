@@ -1603,25 +1603,32 @@ function barsFn(n){                    // log-spaced mini-spectrum for in-scene 
   return out;
 }
 
-/* Onset detector: a hit fires when the band's energy spikes above its own
-   rolling average — so visuals snap on the actual drum, not sustained tone. */
-function makeOnset(thresh, refractoryMs){
-  const hist = new Float32Array(43);   // ~0.7 s of frames
-  let idx = 0, filled = 0, lastHit = -1e9, env = 0;
+/* Onset detector — RANGE-ADAPTIVE. The old spike-above-rolling-average test
+   never fired on dense, compressed material (a busy mix holds its drum band
+   within ±25% of its mean, so nothing ever exceeded avg×1.4 — measured live:
+   0 snare hits in 10s of 124bpm music). Instead we track the band's own
+   rolling floor/ceiling and fire when the level crosses UP into the top of
+   its recent range — self-normalizing to any track's dynamics, quiet or
+   crushed. Fractions/refractories were calibrated against real playback:
+   snare ≈ the backbeat (~1/s at 124bpm), kick ≈ four-on-the-floor (~2/s). */
+function makeOnset(frac, refractoryMs, minSpan = .03){
+  let lo = 0, hi = 0, prevPos = 0, lastHit = -1e9, env = 0, primed = false;
   return function feed(v, nowMs){
-    let avg = 0;
-    for (let k = 0; k < filled; k++) avg += hist[k];
-    avg = filled ? avg / filled : 0;
-    if (filled >= 10 && v > Math.max(.06, avg * thresh) && nowMs - lastHit > refractoryMs){
-      lastHit = nowMs; env = 1;
+    if (!primed){ lo = hi = v; primed = true; }
+    lo = Math.min(v, lo + (v - lo) * .012);   // floor/ceiling relax toward the signal
+    hi = Math.max(v, hi + (v - hi) * .012);
+    const span = hi - lo;
+    const pos = span > 1e-6 ? (v - lo) / span : 0;
+    if (span > minSpan && pos > frac && prevPos <= frac && nowMs - lastHit > refractoryMs){
+      lastHit = nowMs; env = 1;              // minSpan mutes silence/steady tones
     }
-    hist[idx] = v; idx = (idx + 1) % hist.length; if (filled < hist.length) filled++;
-    const out = env; env *= .88;       // fast decay = punchy impulse
+    prevPos = pos;
+    const out = env; env *= .88;             // fast decay = punchy impulse
     return out;
   };
 }
-const kickOnset  = makeOnset(1.55, 150);
-const snareOnset = makeOnset(1.42, 110);
+const kickOnset  = makeOnset(.75, 300);
+const snareOnset = makeOnset(.80, 420);
 
 function smoothTo(key, v){ SIG[key] += (v - SIG[key]) * (v > SIG[key] ? .5 : .12); }  // fast attack, slow release
 
@@ -3031,6 +3038,29 @@ const shopModal = document.getElementById('shop');
 const cabModal  = document.getElementById('cabinet');
 let cabinetLib  = { records: [], art: [] };   // last-fetched library
 
+/* ── CABINET DEMO LOOK ─────────────────────────────────────────────
+   true  → the cabinet shows a furnished, NON-FUNCTIONAL preview (fixed
+           records + prints; clicking a record just explains it's a demo)
+   false → the real thing: your purchases, records play on the deck
+   William: to go back to normal, flip this to false ("remove demo").   */
+let CABINET_DEMO = true;
+const DEMO_LIBRARY = {
+  records: [
+    { id: 'demo-first-pressing', title: 'Volt Transmission · First Pressing', tracks: 4,
+      trackNames: ['Carrier Wave', 'Night Grid', 'Amber Signal', 'Sign-Off'] },
+    { id: 'demo-night-drive', title: 'Night Drive · B-Sides', tracks: 3,
+      trackNames: ['Overpass', 'Vapor Trail', 'Last Exit'] },
+    { id: 'demo-station-cuts', title: 'Pretty Lights · Station Cuts', tracks: 3,
+      trackNames: ['Short Line', 'Until Tomorrow', 'Wrong Platform'] },
+  ],
+  art: [
+    { id: 'demo-art-tokyo', title: 'Neon Tokyo · Prints Vol 1', pieces: 6, seed: 20260701,
+      palette: ['#ff4fd8', '#4fd8ff', '#ffe14f', '#0a0618'] },
+    { id: 'demo-art-water', title: 'Deep Water · Prints Vol 1', pieces: 6, seed: 20260703,
+      palette: ['#4fd8ff', '#7fd0e0', '#a9ffd0', '#04101c'] },
+  ],
+};
+
 // The dev identity query only ever means something on a local unconfigured-auth
 // server — gate it on the host too, so production visitors (verified or not)
 // always send clean URLs with no identity-shaped params in access logs.
@@ -3169,6 +3199,12 @@ function fetchShop(statusHtml){   // optional override, e.g. the post-buy messag
 }
 function fetchCabinet(){
   const status = document.getElementById('cabStatus');
+  if (CABINET_DEMO){   // demo look: fixed shelf, nothing fetched, nothing playable
+    cabinetLib = DEMO_LIBRARY;
+    renderCabinet();
+    status.textContent = 'demo preview — purchases go live with payments';
+    return;
+  }
   fetch('/api/shop/library' + devQ())
     .then(async r => { if (r.ok) return r.json(); throw new Error((await r.json().catch(() => ({}))).error || 'api'); })
     .then(lib => { cabinetLib = lib; renderCabinet(); status.textContent = ''; })
@@ -3193,7 +3229,9 @@ document.getElementById('shopRecords').closest('.modal__panel').addEventListener
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || r.status);
     // refresh with the success message (passed through so the re-render can't clobber it)
-    fetchShop('added to your cabinet ✓ · <a href="#" data-goto-cabinet style="color:var(--signal)">open the cabinet →</a>');
+    fetchShop(CABINET_DEMO
+      ? 'added to your cabinet ✓ (the cabinet shows a demo preview for now)'
+      : 'added to your cabinet ✓ · <a href="#" data-goto-cabinet style="color:var(--signal)">open the cabinet →</a>');
     fetchCabinet();
   }).catch(err => {
     b.disabled = false; b.textContent = label;
@@ -3213,6 +3251,11 @@ shopModal.addEventListener('click', (e) => {
 cabModal.addEventListener('click', (e) => {
   const b = e.target.closest('[data-play]');
   if (!b) return;
+  if (CABINET_DEMO){   // non-functional preview — explain instead of playing
+    document.getElementById('cabStatus').textContent =
+      'demo preview — records will play right here once purchases go live';
+    return;
+  }
   const album = cabinetLib.records.find(r => r.id === b.dataset.play);
   if (!album) return;
   if ('record:' + album.id === player.dataset.tid){ presetToggle(); renderCabinet(); return; }   // tap again = pause/resume
