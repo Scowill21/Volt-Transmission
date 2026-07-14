@@ -29,18 +29,22 @@ function makeApp(){
 }
 function makeRes(){
   const res = {
-    statusCode: 200, body: undefined, _sent: false,
+    statusCode: 200, body: undefined, _sent: false, headers: {}, writable: true,
     status(c){ this.statusCode = c; return this; },
     json(o){ this.body = o; this._sent = true; return this; },
     send(o){ this.body = o; this._sent = true; return this; },
-    setHeader(){}, end(){ this._sent = true; },
+    setHeader(k, v){ this.headers[String(k).toLowerCase()] = v; return this; },
+    // minimal writable-stream face so createReadStream(...).pipe(res) works
+    on(){ return this; }, once(){ return this; }, emit(){ return false; },
+    removeListener(){ return this; }, write(){ return true; },
+    end(){ this._sent = true; }, destroy(){},
   };
   return res;
 }
-async function call(app, method, path, { params = {}, body = {}, headers = {} } = {}){
+async function call(app, method, path, { params = {}, body = {}, headers = {}, query = {} } = {}){
   const route = app._routes.find(r => r.method === method && r.path === path);
   if (!route) throw new Error(`no route ${method} ${path}`);
-  const req = { params, body, headers, get: (h) => headers[h.toLowerCase()] };
+  const req = { params, body, headers, query, get: (h) => headers[h.toLowerCase()] };
   const res = makeRes();
   let idx = 0;
   const next = async (err) => {
@@ -145,6 +149,73 @@ const ok = (label) => { console.log('OK  ', label); passed++; };
   // Re-read: still no active slot, and nothing leaked from the real channel.
   assert.strictEqual(r.body.channel, 'ghost-' + passed);
   ok('GET /queues on unknown channel → empty, no state created');
+
+  /* ── the SHOP (server/shop.js): catalog, buy gates, purchase-gated streaming ──
+     Uses its OWN fixture album (albums/ may hold real records — the demo entry
+     is suppressed as soon as one exists, so never assert on the demo id). */
+  const fsp = require('node:fs');
+  const pathm = require('node:path');
+  const DATA = pathm.join(__dirname, 'server', '.shop-data.json');
+  const FIX_DIR = pathm.join(__dirname, 'albums', 'Smoke Test EP');
+  const FIX_ID = 'rec-smoke-test-ep';
+  fsp.mkdirSync(FIX_DIR, { recursive: true });
+  fsp.writeFileSync(pathm.join(FIX_DIR, '01 smoke.flac'), Buffer.alloc(512, 7));   // content irrelevant — gate test
+  const cleanupShop = () => {
+    try { fsp.unlinkSync(DATA); } catch {}
+    try { fsp.rmSync(FIX_DIR, { recursive: true, force: true }); } catch {}
+    try { if (!fsp.readdirSync(pathm.join(__dirname, 'albums')).length) fsp.rmdirSync(pathm.join(__dirname, 'albums')); } catch {}
+  };
+  try { fsp.unlinkSync(DATA); } catch {}
+  const shop = await import('./server/shop.js?t=' + Date.now());   // fresh module → fresh purchases
+  shop.attachShop(app);
+
+  try {
+    // 12. Catalog is public — records listed, art packs WITHOUT their recipe.
+    r = await call(app, 'GET', '/api/shop');
+    assert.ok(r.body.records.some(x => x.id === FIX_ID), 'fixture album listed');
+    assert.strictEqual(r.body.art.length, 3, 'three art packs');
+    assert.ok(r.body.art.every(p => !p.seed && !p.palette), 'unowned packs must NOT ship seed/palette (the recipe IS the art)');
+    ok('shop catalog → albums listed, art recipe withheld until owned');
+
+    // 13. Buying needs identity; owning is per-user; double-buy rejected.
+    r = await call(app, 'POST', '/api/shop/buy', { body: { itemId: FIX_ID } });
+    assert.strictEqual(r.statusCode, 401, 'anonymous buy should 401');
+    r = await call(app, 'POST', '/api/shop/buy', { body: { itemId: FIX_ID, ...AS('u-smoke', 'Smokey') } });
+    assert.strictEqual(r.statusCode, 201, 'buy should 201');
+    r = await call(app, 'POST', '/api/shop/buy', { body: { itemId: FIX_ID, ...AS('u-smoke', 'Smokey') } });
+    assert.strictEqual(r.statusCode, 409, 'double-buy should 409');
+    r = await call(app, 'POST', '/api/shop/buy', { body: { itemId: 'no-such-thing', ...AS('u-smoke', 'Smokey') } });
+    assert.strictEqual(r.statusCode, 404, 'unknown item should 404');
+    r = await call(app, 'POST', '/api/shop/buy', { body: { itemId: 'art-neon-tokyo', ...AS('u-smoke', 'Smokey') } });
+    assert.strictEqual(r.statusCode, 201, 'art pack buy should 201');
+    ok('shop buy → 401 anon · 201 first · 409 double · 404 unknown');
+
+    // 14. The library shows what you own — and only to you; owners get the art recipe.
+    r = await call(app, 'GET', '/api/shop/library', { query: { uid: 'u-smoke', name: 'Smokey' } });
+    assert.strictEqual(r.body.records.length, 1, 'owner library has the record');
+    assert.ok(r.body.art[0].seed && r.body.art[0].palette.length === 4, 'owned pack carries seed + palette');
+    r = await call(app, 'GET', '/api/shop/library', { query: { uid: 'u-else', name: 'Else' } });
+    assert.strictEqual(r.body.records.length, 0, 'stranger library is empty');
+    ok('shop library → per-user; art recipe only for owners');
+
+    // 15. THE GATE: records stream only for owners; Range honored; bad ranges 416.
+    r = await call(app, 'GET', '/api/shop/records/:albumId/:n',
+      { params: { albumId: FIX_ID, n: '0' }, query: { uid: 'u-else', name: 'Else' } });
+    assert.strictEqual(r.statusCode, 402, 'non-owner stream should 402');
+    r = await call(app, 'GET', '/api/shop/records/:albumId/:n',
+      { params: { albumId: FIX_ID, n: '0' }, query: { uid: 'u-smoke', name: 'Smokey' },
+        headers: { range: 'bytes=0-99' } });
+    assert.strictEqual(r.statusCode, 206, 'owner range stream should 206');
+    assert.match(String(r.headers['content-range'] || ''), /^bytes 0-99\//, 'Content-Range set');
+    r = await call(app, 'GET', '/api/shop/records/:albumId/:n',
+      { params: { albumId: FIX_ID, n: '0' }, query: { uid: 'u-smoke', name: 'Smokey' },
+        headers: { range: 'bytes=100-50' } });
+    assert.strictEqual(r.statusCode, 416, 'inverted range should 416, never 500');
+    r = await call(app, 'GET', '/api/shop/records/:albumId/:n',
+      { params: { albumId: FIX_ID, n: '99' }, query: { uid: 'u-smoke', name: 'Smokey' } });
+    assert.strictEqual(r.statusCode, 404, 'missing track should 404');
+    ok('record stream → 402 non-owner · 206+Range owner · 416 bad range · 404 bad track');
+  } finally { cleanupShop(); }
 
   console.log(`\nALL CLEAR — ${passed} server-gate checks passed`);
   process.exit(0);

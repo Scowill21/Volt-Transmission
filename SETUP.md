@@ -468,6 +468,35 @@ Paid queues → **Played** / **Refund**.
 
 ---
 
+## The shop + cabinet (records & art — test tier)
+
+Footer → **Shop** (or the bag icon). Two kinds of products, payment stubbed
+at `STRIPE:` seams in `server/shop.js` until Tier 2b:
+
+- **Records (albums).** Drop an album folder into **`albums/<Artist - Title>/`**
+  (repo root — *not* under `audio/`) and it appears in the shop automatically.
+  Its files are **purchase-gated**: they never serve statically (the `/albums`
+  path is blocked) and stream only through `GET /api/shop/records/:id/:n`,
+  which checks ownership. A demo record built from the deployed Pulse tracks
+  ships so the shelf isn't empty (labeled *demo listing* — those files are
+  also publicly playable on the Pulse station).
+- **Art · VJ packs.** Procedural print sets — the catalog carries each pack's
+  seed + palette and the console draws the prints on canvases in the cabinet.
+  No image assets to ship; a pack is rows in `ART_PACKS` (`server/shop.js`).
+
+Footer → **Cabinet**: your purchases. Click a record to put it on — it plays
+through the console's audio chain, so **the scenes react to it** (Skip/Play/
+Pause work; tuning a station takes it off). Scroll the art strip to browse
+your prints.
+
+**Identity & testing:** buying needs a signed-in account in production; in
+local unconfigured-auth dev the same escape hatch as the paid queues applies
+(`{"user":{id,name}}` body on POSTs, `?uid=&name=` on GETs). Purchases persist
+in `server/.shop-data.json` (gitignored; on Render this file is wiped by each
+deploy — fine for the stub tier, Tier 2b moves purchases into Postgres).
+
+---
+
 ## Sending your feed to the site (going live)
 
 Two kinds of feed, matching the two Live planes:

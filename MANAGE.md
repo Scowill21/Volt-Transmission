@@ -45,6 +45,9 @@ Follow `PAYMENTS-SETUP.md` §2–§3. In order:
 - [ ] Code the seams in `server/paid.js`: Checkout session per bid → webhook
       does the enqueue → persist queues to a `paid_events` Postgres table →
       refunds. *(Hand me the test key and I'll build this against the seams.)*
+- [ ] Same pass for the **shop** (`server/shop.js`): stubPay → Checkout, move
+      `.shop-data.json` purchases into Postgres (Render wipes the file per
+      deploy), gate real album downloads/streams on the paid webhook.
 - [ ] Extend `.smoke-server.cjs` to cover the webhook enqueue path.
 - [ ] End-to-end test: Stripe CLI (`stripe listen --forward-to …/api/stripe/webhook`)
       + card `4242 4242 4242 4242`; verify enqueue + refund + idempotency.

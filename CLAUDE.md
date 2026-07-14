@@ -20,7 +20,11 @@ every stamped message to `wss://…/api/bus?channel=<id>`; VJ rigs subscribe
 (`server/paid.js`, Stripe stubbed at marked seams): per-channel control
 takeover queue — the bus verifies the session per socket and only passes
 the slot holder's Live 1–4 actions — plus song requests; queues render in
-the console (Live) and the host manages them in admin.html. **Drive Mode**
+the console (Live) and the host manages them in admin.html. Shop + cabinet
+(`server/shop.js`, same stub-pay tier): records = `albums/<Name>/` folders
+(purchase-gated streaming; `/albums` never served statically) + procedural
+art/VJ packs; purchases in gitignored `server/.shop-data.json`; the console's
+footer Shop/Cabinet modals play records through the analyser chain. **Drive Mode**
 (phone-only, audio-only): on phones an auto-suggested, dismissible view
 that kills the canvas scenes (battery) and shows only station/track + big
 play/pause + volume; detection is `isPhone()` (matchMedia coarse+hover:none
@@ -74,8 +78,11 @@ extend them when adding features.
 
 ## Deploy
 
-Push to `main` → Render auto-deploys (static site, publish dir `.`, see
-render.yaml). Songs ship via `audio/` + `PRESET_TRACKS` in index.html.
+Push to `main` → Render auto-deploys the **Node web service** (render.yaml:
+`node server/index.js` serves the site + API — it has NOT been a static site
+since Tier 1b; purchase-gating and the API depend on this). Station songs ship
+via `audio/<Station>/` folders (auto-listed by GET /api/audio); gated shop
+records via `albums/<Name>/`.
 
 ## Docs to keep in sync
 

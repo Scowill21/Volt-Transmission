@@ -88,7 +88,11 @@ an Applications queue (approve = the role flips). Ops note: Supabase
 
 **2b. Paid song requests.** Stripe Checkout (hosted page — you never touch
 cards) + a webhook that inserts into a `song_requests` table with status
-`paid → queued → played`. The channel's console (and TD, via the existing
+`paid → queued → played`. **The 2b pass now also converts the SHOP
+(`server/shop.js` — records from `albums/<Name>/` folders with purchase-gated
+streaming, procedural art/VJ packs, cabinet library in the console): its
+stubPay seam becomes Checkout and the `.shop-data.json` purchases move into
+Postgres alongside the queues.** The channel's console (and TD, via the existing
 data channel) shows the queue; the host marks them played. Refund path for
 skipped requests. This is well-trodden; the work is in the flow, not the tech.
 

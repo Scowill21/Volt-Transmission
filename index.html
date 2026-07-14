@@ -380,6 +380,57 @@
   .modal__close:focus-visible{ outline:2px solid var(--signal); outline-offset:2px; }
   .modal__title{ font-family:var(--disp); font-weight:500; font-size:1.5rem; letter-spacing:.01em; margin:.5rem 0 .4rem; color:var(--ink); }
   .modal__blurb{ font-size:.8rem; line-height:1.6; color:var(--ink-dim); margin:0 0 1.1rem; max-width:30ch; }
+  .modal__panel--wide{ width:min(44rem,100%); }
+
+  /* ── Shop + Cabinet ── */
+  .shop-head{ font-size:.62rem; letter-spacing:.22em; color:var(--ink-dim); margin:1.1rem 0 .5rem; }
+  .shop-head:first-of-type{ margin-top:.4rem; }
+  .shop-note{ font-size:.72rem; color:var(--ink-dim); line-height:1.5; }
+  .shop-item{
+    display:flex; align-items:center; gap:.8rem; padding:.55rem .65rem; margin-bottom:.45rem;
+    border:1px solid var(--edge); border-radius:10px; background:rgba(255,255,255,.02);
+  }
+  .shop-item .si-body{ flex:1; min-width:0; }
+  .shop-item .si-title{ font-size:.82rem; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .shop-item .si-meta{ font-size:.66rem; color:var(--ink-dim); margin-top:.1rem; }
+  .shop-item .si-buy{
+    -webkit-appearance:none; appearance:none; cursor:pointer; font-family:var(--mono);
+    background:var(--signal); color:#1a1206; border:none; border-radius:8px;
+    padding:.42rem .7rem; font-size:.68rem; font-weight:600; letter-spacing:.05em; white-space:nowrap;
+  }
+  .shop-item .si-buy[disabled]{ opacity:.55; cursor:default; }
+  .shop-item .si-owned{
+    font-size:.64rem; letter-spacing:.12em; color:var(--signal); white-space:nowrap;
+    border:1px solid color-mix(in srgb, var(--signal) 45%, transparent); border-radius:8px; padding:.4rem .6rem;
+  }
+  .cab-records{ display:flex; flex-wrap:wrap; gap:.7rem; }
+  .cab-rec{
+    -webkit-appearance:none; appearance:none; cursor:pointer; font-family:var(--mono); text-align:left;
+    width:10.5rem; padding:.7rem; border:1px solid var(--edge); border-radius:12px;
+    background:rgba(255,255,255,.02); color:var(--ink); transition:border-color .15s;
+  }
+  .cab-rec:hover{ border-color:color-mix(in srgb, var(--signal) 45%, transparent); }
+  .cab-rec .disc{
+    width:5.4rem; height:5.4rem; margin:0 auto .55rem; border-radius:50%;
+    background:radial-gradient(circle at 50% 50%, var(--signal) 0 12%, #17110a 13% 30%, #0c0906 31% 42%,
+      #17110a 43% 58%, #0c0906 59% 72%, #17110a 73% 100%);
+    border:1px solid var(--edge);
+  }
+  .cab-rec.playing .disc{ animation:spin 2.4s linear infinite; box-shadow:0 0 22px color-mix(in srgb, var(--signal) 35%, transparent); }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .cab-rec .cr-title{ font-size:.72rem; line-height:1.35; }
+  .cab-rec .cr-meta{ font-size:.62rem; color:var(--ink-dim); margin-top:.2rem; }
+  .cab-art{
+    display:flex; gap:.7rem; overflow-x:auto; padding:.2rem .1rem .6rem;
+    scroll-snap-type:x mandatory; -webkit-overflow-scrolling:touch;
+  }
+  .cab-art canvas{
+    flex:0 0 auto; width:15rem; height:10rem; border-radius:10px; border:1px solid var(--edge);
+    scroll-snap-align:start; background:#000;
+  }
+  .cab-art:empty::after, .cab-records:empty::after{
+    content:attr(data-empty); font-size:.72rem; color:var(--ink-dim); padding:.4rem 0;
+  }
   .modal__form{ display:flex; flex-direction:column; gap:.7rem; }
   .modal__form label{ display:flex; flex-direction:column; gap:.3rem; font-size:.6rem; letter-spacing:.22em; text-transform:uppercase; color:var(--ink-dim); }
   .modal__form input, .modal__form textarea{
@@ -691,11 +742,11 @@
           </svg>
           <span class="icon-tip" id="homeTip">Visit my freelance portfolio ↗</span>
         </a>
-        <a class="icon-link" id="storeBtn" target="_blank" rel="noopener noreferrer">
+        <a class="icon-link" id="storeBtn" role="button" tabindex="0" data-shop-open>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M6 7h12l-1 12.5H7L6 7Z"/><path d="M9 7V6a3 3 0 0 1 6 0v1"/>
           </svg>
-          <span class="icon-tip" id="storeTip">Store — coming soon</span>
+          <span class="icon-tip" id="storeTip">The shop — records &amp; art</span>
         </a>
         <div class="tx" id="tx">TX idle</div>
         <div class="vu" id="vu" aria-hidden="true" title="Signal — bass / snare / treble">
@@ -706,6 +757,8 @@
       </div>
       <div class="foot-btns">
         <a class="ctl-btn acct" id="acct" href="/account.html" title="Your account — sign in / apply to broadcast">guest</a>
+        <button class="ctl-btn" data-shop-open title="The shop — buy records &amp; art packs">Shop</button>
+        <button class="ctl-btn" data-cabinet-open title="Your cabinet — purchased records &amp; prints">Cabinet</button>
         <button class="ctl-btn" data-contact-open title="Contact us for custom transmissions">Contact</button>
         <button class="ctl-btn" id="diagBtn" aria-pressed="false" title="Audio diagnostics (D)">Diag · D</button>
         <button class="ctl-btn" id="hideBtn" title="Hide controls (H)">Hide · H</button>
@@ -730,6 +783,37 @@
         <button class="modal__send" type="submit">Send transmission →</button>
       </form>
       <div class="modal__alt">or email <a id="contactMailto" href="#">—</a></div>
+    </div>
+  </div>
+
+  <!-- The SHOP — records + art (VJ packs). Payment stubbed (test tier). -->
+  <div class="modal" id="shop" hidden>
+    <div class="modal__backdrop" data-shop-close></div>
+    <div class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="shopTitle">
+      <button class="modal__close" type="button" data-shop-close aria-label="Close">✕</button>
+      <div class="eyebrow">The shop</div>
+      <h2 class="modal__title" id="shopTitle">Records &amp; art</h2>
+      <p class="modal__blurb">Records play right here on the console — the scenes react to them. Art packs are print sets for your cabinet.</p>
+      <div class="shop-head">Records</div>
+      <div id="shopRecords"><div class="shop-note">loading…</div></div>
+      <div class="shop-head">Art · VJ packs</div>
+      <div id="shopArt"><div class="shop-note">loading…</div></div>
+      <div class="shop-note" id="shopStatus" style="margin-top:.8rem"></div>
+    </div>
+  </div>
+
+  <!-- The CABINET — your purchased records + art prints. -->
+  <div class="modal" id="cabinet" hidden>
+    <div class="modal__backdrop" data-cabinet-close></div>
+    <div class="modal__panel modal__panel--wide" role="dialog" aria-modal="true" aria-labelledby="cabinetTitle">
+      <button class="modal__close" type="button" data-cabinet-close aria-label="Close">✕</button>
+      <div class="eyebrow">Your cabinet</div>
+      <h2 class="modal__title" id="cabinetTitle">Records &amp; prints</h2>
+      <div class="shop-head">Records — click to put one on · click again to pause</div>
+      <div class="cab-records" id="cabRecords" data-empty="no records yet — the shop has them"></div>
+      <div class="shop-head">Art — scroll through your prints</div>
+      <div class="cab-art" id="cabArt" data-empty="no prints yet — grab a pack in the shop"></div>
+      <div class="shop-note" id="cabStatus" style="margin-top:.8rem"></div>
     </div>
   </div>
 
@@ -904,12 +988,8 @@ const HOME = {
   tip: 'Visit my freelance portfolio ↗',
 };
 
-// Store button → your shop (link to be added later). Until `url` is filled in,
-// the button shows but doesn't navigate; update the tip when it goes live.
-const STORE = {
-  url: '',                                // ← ADD your store link later
-  tip: 'Store — coming soon',
-};
+// (The store icon now opens the built-in SHOP modal — see "Shop + cabinet"
+// near the end of this script. Records + art packs, payment stubbed until 2b.)
 
 /* ════════════════════════════════════════════════════════════════
    Messages sent to TouchDesigner over the data channel. Every payload
@@ -1771,6 +1851,11 @@ function presetPlay(){
     txEl.innerHTML = `LIVE AUDIO → <b>play</b> · ${live.id}`;
     return;
   }
+  if ((player.dataset.tid || '').startsWith('record:')){   // a cabinet record is on — resume it
+    player.play().catch(() => {});
+    txEl.innerHTML = 'RECORD → <b>play</b>';
+    return;
+  }
   const tr = currentTrack(currentStation);
   if (!tr){ txEl.innerHTML = `PRESET → <b>no tracks</b> · add songs to ${currentStation} with ↥ or drag-drop`; return; }
   loadTrack(currentStation, tr);
@@ -1784,6 +1869,7 @@ function presetToggle(){ (player.paused || !player.src) ? presetPlay() : presetP
    if it was playing; wraps at the ends; a 1-song playlist re-cues itself. */
 function advanceTrack(d = 1){
   if (mode !== 'presets') return;
+  if ((player.dataset.tid || '').startsWith('record:')){ recordAdvance(d); return; }   // Skip works on records too
   const pl = playlist(currentStation);
   if (!pl.length) return;
   playIdx[currentStation] = ((playIdx[currentStation] || 0) + d + pl.length) % pl.length;
@@ -1794,6 +1880,7 @@ function advanceTrack(d = 1){
 player.addEventListener('ended', () => {
   const id = player.dataset.tid;
   if (mode !== 'presets' || !id || id.startsWith('live:')) return;
+  if (id.startsWith('record:')){ recordAdvance(1); return; }   // cabinet record → next track
   const pl = playlist(id);
   if (!pl.length) return;
   playIdx[id] = ((playIdx[id] || 0) + 1) % pl.length;
@@ -1857,6 +1944,10 @@ function syncDriveReadout(){
     src = c ? c.name : 'Live';
     tr = currentLiveAudio() ? 'live broadcast'
        : (plane === 'video' ? 'video channel — no radio audio' : 'no live audio on this channel');
+  } else if ((player.dataset.tid || '').startsWith('record:') && recordNow.album){
+    // a cabinet record is on the deck — show IT, not the last-tuned station
+    src = recordNow.album.title;
+    tr = recordNow.album.trackNames[recordNow.idx] || `${recordNow.idx + 1}/${recordNow.album.tracks}`;
   } else {
     const st = STATIONS.find(s => s.id === currentStation);
     src = st ? st.name : 'Offline';
@@ -2801,6 +2892,7 @@ window.addEventListener('keydown', (e) => {
   if (e.repeat) return;                                  // ignore auto-repeat
   if (driveOn){ if (e.key === 'Escape'){ e.preventDefault(); exitDrive(); } return; }   // Drive Mode swallows shortcuts
   if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]')) return;
+  if (document.querySelector('.modal:not([hidden])')) return;   // a modal is up — no console shortcuts behind it
   const k = e.key.toLowerCase();
 
   if (k === 'h'){ e.preventDefault(); toggleConsole(); return; }
@@ -2879,7 +2971,6 @@ function initIconLink(btnId, tipId, cfg){
   }
 }
 initIconLink('homeBtn',  'homeTip',  HOME);
-initIconLink('storeBtn', 'storeTip', STORE);
 
 /* ── Contact / commission modal ("custom transmissions") ──
    No backend: the form composes a pre-filled mailto: so it works standalone. */
@@ -2927,6 +3018,230 @@ contactForm.addEventListener('submit', (e) => {
     `mailto:${CONTACT.email}?subject=${encodeURIComponent(CONTACT.subject)}&body=${encodeURIComponent(body)}`;
   closeContact();
 });
+
+/* ════════════════════════════════════════════════════════════════
+   SHOP + CABINET (test tier — payment stubbed server-side, see
+   server/shop.js). Records are albums that play right here through the
+   analyser (scenes react); art packs are procedural print sets drawn on
+   canvases below — nothing to download, the seed + palette come from the
+   catalog. Identity mirrors the paid queues: verified session in
+   production, the dev escape hatch (uid/name) locally.
+   ════════════════════════════════════════════════════════════════ */
+const shopModal = document.getElementById('shop');
+const cabModal  = document.getElementById('cabinet');
+let cabinetLib  = { records: [], art: [] };   // last-fetched library
+
+// The dev identity query only ever means something on a local unconfigured-auth
+// server — gate it on the host too, so production visitors (verified or not)
+// always send clean URLs with no identity-shaped params in access logs.
+const DEV_HOST = /^(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(location.hostname);
+const devQ = () => (IDENTITY.verified || !DEV_HOST) ? '' :
+  `?uid=${encodeURIComponent(IDENTITY.id)}&name=${encodeURIComponent(IDENTITY.name)}`;
+const price = (c) => '$' + (c / 100).toFixed(0);
+
+/* ── records on the turntable ── */
+let recordNow = { album: null, idx: 0 };
+const recordSrc = (id, n) => `/api/shop/records/${encodeURIComponent(id)}/${n}${devQ()}`;
+
+function recordLoad(n, autoplay){
+  const a = recordNow.album;
+  if (!a) return;
+  recordNow.idx = ((n % a.tracks) + a.tracks) % a.tracks;
+  ensureAudio();
+  player.loop = a.tracks <= 1;
+  player.src = recordSrc(a.id, recordNow.idx);
+  loadedTrack = player.src;
+  player.dataset.tid = 'record:' + a.id;
+  if (autoplay) player.play().catch(() => {});
+  txEl.innerHTML = `RECORD → <b>${esc(a.trackNames[recordNow.idx] || a.title)}</b> · ${recordNow.idx + 1}/${a.tracks}`;
+  renderCabinet();
+}
+function playRecord(album){
+  if (mode !== 'presets') setMode('presets');   // records ride the Offline deck
+  recordNow = { album, idx: 0 };
+  recordLoad(0, true);
+}
+function recordAdvance(d){ if (recordNow.album) recordLoad(recordNow.idx + d, true); }
+
+/* ── procedural art prints ──
+   Deterministic per (pack seed, piece index): a small synthwave print in the
+   pack's palette. Self-contained on purpose — no image assets to ship. */
+function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0;
+  let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+  return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function drawPrint(cv, pack, i){
+  const W = cv.width = 480, H = cv.height = 320;
+  const g2 = cv.getContext('2d');
+  const R = mulberry32(pack.seed + i * 1013);
+  const [c1, c2, c3, bg] = pack.palette;
+  // sky
+  const sky = g2.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, bg); sky.addColorStop(1, '#000');
+  g2.fillStyle = sky; g2.fillRect(0, 0, W, H);
+  // orb
+  const ox = W * (.2 + R() * .6), oy = H * (.18 + R() * .3), or_ = 24 + R() * 46;
+  const orb = g2.createRadialGradient(ox, oy, 2, ox, oy, or_ * 2.4);
+  orb.addColorStop(0, c3); orb.addColorStop(.4, c1 + 'cc'); orb.addColorStop(1, 'transparent');
+  g2.fillStyle = orb; g2.beginPath(); g2.arc(ox, oy, or_ * 2.4, 0, 6.2832); g2.fill();
+  g2.fillStyle = c3; g2.beginPath(); g2.arc(ox, oy, or_, 0, 6.2832); g2.fill();
+  // horizon stripes through the orb
+  g2.fillStyle = bg;
+  for (let y = oy; y < oy + or_; y += 7 + R() * 5) g2.fillRect(ox - or_ * 1.2, y, or_ * 2.4, 2 + R() * 3);
+  // skyline bars
+  let x = -10;
+  while (x < W + 10){
+    const w = 14 + R() * 42, h = H * (.18 + R() * .38);
+    g2.fillStyle = R() < .5 ? c1 : c2;
+    g2.globalAlpha = .18 + R() * .5;
+    g2.fillRect(x, H - h, w, h);
+    g2.globalAlpha = 1;
+    if (R() < .5){ g2.fillStyle = c3; g2.globalAlpha = .5; g2.fillRect(x + w * .3, H - h - 4, w * .4, 3); g2.globalAlpha = 1; }
+    x += w + 4 + R() * 14;
+  }
+  // beams
+  for (let k = 0; k < 2 + (R() * 3 | 0); k++){
+    g2.strokeStyle = (R() < .5 ? c1 : c2) + '55'; g2.lineWidth = 1 + R() * 2.5;
+    g2.beginPath(); g2.moveTo(R() * W, H); g2.lineTo(R() * W, 0); g2.stroke();
+  }
+  // scanlines + grain
+  g2.fillStyle = 'rgba(0,0,0,.22)';
+  for (let y = 0; y < H; y += 4) g2.fillRect(0, y, W, 1);
+  g2.fillStyle = c3;
+  for (let k = 0; k < 40; k++){ g2.globalAlpha = R() * .5; g2.fillRect(R() * W, R() * H, 1.5, 1.5); }
+  g2.globalAlpha = 1;
+  // plate
+  g2.fillStyle = 'rgba(0,0,0,.55)'; g2.fillRect(0, H - 22, W, 22);
+  g2.fillStyle = c3; g2.font = '12px "IBM Plex Mono", monospace';
+  g2.fillText(`${pack.title} · ${String(i + 1).padStart(2, '0')}/${String(pack.pieces).padStart(2, '0')}`, 8, H - 7);
+}
+
+/* ── rendering ── */
+function renderShop(cat){
+  const rec = document.getElementById('shopRecords');
+  const art = document.getElementById('shopArt');
+  const row = (it, meta) => `
+    <div class="shop-item" data-item="${esc(it.id)}">
+      <div class="si-body"><div class="si-title">${esc(it.title)}</div><div class="si-meta">${meta}</div></div>
+      ${it.owned ? '<span class="si-owned">IN CABINET</span>'
+                 : `<button class="si-buy" data-buy="${esc(it.id)}">Buy · ${price(it.cents)}</button>`}
+    </div>`;
+  rec.innerHTML = cat.records.map(r =>
+    row(r, `${r.tracks} tracks${r.demo ? ' · demo — these tracks also play free on Pulse' : ''}`)).join('')
+    || '<div class="shop-note">no records listed yet — drop an album folder into albums/</div>';
+  art.innerHTML = cat.art.map(p => row(p, `${p.pieces} prints · ${esc(p.vibe)} palette`)).join('');
+}
+function renderCabinet(){
+  const recEl = document.getElementById('cabRecords');
+  const artEl = document.getElementById('cabArt');
+  const nowId = (player.dataset.tid || '').startsWith('record:') ? player.dataset.tid.slice(7) : null;
+  const paused = player.paused;   // spinning disc only while actually playing
+  recEl.innerHTML = cabinetLib.records.map(r => `
+    <button type="button" class="cab-rec${r.id === nowId && !paused ? ' playing' : ''}" data-play="${esc(r.id)}">
+      <div class="disc"></div>
+      <div class="cr-title">${esc(r.title)}</div>
+      <div class="cr-meta">${r.id === nowId ? `${paused ? '❚❚' : '▶'} ${recordNow.idx + 1}/${r.tracks}` : r.tracks + ' tracks'}</div>
+    </button>`).join('');
+  artEl.textContent = '';
+  cabinetLib.art.forEach(pack => {
+    for (let i = 0; i < pack.pieces; i++){
+      const cv = document.createElement('canvas');
+      cv.title = `${pack.title} · ${i + 1}/${pack.pieces}`;
+      try { drawPrint(cv, pack, i); } catch { /* headless canvas */ }
+      artEl.appendChild(cv);
+    }
+  });
+}
+
+/* ── data + actions ── */
+function fetchShop(statusHtml){   // optional override, e.g. the post-buy message
+  const status = document.getElementById('shopStatus');
+  fetch('/api/shop' + devQ())
+    .then(r => (r.ok ? r.json() : Promise.reject(new Error('api'))))
+    .then(cat => {
+      renderShop(cat);
+      status.innerHTML = statusHtml || 'Test tier — purchases are stubbed (no real charge) until Stripe lands.';
+    })
+    .catch(() => {
+      document.getElementById('shopRecords').innerHTML = '<div class="shop-note">the shop is offline in this build</div>';
+      document.getElementById('shopArt').innerHTML = '';
+      status.textContent = '';
+    });
+}
+function fetchCabinet(){
+  const status = document.getElementById('cabStatus');
+  fetch('/api/shop/library' + devQ())
+    .then(async r => { if (r.ok) return r.json(); throw new Error((await r.json().catch(() => ({}))).error || 'api'); })
+    .then(lib => { cabinetLib = lib; renderCabinet(); status.textContent = ''; })
+    .catch(e => {
+      cabinetLib = { records: [], art: [] };
+      renderCabinet();
+      status.innerHTML = String(e.message).includes('sign in')
+        ? '<a href="/account.html" style="color:var(--signal)">sign in</a> to keep a cabinet'
+        : 'the cabinet is offline in this build';
+    });
+}
+document.getElementById('shopRecords').closest('.modal__panel').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-buy]');
+  if (!b) return;
+  const label = b.textContent;   // keep the priced label for error recovery
+  b.disabled = true; b.textContent = '…';
+  fetch('/api/shop/buy', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    // `user` = the dev escape hatch; ignored wherever real auth is configured.
+    body: JSON.stringify({ itemId: b.dataset.buy, user: { id: IDENTITY.id, name: IDENTITY.name } }),
+  }).then(async r => {
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || r.status);
+    // refresh with the success message (passed through so the re-render can't clobber it)
+    fetchShop('added to your cabinet ✓ · <a href="#" data-goto-cabinet style="color:var(--signal)">open the cabinet →</a>');
+    fetchCabinet();
+  }).catch(err => {
+    b.disabled = false; b.textContent = label;
+    document.getElementById('shopStatus').innerHTML = String(err.message).includes('sign in')
+      ? '<a href="/account.html" style="color:var(--signal)">sign in</a> to buy'
+      : esc(String(err.message));
+  });
+});
+// "open the cabinet →" after a purchase: swap modals in place
+shopModal.addEventListener('click', (e) => {
+  const go = e.target.closest('[data-goto-cabinet]');
+  if (!go) return;
+  e.preventDefault();
+  shopModal.hidden = true;
+  openCabinet();
+});
+cabModal.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-play]');
+  if (!b) return;
+  const album = cabinetLib.records.find(r => r.id === b.dataset.play);
+  if (!album) return;
+  if ('record:' + album.id === player.dataset.tid){ presetToggle(); renderCabinet(); return; }   // tap again = pause/resume
+  playRecord(album);
+});
+
+/* ── open/close (mirrors the contact modal pattern) ── */
+function openShop(){ shopModal.hidden = false; fetchShop(); }
+function openCabinet(){ cabModal.hidden = false; fetchCabinet(); }
+document.querySelectorAll('[data-shop-open]').forEach(el => {
+  el.style.cursor = 'pointer';
+  el.addEventListener('click', openShop);
+  // the footer icon is an <a role="button"> — give it real keyboard activation
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openShop(); }
+  });
+});
+document.querySelectorAll('[data-cabinet-open]').forEach(el => el.addEventListener('click', openCabinet));
+shopModal.querySelectorAll('[data-shop-close]').forEach(el => el.addEventListener('click', () => { shopModal.hidden = true; }));
+cabModal.querySelectorAll('[data-cabinet-close]').forEach(el => el.addEventListener('click', () => { cabModal.hidden = true; }));
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!contactModal.hidden) return;   // contact's own handler owns this Escape
+  if (!shopModal.hidden){ e.preventDefault(); shopModal.hidden = true; }
+  else if (!cabModal.hidden){ e.preventDefault(); cabModal.hidden = true; }
+});
+// pause/resume flips the disc + ▶/❚❚ marker while the cabinet is open
+player.addEventListener('play',  () => { if (!cabModal.hidden) renderCabinet(); });
+player.addEventListener('pause', () => { if (!cabModal.hidden) renderCabinet(); });
 
 /* ── Enable-sound gate ── */
 function updateEnableSound(){

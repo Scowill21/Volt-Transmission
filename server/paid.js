@@ -100,13 +100,16 @@ function stubPay(kind, cents, user){
   return { ok: true, kind, cents, payer: user.id };
 }
 
-/* Who is asking? Verified session first; the URL-param escape hatch only
-   exists while auth is unconfigured (local dev), mirroring IDENTITY layers. */
-async function requester(req){
+/* Who is asking? Verified session first; the escape hatch only exists while
+   auth is unconfigured (local dev), mirroring IDENTITY layers. Dev identity
+   rides the body ({user:{id,name}}) on POSTs, or ?uid=&name= query params on
+   GETs (server/shop.js library/streaming). Shared with the shop. */
+export async function requester(req){
   const u = await userFromRequest(req);
   if (u) return { id: u.id, name: u.name || u.email, role: u.role, verified: true };
   if (devIdentityAllowed()){
-    const b = req.body && req.body.user;
+    const b = (req.body && req.body.user)
+      || (req.query && req.query.uid && { id: req.query.uid, name: req.query.name || req.query.uid });
     if (b && b.id && b.name)
       return { id: String(b.id).slice(0, 64), name: String(b.name).slice(0, 40), role: 'listener', verified: false };
   }

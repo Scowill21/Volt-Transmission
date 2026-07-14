@@ -82,10 +82,27 @@ const API_CHANNELS = [
 // /api/me (Tier 2a): a signed-in account — the console must stamp messages
 // with it (IDENTITY hydration) and light the footer account chip.
 const API_ME = { user: { id: 'u-test-1', email: 't@example.com', name: 'Test Account', role: 'vj', appliedRole: null } };
+// Shop (test tier): a catalog with one record + one art pack; buying flips
+// `owned` and the library gains the item — enough to drive the whole UI.
+const SHOP_CAT = { prices: { albumCents: 800, artCents: 400 },
+  records: [{ id: 'rec-t', kind: 'record', title: 'Test Record', cents: 800, tracks: 2, demo: false, owned: false,
+              trackNames: ['Side A', 'Side B'] }],
+  // mirrors the server: unowned packs ship NO seed/palette (recipe is owner-only)
+  art: [{ id: 'art-t', kind: 'art', title: 'Test Prints', cents: 400, vibe: 'pulse', pieces: 3, owned: false }] };
+const SHOP_LIB = { records: [], art: [] };
 w.fetch = (url) => {
   const u = String(url);
   if (u.endsWith('/api/channels')) return Promise.resolve({ ok: true, json: () => Promise.resolve(API_CHANNELS) });
   if (u.endsWith('/api/me'))       return Promise.resolve({ ok: true, json: () => Promise.resolve(API_ME) });
+  if (u.includes('/api/shop/buy')) {
+    SHOP_CAT.records[0].owned = true;
+    SHOP_LIB.records = [{ ...SHOP_CAT.records[0], owned: true }];
+    SHOP_LIB.art = [{ ...SHOP_CAT.art[0], owned: true, seed: 7,   // library carries the recipe
+                      palette: ['#ff4fd8', '#4fd8ff', '#ffe14f', '#0a0618'] }];
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) });
+  }
+  if (u.includes('/api/shop/library')) return Promise.resolve({ ok: true, json: () => Promise.resolve(SHOP_LIB) });
+  if (u.includes('/api/shop'))         return Promise.resolve({ ok: true, json: () => Promise.resolve(SHOP_CAT) });
   return Promise.resolve({ ok: false, json: () => Promise.resolve(null) });
 };
 w.indexedDB = { open(){ return {}; } };
@@ -125,6 +142,7 @@ const script = html.match(/<script>([\s\S]*)<\/script>/)[1] +
    const __origSend = sendToTD;
    window.__resetFire = (a) => { lastFire[a] = 0; };   // step re-fires within the 70ms lockout
    window.__ended = () => player.dispatchEvent(new Event('ended'));   // player is a page-scope const
+   window.__player = () => ({ src: player.src, tid: player.dataset.tid || '' });
    window.__setRole = (r) => { IDENTITY.role = r; };                  // IDENTITY is a page-scope const
    window.__setVerified = (v) => { IDENTITY.verified = v; };          // only /api/me sets this for real
    window.__forceDrivePhone = (v) => { driveForce = v; syncDriveSuggest(); };  // v: true|false|null(auto)
@@ -469,6 +487,40 @@ step('Drive Mode: phone-gated, audio-only, hides both planes + restores on exit'
       applyQueues({ channel: '${ch}', control: { active: null, queue: [] }, songs: [] });
       setMode('presets')`);
     pump(5, 6700);
+  });
+
+  // Shop + cabinet — fetches resolve on microtasks, so yield between actions.
+  w.document.querySelector('[data-shop-open]').click();
+  await new Promise((r) => setImmediate(r));
+  step('shop: catalog renders with prices', () => {
+    const recHtml = w.document.getElementById('shopRecords').innerHTML;
+    if (!/Test Record/.test(recHtml) || !/\$8/.test(recHtml)) throw new Error('shop records: ' + recHtml.slice(0, 120));
+    if (!/Test Prints/.test(w.document.getElementById('shopArt').innerHTML)) throw new Error('art pack missing');
+  });
+  w.document.querySelector('[data-buy="rec-t"]').click();
+  await new Promise((r) => setImmediate(r));
+  step('shop: buying marks the item owned', () => {
+    if (!/IN CABINET/.test(w.document.getElementById('shopRecords').innerHTML)) throw new Error('owned mark missing after buy');
+  });
+  w.document.querySelector('[data-cabinet-open]').click();
+  await new Promise((r) => setImmediate(r));
+  step('cabinet: record card + art prints render, record plays through the deck', () => {
+    if (!/Test Record/.test(w.document.getElementById('cabRecords').innerHTML)) throw new Error('cabinet record missing');
+    if (w.document.querySelectorAll('#cabArt canvas').length !== 3) throw new Error('expected 3 print canvases');
+    // put the record on → plays via the gated stream URL through the ONE player
+    w.document.querySelector('[data-play="rec-t"]').click();
+    if (!/\/api\/shop\/records\/rec-t\/0/.test(w.eval('__player().src'))) throw new Error('record src: ' + w.eval('__player().src'));
+    if (w.eval('__player().tid') !== 'record:rec-t') throw new Error('tid: ' + w.eval('__player().tid'));
+    // Skip advances within the record; ended auto-advances (wraps)
+    w.eval('advanceTrack(1)');
+    if (!/\/rec-t\/1/.test(w.eval('__player().src'))) throw new Error('skip did not advance record');
+    w.eval('__ended()');
+    if (!/\/rec-t\/0/.test(w.eval('__player().src'))) throw new Error('ended did not wrap record');
+    // tuning a station takes the record off cleanly
+    w.eval(`presetTune('ambient')`);
+    if (w.eval('__player().tid') === 'record:rec-t') throw new Error('station tune did not clear the record');
+    w.document.querySelectorAll('[data-cabinet-close]')[1].click();
+    pump(2, 6880);
   });
 
   pump(30, 6000);

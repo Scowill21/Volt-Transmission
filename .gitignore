@@ -15,3 +15,6 @@ server/channels.json
 # Secrets — env only, never committed
 .env
 .env.*
+
+# shop purchases (test tier — 2b moves them to Postgres)
+server/.shop-data.json

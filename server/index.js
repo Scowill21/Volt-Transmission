@@ -34,6 +34,11 @@
      POST   /api/channels/:id/control/skip       end current slot            (admin)
    Preset music:
      GET    /api/audio                            manifest of audio/<Category>/ files
+   Shop + cabinet (server/shop.js — Stripe stubbed at the seams):
+     GET    /api/shop                             catalog: records + art packs
+     GET    /api/shop/library                     your purchases
+     POST   /api/shop/buy                         { itemId }
+     GET    /api/shop/records/:albumId/:n         stream a purchased track
 */
 import express from 'express';
 import path from 'node:path';
@@ -44,6 +49,7 @@ import { createStore, httpError } from './store.js';
 import { initAuth, mountAuth, authConfigured } from './auth.js';
 import { attachBus } from './bus.js';
 import { attachPaid } from './paid.js';
+import { attachShop } from './shop.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.PORT || 8787;
@@ -146,8 +152,16 @@ mountAuth(app, requireAdmin);
 /* ── paid features, test tier: control queue + song requests (server/paid.js) ── */
 attachPaid(app, requireAdmin);
 
+/* ── shop + cabinet: records + art packs (server/shop.js) ── */
+attachShop(app);
+
 /* ── the site itself (console + admin + audio/) ── */
-app.use(express.static(ROOT, { extensions: ['html'] }));
+// albums/ holds PURCHASE-GATED records — never serve it statically; tracks
+// stream only through /api/shop/records/:albumId/:n (which checks ownership).
+app.use('/albums', (req, res) => res.status(403).json({ error: 'records stream via the shop — purchase required' }));
+// dotfiles:'ignore' is serve-static's default, but the shop's purchase file
+// (server/.shop-data.json) depends on it — pin it so an upgrade can't flip it.
+app.use(express.static(ROOT, { extensions: ['html'], dotfiles: 'ignore' }));
 
 /* ── errors → JSON (store throws httpError(status, message)) ── */
 app.use((err, req, res, next) => {   // eslint-disable-line no-unused-vars
