@@ -110,6 +110,28 @@ in `CLAUDE.md`).
   `ADMIN_KEY` is auto-generated.
 - **Never commit `.env`.** Rotate anything that lands in a chat or a screenshot.
 
+### Rotating the DB password
+The original went through a chat, so rotate it. A reset takes effect
+**immediately**, so line up Render first to keep the prod window tiny — and
+while it's down the app just **fails closed** (401s), never exposes anything.
+
+> ⚠️ The new password must go straight into your password manager and the two
+> config spots below — **never paste it into a chat** (that would re-expose it).
+> Only `DATABASE_URL`'s password changes; `SUPABASE_URL` / publishable key don't.
+
+1. **Open both tabs first**, at a quiet time: Supabase → **Settings → Database**,
+   and Render → the service → **Environment**.
+2. **Reset:** Supabase → Settings → Database → **Reset database password** →
+   generate a strong one. Then **Connect → pooler** → copy the new connection
+   string. Save it in your password manager.
+3. **Render (immediately):** edit `DATABASE_URL` → paste the new string (Render
+   works on `:5432`) → **Save** (auto-redeploys). After ~1 min confirm
+   `curl …/healthz` = `{"ok":true}` and a real bid works.
+4. **Local `.env`:** open it in an editor (not `echo`, not chat) and swap the
+   password in `DATABASE_URL`, keeping port **`:6543`**. Verify with the
+   `CONNECTED ✓` command above.
+5. Done — the old password is dead, so its copies in old chat logs are inert.
+
 ### Troubleshooting
 | Symptom | Cause → fix |
 | --- | --- |
