@@ -86,6 +86,9 @@ records via `albums/<Name>/`.
 
 ## Docs to keep in sync
 
+- `HANDOFF.md` — **the state-transfer doc for new Claude sessions** (current
+  state, open items, landmines). Update it whenever something ships.
+- `MANAGE.md` — operator to-do list + runbook.
 - `SETUP.md` — operator guide: TD connection, adding songs, message schema.
 - `ROADMAP.md` — the tiered build plan (accounts → payments → streaming →
   control bus → VJ mesh). Build in tier order; each tier has a ready prompt.
