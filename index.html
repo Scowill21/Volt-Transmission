@@ -2216,7 +2216,7 @@ function makeAmbient(){
    with it, sweeping faster on MIDS) · window grids ride MIDS · neon
    flicker + drone strobes ride TREBLE · a sign flashes white (and may
    re-letter) on the SNARE · the frame shakes and the wet road ripples
-   on the KICK · traffic with LEVEL · one tower is a giant equalizer. */
+   on the KICK · traffic surges +15% on the BASS · one tower is a giant equalizer. */
 function makePulse(){
   const KATA = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワンパルス東京';
   const kchar = () => KATA[(Math.random() * KATA.length) | 0];
@@ -2382,7 +2382,7 @@ function makePulse(){
       cars.push({ x: east ? -70 : 1350, y: rnd(650, 706), v: east ? rnd(240, 430) : -rnd(240, 430), col: east ? '#fff' : '#ff5a4f' });
     }
     for (let i = cars.length - 1; i >= 0; i--){
-      const c = cars[i]; c.x += c.v * dt * (1 + S.level * .8);
+      const c = cars[i]; c.x += c.v * dt * (1 + S.bass * .15);   // traffic surges up to +15% on the bass
       g.save(); g.globalCompositeOperation = 'lighter';
       g.shadowColor = c.col; g.shadowBlur = 8 + S.bass * 16;
       g.globalAlpha = .85; g.fillStyle = c.col;
