@@ -32,9 +32,12 @@
      POST   /api/channels/:id/songs/request      { title } song request
      POST   /api/channels/:id/songs/:songId      { action: played|refund }  (admin)
      POST   /api/channels/:id/control/skip       end current slot            (admin)
+   Preset music:
+     GET    /api/audio                            manifest of audio/<Category>/ files
 */
 import express from 'express';
 import path from 'node:path';
+import { readdirSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { createStore, httpError } from './store.js';
@@ -58,6 +61,32 @@ app.use(express.json({ limit: '32kb' }));
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 app.get('/api/channels', async (req, res, next) => {
   try { res.json(await store.list()); } catch (e) { next(e); }
+});
+
+/* Preset music manifest: lists whatever files sit in audio/<Category>/ so the
+   console's Offline stations auto-play the deployed songs — drop files in the
+   folder, redeploy, done (no per-song code edit). Folder name (any case) maps
+   to a station id; only audio files are listed, natural-sorted. The console
+   falls back to the static PRESET_TRACKS when this isn't reachable. */
+const AUDIO_EXT = new Set(['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.webm']);
+const AUDIO_STATIONS = new Set(['ambient', 'pulse', 'static', 'drift']);
+app.get('/api/audio', (req, res) => {
+  const out = {};
+  try {
+    for (const dir of readdirSync(path.join(ROOT, 'audio'), { withFileTypes: true })){
+      if (!dir.isDirectory()) continue;
+      const id = dir.name.toLowerCase();
+      if (!AUDIO_STATIONS.has(id)) continue;
+      const files = readdirSync(path.join(ROOT, 'audio', dir.name))
+        .filter(f => AUDIO_EXT.has(path.extname(f).toLowerCase()))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      if (files.length) out[id] = files.map(f => ({
+        name: f.replace(/\.[^.]+$/, ''),                        // display name (extension stripped)
+        url: 'audio/' + encodeURIComponent(dir.name) + '/' + encodeURIComponent(f),
+      }));
+    }
+  } catch { /* no audio/ dir → empty manifest; the console keeps PRESET_TRACKS */ }
+  res.json(out);
 });
 
 /* Live-audio relay (Tier 3a): pipes the channel's upstream stream through our

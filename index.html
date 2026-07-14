@@ -773,10 +773,12 @@ const STATIONS = [
    the end of each track. Two ways to fill a station's playlist
    (uploads override the deployed defaults):
 
-   1. DEFAULT TRACKS (everyone hears these): put audio files in an
-      `audio/` folder next to this page and reference them here — a
-      single path, OR an array for a multi-song playlist. They deploy
-      with the site (e.g. on Render) and load for every visitor.
+   1. DEFAULT TRACKS (everyone hears these). Easiest: drop audio files
+      into `audio/<Station>/` (folders `Ambient` `Pulse` `Static` `Drift`,
+      any case) — the server's GET /api/audio lists them and they become
+      that station's playlist automatically on deploy, no code edit. The
+      map below is the fallback for static hosting with no API; reference
+      files by path — a single path, OR an array for a multi-song playlist:
         one song:  ambient: 'audio/ambient.mp3',
         playlist:  ambient: ['audio/a1.mp3', 'audio/a2.mp3'],
    2. BROWSER UPLOADS (operator-side): the ↥ button on a station card
@@ -1796,6 +1798,33 @@ player.addEventListener('error', () => {
 });
 
 volEl.addEventListener('input', () => { if (masterGain) masterGain.gain.value = volEl.value / 100; });
+
+/* Deployed preset music (server/index.js → GET /api/audio): whatever files sit
+   in audio/<Station>/ become that station's default playlist — drop songs in the
+   folder, redeploy, done, no per-song code edit. Browser uploads still override.
+   On static hosting (no API) this fetch just fails and the PRESET_TRACKS defaults
+   above stand. */
+if (typeof fetch === 'function'){
+  fetch('/api/audio')
+    .then(r => (r.ok ? r.json() : null))
+    .then(manifest => {
+      if (!manifest || typeof manifest !== 'object') return;
+      let any = false;
+      STATIONS.forEach(s => {
+        const files = manifest[s.id];
+        if (Array.isArray(files) && files.length){
+          defaults[s.id] = files.map(t => ({ name: String(t.name || t.url), url: String(t.url) }));
+          any = true;
+        }
+      });
+      if (!any) return;
+      STATIONS.forEach(s => updateStationCard(s.id));
+      // cue the current station off its new default list — only when it's not on
+      // browser uploads; presetTune cues without starting playback unless already playing
+      if (mode === 'presets' && !(uploads[currentStation] && uploads[currentStation].length)) presetTune(currentStation);
+    })
+    .catch(() => {});   // no API (static host / file://) → PRESET_TRACKS defaults stand
+}
 
 /* ── Drive Mode wiring (state + isPhone() are defined above, near applyStage).
    enterDrive only toggles the overlay and re-runs applyStage — it never mutates
