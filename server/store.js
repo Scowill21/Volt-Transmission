@@ -46,22 +46,133 @@ export function httpError(status, message){
   const e = new Error(message); e.status = status; return e;
 }
 
+/* ── Items (Volt Control — pay-to-control objects, server/items.js) ──
+   Durable definitions only; runtime queue/auction state lives in items.js.
+   Codes are 6 chars from an unambiguous alphabet (no 0/O/1/I) — they get
+   read aloud at events and typed on phones. */
+export const ITEM_MODES = ['buynow', 'auction'];
+export const ITEM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
+const ITEM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function randomItemCode(){
+  let s = '';
+  for (let i = 0; i < 6; i++) s += ITEM_CODE_ALPHABET[Math.floor(Math.random() * ITEM_CODE_ALPHABET.length)];
+  return s;
+}
+
+// Admin-supplied numbers are clamped into sane ranges (friendly for the
+// dashboard); user-supplied bid amounts are validated STRICTLY in items.js.
+function itemInt(v, min, max, name){
+  const n = Math.round(+v);
+  if (!Number.isFinite(n)) throw httpError(400, `${name} must be a number`);
+  return Math.min(max, Math.max(min, n));
+}
+const ITEM_FIELDS = {
+  priceCents:        [0, 50000],   // buy-now price / auction starting bid — hard cap $500
+  slotSeconds:       [10, 3600],
+  auctionSeconds:    [15, 600],    // soft-close countdown length
+  minIncrementCents: [1, 10000],
+};
+
+function normalizeNewItem(props = {}){
+  const name = String(props.name || '').trim().slice(0, 60);
+  if (!name) throw httpError(400, 'name required');
+  const mode = props.mode === undefined ? 'buynow' : props.mode;
+  if (!ITEM_MODES.includes(mode)) throw httpError(400, `mode must be one of ${ITEM_MODES.join('|')}`);
+  const defaults = { priceCents: 500, slotSeconds: 120, auctionSeconds: 60, minIncrementCents: 50 };
+  const item = { code: null, name, mode,
+    description: String(props.description || '').trim().slice(0, 200) || null,
+    status: 'on', createdAt: new Date().toISOString() };
+  for (const [f, [min, max]] of Object.entries(ITEM_FIELDS))
+    item[f] = props[f] === undefined ? defaults[f] : itemInt(props[f], min, max, f);
+  return item;
+}
+
+function applyItemPatch(item, patch = {}){
+  if (patch.name !== undefined){
+    const name = String(patch.name).trim().slice(0, 60);
+    if (!name) throw httpError(400, 'name required');
+    item.name = name;
+  }
+  if (patch.description !== undefined)
+    item.description = String(patch.description || '').trim().slice(0, 200) || null;
+  if (patch.mode !== undefined){
+    if (!ITEM_MODES.includes(patch.mode)) throw httpError(400, `mode must be one of ${ITEM_MODES.join('|')}`);
+    item.mode = patch.mode;
+  }
+  if (patch.status !== undefined){
+    if (!['on', 'off'].includes(patch.status)) throw httpError(400, 'status must be on|off');
+    item.status = patch.status;
+  }
+  for (const [f, [min, max]] of Object.entries(ITEM_FIELDS))
+    if (patch[f] !== undefined) item[f] = itemInt(patch[f], min, max, f);
+  return item;
+}
+
 // The live pg pool when running on Postgres (null in JSON-file mode).
 // auth.js shares it for the profiles table instead of opening a second pool.
 let sharedPool = null;
 export const getPool = () => sharedPool;
 
 /* ── JSON-file backend (local dev) ────────────────────────────────── */
-class FileStore {
-  constructor(file){
+export class FileStore {
+  constructor(file, itemsFile){
     this.file = file;
+    this.itemsFile = itemsFile || path.join(path.dirname(file), 'items.json');
     if (!fs.existsSync(file)){
       fs.mkdirSync(path.dirname(file), { recursive: true });
       this._write(SEED);
     }
+    if (!fs.existsSync(this.itemsFile)) this._writeItems([]);
   }
   _read(){ return JSON.parse(fs.readFileSync(this.file, 'utf8')); }
   _write(data){ fs.writeFileSync(this.file, JSON.stringify(data, null, 2)); }
+  // Items reads must never take the site down (index.js loads them at boot,
+  // and the JSON store is also the documented prod fallback when Postgres is
+  // unreachable): a corrupt file is set aside — not deleted — and treated as
+  // empty. Writes are atomic (tmp + rename) so a mid-write crash can't
+  // truncate the file in the first place.
+  _readItems(){
+    try { return JSON.parse(fs.readFileSync(this.itemsFile, 'utf8')); }
+    catch (e){
+      const bak = this.itemsFile + '.corrupt-' + Date.now();
+      try { fs.renameSync(this.itemsFile, bak); } catch { /* already gone */ }
+      console.error(`[store] items file unreadable (${e.message}) — set aside as ${bak}, starting empty`);
+      this._writeItems([]);
+      return [];
+    }
+  }
+  _writeItems(data){
+    const tmp = this.itemsFile + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, this.itemsFile);
+  }
+
+  async listItems(){ return this._readItems(); }
+
+  async createItem(props){
+    const item = normalizeNewItem(props);
+    const data = this._readItems();
+    const taken = new Set(data.map(i => i.code));
+    do { item.code = randomItemCode(); } while (taken.has(item.code));
+    data.push(item);
+    this._writeItems(data);
+    return item;
+  }
+
+  async updateItem(code, patch){
+    const data = this._readItems();
+    const item = data.find(i => i.code === code);
+    if (!item) throw httpError(404, 'item not found');
+    applyItemPatch(item, patch);
+    this._writeItems(data);
+    return item;
+  }
+
+  async deleteItem(code){
+    const data = this._readItems();
+    if (!data.some(i => i.code === code)) throw httpError(404, 'item not found');
+    this._writeItems(data.filter(i => i.code !== code));
+  }
 
   async list(){ return this._read(); }
 
@@ -164,6 +275,21 @@ class PgStore {
     `);
     // Tier 3a: live channel audio — additive migration for existing tables.
     await this.pool.query('ALTER TABLE channels ADD COLUMN IF NOT EXISTS audio_url TEXT');
+    // Volt Control items (pay-to-control objects — server/items.js).
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS items (
+        code                TEXT PRIMARY KEY,
+        name                TEXT NOT NULL,
+        description         TEXT,
+        mode                TEXT NOT NULL DEFAULT 'buynow',
+        price_cents         INT  NOT NULL DEFAULT 500,
+        slot_seconds        INT  NOT NULL DEFAULT 120,
+        auction_seconds     INT  NOT NULL DEFAULT 60,
+        min_increment_cents INT  NOT NULL DEFAULT 50,
+        status              TEXT NOT NULL DEFAULT 'on',
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `);
     const { rows } = await this.pool.query('SELECT COUNT(*)::int AS n FROM channels');
     if (rows[0].n === 0) for (const c of SEED){
       await this.pool.query('INSERT INTO channels (id, name, default_scene) VALUES ($1,$2,$3)', [c.id, c.name, c.defaultScene]);
@@ -259,6 +385,54 @@ class PgStore {
     // Tidy the profile if nothing references it anymore.
     await this.pool.query(
       'DELETE FROM vj_profiles WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM channel_vjs WHERE vj_id = $1)', [vjId]);
+  }
+
+  /* items (Volt Control) — same client shape as the FileStore */
+  _itemRow(r){
+    return { code: r.code, name: r.name, description: r.description, mode: r.mode,
+      priceCents: r.price_cents, slotSeconds: r.slot_seconds, auctionSeconds: r.auction_seconds,
+      minIncrementCents: r.min_increment_cents, status: r.status,
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at };
+  }
+
+  async listItems(){
+    const { rows } = await this.pool.query('SELECT * FROM items ORDER BY created_at');
+    return rows.map(r => this._itemRow(r));
+  }
+
+  async createItem(props){
+    const item = normalizeNewItem(props);
+    for (;;){                                   // 32^6 codes — collisions are lottery-rare
+      item.code = randomItemCode();
+      try {
+        await this.pool.query(
+          `INSERT INTO items (code, name, description, mode, price_cents, slot_seconds,
+             auction_seconds, min_increment_cents, status, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [item.code, item.name, item.description, item.mode, item.priceCents, item.slotSeconds,
+           item.auctionSeconds, item.minIncrementCents, item.status, item.createdAt]);
+        return item;
+      } catch (e){
+        if (e.code !== '23505') throw e;        // anything but a code collision is real
+      }
+    }
+  }
+
+  async updateItem(code, patch){
+    const { rows } = await this.pool.query('SELECT * FROM items WHERE code = $1', [code]);
+    if (!rows.length) throw httpError(404, 'item not found');
+    const item = applyItemPatch(this._itemRow(rows[0]), patch);
+    await this.pool.query(
+      `UPDATE items SET name=$2, description=$3, mode=$4, price_cents=$5, slot_seconds=$6,
+         auction_seconds=$7, min_increment_cents=$8, status=$9 WHERE code=$1`,
+      [code, item.name, item.description, item.mode, item.priceCents, item.slotSeconds,
+       item.auctionSeconds, item.minIncrementCents, item.status]);
+    return item;
+  }
+
+  async deleteItem(code){
+    const { rowCount } = await this.pool.query('DELETE FROM items WHERE code = $1', [code]);
+    if (!rowCount) throw httpError(404, 'item not found');
   }
 }
 

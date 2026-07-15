@@ -48,6 +48,7 @@ function route(m){
   if (m.type === 'key' && m.action === 'blackout') osc('/volt/key/blackout', who, m.state || '');
   else if (m.type === 'key')                       osc('/volt/key/' + m.action, who);
   else if (m.type === 'transport')                 osc('/volt/transport/' + m.action, who);
+  else if (m.type === 'item' && m.action)          osc('/volt/item/' + m.action, who, m.item || '');  // item state (pause/off/slot_start/…)
   else                                             osc('/volt/' + m.type, JSON.stringify(m).slice(0, 240));
   console.log(`→ osc://${oscHost}:${oscPort}  ${m.type}${m.action ? '/' + m.action : ''}  (${who})`);
 }

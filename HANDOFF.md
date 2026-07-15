@@ -74,6 +74,21 @@ Everything below is **deployed and working in production** unless marked.
   backbeat, kick `(.75,300)` ≈ four-on-floor. Pulse: cars +25% on bass,
   searchlights flash on snare (alpha ~.2→~.74).
 - **Drive Mode** — phone-only audio-first view; auto-suggests on phones.
+- **VOLT CONTROL — pay-to-control items (test tier)** — `server/items.js` +
+  `control.html` (+ items table/JSON in `store.js`): items with 6-char codes
+  + printable QR to `/control?item=<CODE>`; buy-now queue or soft-close
+  auction wins a timed slot; the holder's phone becomes a d-pad/A-B-C
+  controller publishing `pad_*`/`btn_*` on bus room `item:<CODE>`.
+  `bus.js`'s single keyGate became a **gate registry** (paid.js claims only
+  scene_1..4 outside `item:` rooms and its endpoints 404 on `item:` ids;
+  items.js owns `item:` rooms — territories provably disjoint). New RESERVED
+  types `item` (state announcements TD parses: slot_start/slot_end/skip/
+  pause/resume/on/off/auction_won) + `item_queues` (full public state).
+  Admin ops in control.html's ⚙ view (memory-held X-Admin-Key); admin.html
+  cross-links. account.html grew a validated `?return=` redirect. The QR
+  encoder is hand-written in control.html (byte mode, EC-M, v1–10) and was
+  round-trip-verified against jsqr. Same STRIPE stub seams as paid.js;
+  runtime resets on deploy.
 - **⚠️ CABINET DEMO LOOK IS ON** — `CABINET_DEMO = true` in `index.html`
   renders a furnished, NON-functional cabinet preview (3 fake records + 12
   prints; clicks explain). **When William says "remove demo": flip that one
@@ -95,7 +110,9 @@ Everything below is **deployed and working in production** unless marked.
 ```bash
 node .smoke-test.cjs        # client: whole console in jsdom (~20 steps)
 node .smoke-server.cjs      # server: paid gate + shop gates (15 checks, hermetic)
-node .smoke-failclosed.cjs  # boots real server w/ Supabase env set + DB down → 401s
+node .smoke-failclosed.cjs  # boots real server w/ Supabase env set + DB down → 401s (incl. item buy/bid)
+node .smoke-items.cjs       # server: Volt Control items (23 checks, hermetic)
+node .smoke-control.cjs     # client: control.html in jsdom (14 checks)
 ```
 
 Extend them with every feature (CLAUDE.md rule). They are the ONLY gate —
@@ -179,7 +196,21 @@ there is no CI.
   "password authentication failed"; a TIMEOUT is network/port (see the
   `:6543` note). `connectionTimeoutMillis` can hide the real error.
 - Purchases (`server/.shop-data.json`) and paid queues are in-memory/file at
-  this tier — they reset on restart/deploy. Documented; 2b fixes.
+  this tier — they reset on restart/deploy. Documented; 2b fixes. Item
+  DEFINITIONS survive (items table / gitignored `server/items.json`); item
+  queues/auctions do not.
+- **Block comments cannot contain `pad_*/btn_*`** — the `*/` closes the
+  comment (a real boot-breaking incident in items.js). Write "pad/btn".
+- Items landmines: item codes are stored UPPERCASE (routes normalize);
+  admin PATCH deliberately 400s on `status` (on/off must go through
+  `POST /state` so the change is ANNOUNCED to TD); `items.js` keeps a
+  memory mirror of the store (loaded at attach) — mutate items only through
+  its routes or the mirror goes stale; `.smoke-items.cjs` drives time by
+  rewinding `endsAt` via the module's `__test` hook, never by sleeping.
+- The Claude-preview launch entry `volt-api-dev` (in ~/.claude/launch.json)
+  boots the server auth-unconfigured (env -u …) on port 8794 — that's the
+  one to use for driving buy/bid flows in a browser locally; plain
+  `volt-api` loads `.env` and correctly fails closed.
 
 ---
 

@@ -24,15 +24,28 @@ const rooms = new Map();                       // channelId -> Set<ws>
 const RATE = { burst: 20, perSec: 8 };         // per-socket publish budget
 const ADMIN_KEY = process.env.ADMIN_KEY || 'dev';   // single source (mirrors index.js)
 
-// Control-plane message types the SERVER originates (paid.js broadcasts these).
-// Clients may never inject them — otherwise any peer could forge queue/lock
-// state or fake "denied" notices to the whole room.
-const RESERVED = new Set(['queues', 'denied']);
+// Control-plane message types the SERVER originates (paid.js broadcasts
+// 'queues'; items.js broadcasts 'item' + 'item_queues'). Clients may never
+// inject them — otherwise any peer could forge queue/lock/auction state or
+// fake "denied" notices to the whole room.
+const RESERVED = new Set(['queues', 'denied', 'item', 'item_queues']);
 
-// Pluggable permission check for LIVE ACTIONS (keys scene_1..4) — installed
-// by server/paid.js (takeover sessions). Returns { ok } or { ok:false, reason }.
-let keyGate = null;
-export function setKeyGate(fn){ keyGate = fn; }
+// Pluggable permission checks for {type:'key'} actions. Each paid product
+// registers ONE gate; every key message is offered to every gate, which
+// answers null ("not mine — someone else's action/territory") or a verdict
+// { ok } / { ok:false, reason }. First verdict wins; no verdict = open.
+// Territories are disjoint by construction: paid.js gates scene_1..4 in
+// radio-channel rooms and ignores item:-prefixed rooms; items.js gates
+// item:-prefixed rooms only (pad_*/btn_* controller input).
+const keyGates = [];
+export function registerKeyGate(fn){ keyGates.push(fn); }
+function gateVerdict(channel, sender, msg){
+  for (const gate of keyGates){
+    const v = gate(channel, sender, msg);
+    if (v) return v;
+  }
+  return { ok: true };
+}
 
 export function publish(channel, msg, exceptWs){
   const room = rooms.get(channel);
@@ -75,9 +88,10 @@ export function attachBus(server, app){
       try { msg = JSON.parse(String(data).slice(0, 4096)); } catch { return; }
       if (!msg || typeof msg.type !== 'string') return;
       if (RESERVED.has(msg.type)) return;      // clients can't forge server control-plane types
-      // Takeover gating: live actions only pass for whoever holds the controls.
-      if (keyGate && msg.type === 'key' && /^scene_[1-4]$/.test(msg.action || '')){
-        const verdict = keyGate(channel, ws, msg);
+      // Gating: key actions only pass for whoever holds the relevant controls
+      // (paid.js: scene_1..4 takeover · items.js: pad/btn in item rooms).
+      if (msg.type === 'key'){
+        const verdict = gateVerdict(channel, ws, msg);
         if (!verdict.ok){
           try { ws.send(JSON.stringify({ type: 'denied', action: msg.action, reason: verdict.reason })); } catch {}
           return;
@@ -123,10 +137,10 @@ export function attachBus(server, app){
       return res.status(400).json({ error: 'body must be a message with a "type"' });
     if (RESERVED.has(msg.type))
       return res.status(400).json({ error: 'reserved (server-originated) message type' });
-    // Same takeover gate as the socket path (X-Admin-Key acts as privileged).
-    if (keyGate && msg.type === 'key' && /^scene_[1-4]$/.test(msg.action || '')){
+    // Same gates as the socket path (X-Admin-Key acts as privileged).
+    if (msg.type === 'key'){
       const admin = req.get('x-admin-key') === ADMIN_KEY;
-      const verdict = keyGate(req.params.id, { _user: admin ? { role: 'admin' } : null }, msg);
+      const verdict = gateVerdict(req.params.id, { _user: admin ? { role: 'admin' } : null }, msg);
       if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
     }
     const delivered = publish(req.params.id, { ts: Date.now(), ...msg }, null);

@@ -82,13 +82,28 @@ Follow `PAYMENTS-SETUP.md` §2–§3. In order:
   **End control slot** to cut a takeover short. *(After Tier 2b, Refund/End also
   issue the Stripe refund.)*
 
+### Volt Control items — `/control` → ⚙ gear (same admin key)
+- **Create an item:** name, buy-now or auction, price, slot seconds → the
+  6-char code appears with its QR. **Print** gives a poster-ready sheet
+  (big QR + name + code); tape it to the physical thing.
+- **Event day, one-handed:** each item card has **Skip** (end the current
+  slot), **Pause/Resume** (freezes the holder's remaining time + their
+  controls), **Off/On** (off = not sellable, controller dead — pause first
+  if someone is mid-slot so they don't burn paid time), **Edit**, **Delete**.
+- Wire TouchDesigner to the item's bus room first (SETUP.md → "Volt Control")
+  and test with the HTTP inject before doors open.
+- Queues/auctions are in-memory at this tier — a deploy or restart clears
+  them (item definitions survive; they're in the database).
+
 ### Testing — run before every push
 ```bash
 node .smoke-test.cjs        # client: every console path (jsdom)
 node .smoke-server.cjs      # server: the paid permission gate
 node .smoke-failclosed.cjs  # server: fail-closed on a DB outage
+node .smoke-items.cjs       # server: Volt Control items product
+node .smoke-control.cjs     # client: the /control page (jsdom)
 ```
-All three must print `ALL CLEAR`. Extend them when you add features (it's a rule
+All five must print `ALL CLEAR`. Extend them when you add features (it's a rule
 in `CLAUDE.md`).
 
 ### Monitoring & health

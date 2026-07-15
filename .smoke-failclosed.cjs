@@ -84,6 +84,18 @@ async function waitForBoot(tries){
     if (r.status !== 401) fail(`minutes-knob bid should 401 during outage, got ${r.status}`);
     ok('minutes-knob bid → 401 (knob unreachable in production intent)');
 
+    // Volt Control items (server/items.js) share the same posture: with
+    // Supabase env set, payload identity on /buy and /bid must be rejected
+    // even while the DB is down — never trusted. (Identity is checked before
+    // the item lookup, so any well-formed code proves it.)
+    r = await req('POST', '/api/items/ZZZZZZ/buy', { user: { id: 'attacker', name: 'Mallory' } });
+    if (r.status !== 401) fail(`item buy should 401 during outage, got ${r.status}: ${r.body}`);
+    ok('payload-identity item buy → 401 (fail-closed)');
+
+    r = await req('POST', '/api/items/ZZZZZZ/bid', { cents: 500, user: { id: 'attacker', name: 'Mallory' } });
+    if (r.status !== 401) fail(`item bid should 401 during outage, got ${r.status}: ${r.body}`);
+    ok('payload-identity item bid → 401 (fail-closed)');
+
     // Sanity: the public read still works and creates no state.
     r = await req('GET', '/api/channels/volt-fm/queues');
     if (r.status !== 200) fail(`GET /queues should 200, got ${r.status}`);

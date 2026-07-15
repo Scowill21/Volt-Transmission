@@ -29,8 +29,17 @@ footer Shop/Cabinet modals play records through the analyser chain. **Drive Mode
 that kills the canvas scenes (battery) and shows only station/track + big
 play/pause + volume; detection is `isPhone()` (matchMedia coarse+hover:none
 + ≤500px short side, `?drive=1|0` override), it never mutates mode/plane/
-audio and restores on exit. `src/` + `react-app.html` is an archived React
-variant — reference only, don't extend it.
+audio and restores on exit. **VOLT CONTROL** (`control.html` + `server/items.js`,
+same stub-pay tier): pay-to-control physical items driven by TD — each item
+has a 6-char code + QR to `/control?item=<CODE>`; buy-now queue or soft-close
+auction wins a timed slot; the holder gets a d-pad/A-B-C touch controller whose
+presses ride the action bus (room `item:<CODE>`, actions `pad_*`/`btn_*`) with
+server-side gate enforcement (bus.js gate REGISTRY — paid.js gates scene_1..4
+in radio rooms, items.js owns `item:` rooms; `item`/`item_queues` are RESERVED);
+item defs persist via store.js (items table / `server/items.json`), runtime
+queues reset on deploy like paid.js; admin ops live in control.html's gear view
+(same X-Admin-Key), QR encoder is embedded + decoder-verified. `src/` +
+`react-app.html` is an archived React variant — reference only, don't extend it.
 
 ## Golden rules
 
@@ -65,6 +74,8 @@ npm i jsdom              # once
 node .smoke-test.cjs     # client: headless run of every console path (jsdom)
 node .smoke-server.cjs   # server: the paid control gate (in-process, auth-unconfigured)
 node .smoke-failclosed.cjs  # server: fail-closed on DB outage (boots a child w/ Supabase env set + DB down)
+node .smoke-items.cjs    # server: Volt Control items (queue, auction, gate, territory)
+node .smoke-control.cjs  # client: control.html in jsdom (views, controller, throttle, QR)
 ```
 
 `.smoke-test.cjs` evals the whole page script (also catches syntax errors) and
@@ -73,8 +84,13 @@ the paid-takeover client mirror, and Drive Mode. `.smoke-server.cjs` proves the
 server-side permission gate (non-holder denied, holder passes, admin bypass,
 forged-type rejected, no create-on-read). `.smoke-failclosed.cjs` guards the
 headline security invariant: with Supabase env set but Postgres down, the
-payload-identity escape hatch stays CLOSED (bids 401). Keep all three green and
-extend them when adding features.
+payload-identity escape hatch stays CLOSED (bids AND item buys/bids 401).
+`.smoke-items.cjs` covers the items product end to end (create → buy/queue →
+expiry/skip/pause/off → auction arm/soft-close/win → gate verdicts → the
+paid-vs-items territory split). `.smoke-control.cjs` drives control.html
+headlessly (code entry, both item modes, slot-grant → controller, stamped
+presses, the ≤8 Hz throttle, admin unlock, QR structure). Keep all five green
+and extend them when adding features.
 
 ## Deploy
 

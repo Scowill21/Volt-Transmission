@@ -468,6 +468,94 @@ Paid queues → **Played** / **Refund**.
 
 ---
 
+## Volt Control — pay-to-control items (test tier)
+
+The second paid product: **physical/visual "items" driven by TouchDesigner
+that the public pays to control from their phone.** A lamp rig, a laser
+head, a projected creature — anything TD can move.
+
+**The flow.** Each item gets a **6-character code** and a **QR** that opens
+`https://<site>/control?item=<CODE>`. Anyone can watch (holder, countdown,
+queue/auction — no account); paying needs a signed-in account. Buy-now
+items sell timed slots into a queue (with estimated start times); auction
+items run **soft-close rounds** — the first bid arms the countdown
+(default 60 s), a bid in the final 10 s adds 10 s, the top bid at zero
+takes the slot, and the next round arms on the first bid after that slot
+ends. The winner's phone becomes a **controller**: a d-pad + A/B/C buttons,
+throttled under the bus rate budget, keyboard fallback on desktop.
+
+### Wiring an item to TouchDesigner
+
+Every item is a normal action-bus room named `item:<CODE>`. WebSocket DAT:
+
+```
+wss://<your-site>.onrender.com/api/bus?channel=item:7KP3QX&as=vj
+```
+
+**Controller input** is the same stamped `key` schema as the console:
+
+```json
+{ "type": "key", "action": "pad_up", "ts": 1784079724347,
+  "user": { "id": "…", "name": "Ada", "role": "listener", "sid": "…" } }
+```
+
+with actions `pad_up · pad_down · pad_left · pad_right · btn_a · btn_b ·
+btn_c`. **The server only lets the current slot holder's presses through**
+(verified session bound at the WS handshake; vj/radio/admin bypass;
+paused/off items pass nothing) — your TD patch can trust every `key` it
+receives in an item room.
+
+**Item state** arrives as server-originated (unforgeable) messages:
+
+```json
+{ "type": "item", "action": "slot_start", "item": "7KP3QX",
+  "user": { "id": "…", "name": "Ada" }, "ts": … }
+```
+
+with actions `slot_start · slot_end · skip · pause · resume · on · off ·
+auction_won` — park the rig on `slot_end`/`pause`/`off`, celebrate on
+`auction_won`. (`item_queues` messages also ride the room — the full public
+state the phones render; ignore or mine them as you like.)
+
+### OSC (Resolume, VDMX, chataigne…)
+
+`tools/bus-to-osc.mjs` forwards item rooms with zero config — point it at
+the item's bus URL. Additions to the address table:
+
+| OSC address | Fires when |
+| --- | --- |
+| `/volt/key/pad_up` … `pad_right` | the holder presses the d-pad (arg = name) |
+| `/volt/key/btn_a` … `btn_c` | the holder presses A / B / C |
+| `/volt/item/slot_start` … | item state changes (arg 1 = name, arg 2 = code) |
+
+### Running it (operator)
+
+1. `/control` → **⚙ gear** → your admin key → **Create item** (name, mode,
+   price, slot seconds). The code + QR appear — **Print** makes a
+   poster-ready sheet (big QR, name, code as text fallback).
+2. Wire TD to `item:<CODE>` (above) and test without a phone:
+   ```bash
+   curl -X POST https://<site>/api/channels/item:<CODE>/actions \
+     -H 'Content-Type: application/json' -H 'X-Admin-Key: <key>' \
+     -d '{"type":"key","action":"pad_up","user":{"name":"test"}}'
+   ```
+   (The gate applies to injection too — X-Admin-Key acts as the privileged
+   sender; without it a non-holder inject is denied, which is the product
+   working.)
+3. Event day: the same gear view does **Skip / Pause / Off / Edit** per item,
+   one-handed on a phone. Pause freezes the holder's remaining time; Off
+   stops sales and kills the controller (pause first if someone's mid-slot).
+4. Local dev testing uses the same escape hatch as the paid queues: run
+   auth-unconfigured and open `/control?item=<CODE>&uid=u-ada&name=Ada`,
+   or curl `/api/items/<CODE>/buy` with `{"user":{…}}`.
+
+Queues and auction rounds are **in-memory** at this tier (restart clears
+them; item definitions persist in the store). Money is stubbed at `STRIPE:`
+seams in `server/items.js` — Tier 2b converts buys to Checkout and bids to
+authorize-on-bid / capture-winner / release-losers.
+
+---
+
 ## The shop + cabinet (records & art — test tier)
 
 Footer → **Shop** (or the bag icon). Two kinds of products, payment stubbed

@@ -1,0 +1,1269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Volt Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+/* ═══ Volt Control — clean minimal, bright, thumb-first ═══
+   Deliberately NOT the neon console: this is a walk-up product people open
+   from a QR code at an event. Big targets, plain words, no visual noise.
+   Same golden rules as index.html: ONE file, no bundler, no external JS,
+   no localStorage. */
+:root{
+  --bg:#faf8f4; --card:#ffffff; --ink:#191512; --sub:#7d7468;
+  --accent:#d1720f; --accent-ink:#a35708; --accent-soft:#fdeedb;
+  --ok:#178f5f; --ok-soft:#e2f5ec; --warn:#cf3f3f; --warn-soft:#fbe9e9;
+  --edge:#e9e2d6; --shadow:0 1px 3px rgba(35,25,10,.07), 0 6px 18px rgba(35,25,10,.05);
+  --disp:'Space Grotesk', system-ui, -apple-system, sans-serif;
+  --r:16px;
+}
+*{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html, body{ height:100%; }
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--disp); font-size:1rem; line-height:1.45;
+  -webkit-font-smoothing:antialiased; touch-action:manipulation;
+}
+[hidden]{ display:none !important; }
+button{ font-family:var(--disp); cursor:pointer; }
+a{ color:var(--accent-ink); }
+
+.shell{ max-width:520px; margin:0 auto; padding:1rem 1.1rem 3rem; }
+.top{ display:flex; align-items:center; gap:.6rem; padding:.4rem 0 1.2rem; }
+.wordmark{ font-weight:700; letter-spacing:.02em; font-size:1.02rem; }
+.wordmark .bolt{ color:var(--accent); }
+.top .acct{
+  margin-left:auto; font-size:.8rem; color:var(--sub); text-decoration:none;
+  border:1px solid var(--edge); border-radius:999px; padding:.35rem .8rem; background:var(--card);
+}
+.top .gear{
+  border:1px solid var(--edge); background:var(--card); color:var(--sub);
+  border-radius:999px; width:2.3rem; height:2.3rem; font-size:1rem; line-height:1;
+}
+
+h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; }
+.sub{ color:var(--sub); margin:0 0 1.6rem; }
+
+.card{
+  background:var(--card); border:1px solid var(--edge); border-radius:var(--r);
+  box-shadow:var(--shadow); padding:1.1rem 1.15rem; margin-bottom:.9rem;
+}
+.btn{
+  display:block; width:100%; border:none; border-radius:14px;
+  padding:1rem 1.2rem; font-size:1.05rem; font-weight:700; letter-spacing:.01em;
+  background:var(--accent); color:#fff; min-height:56px;
+}
+.btn:active{ transform:scale(.985); }
+.btn[disabled]{ opacity:.45; }
+.btn.ghost{ background:var(--card); color:var(--ink); border:1.5px solid var(--edge); font-weight:500; }
+.btn.slim{ min-height:44px; padding:.6rem 1rem; font-size:.92rem; }
+.row{ display:flex; gap:.6rem; }
+.row > *{ flex:1; }
+
+/* ── code entry ── */
+.code-wrap{ display:flex; justify-content:center; margin:1.4rem 0 .9rem; }
+#codeInput{
+  width:100%; max-width:340px; text-align:center; text-transform:uppercase;
+  font-family:ui-monospace, Menlo, monospace; font-size:2rem; font-weight:600;
+  letter-spacing:.45em; padding:.7rem .2rem .7rem .65em;
+  border:2px solid var(--edge); border-radius:14px; background:var(--card); color:var(--ink);
+  caret-color:var(--accent);
+}
+#codeInput:focus-visible{ outline:none; border-color:var(--accent); }
+#codeInput::placeholder{ color:#d8d0c2; letter-spacing:.45em; }
+.err{ color:var(--warn); font-size:.9rem; min-height:1.3em; text-align:center; margin:.5rem 0; }
+
+/* ── item view ── */
+.item-head{ display:flex; align-items:center; gap:.7rem; margin-bottom:.2rem; }
+.item-head h2{ margin:0; font-size:1.45rem; flex:1; }
+.chip{
+  font-size:.72rem; font-weight:700; letter-spacing:.09em; padding:.3rem .7rem;
+  border-radius:999px; white-space:nowrap;
+}
+.chip.live{ background:var(--ok-soft); color:var(--ok); }
+.chip.paused{ background:var(--accent-soft); color:var(--accent-ink); }
+.chip.off{ background:var(--warn-soft); color:var(--warn); }
+.desc{ color:var(--sub); font-size:.92rem; margin:.2rem 0 1rem; }
+.back{ background:none; border:none; color:var(--sub); font-size:.88rem; padding:.2rem 0; }
+
+.holder-name{ font-weight:700; }
+.meter{ height:10px; border-radius:999px; background:var(--accent-soft); overflow:hidden; margin:.55rem 0 .35rem; }
+.meter i{ display:block; height:100%; background:var(--accent); border-radius:999px; transition:width .25s linear; }
+.meter.paused i{ background:var(--sub); }
+.time-line{ font-size:.86rem; color:var(--sub); }
+.mini{ font-size:.8rem; color:var(--sub); }
+
+.price{ font-size:1.9rem; font-weight:700; margin:.1rem 0 .8rem; }
+.price small{ font-size:.85rem; font-weight:500; color:var(--sub); margin-left:.4rem; }
+
+.queue{ list-style:none; margin:.8rem 0 0; padding:0; }
+.queue li{
+  display:flex; align-items:center; gap:.6rem; padding:.55rem .7rem;
+  border:1px solid var(--edge); border-radius:12px; margin-bottom:.45rem; font-size:.92rem;
+}
+.queue li.me{ border-color:var(--accent); background:var(--accent-soft); }
+.queue .pos{ font-weight:700; color:var(--accent-ink); min-width:1.4em; }
+.queue .eta{ margin-left:auto; color:var(--sub); font-size:.8rem; }
+
+.bid-top{ display:flex; align-items:baseline; gap:.7rem; }
+.bid-top .amount{ font-size:1.9rem; font-weight:700; }
+.count{ font-variant-numeric:tabular-nums; font-weight:700; color:var(--accent-ink); }
+.chips{ display:flex; gap:.5rem; margin:.8rem 0; }
+.chips button{
+  flex:1; border:1.5px solid var(--edge); background:var(--card); border-radius:12px;
+  padding:.65rem .3rem; font-size:.95rem; font-weight:600; min-height:48px;
+}
+.chips button[aria-pressed="true"]{ border-color:var(--accent); background:var(--accent-soft); color:var(--accent-ink); }
+.custom-bid{ display:flex; gap:.5rem; align-items:center; margin-bottom:.8rem; }
+.custom-bid input{
+  flex:1; font-size:1.05rem; padding:.6rem .7rem; border:1.5px solid var(--edge);
+  border-radius:12px; min-height:48px; font-family:var(--disp); background:var(--card); color:var(--ink);
+}
+.note{ font-size:.85rem; color:var(--sub); }
+.note.ok{ color:var(--ok); }
+.note.warn{ color:var(--warn); }
+
+.signin{ background:var(--accent-soft); border-color:var(--accent); }
+.signin a{ font-weight:700; }
+
+/* ── controller ── */
+#viewController{
+  position:fixed; inset:0; background:var(--bg); z-index:40;
+  display:flex; flex-direction:column; padding:max(.7rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+  touch-action:none; user-select:none; -webkit-user-select:none;
+}
+.ctl-top{ display:flex; align-items:center; gap:.8rem; }
+.ctl-top .meter{ flex:1; margin:0; }
+.ctl-time{ font-variant-numeric:tabular-nums; font-size:.92rem; font-weight:600; white-space:nowrap; }
+.ctl-name{ text-align:center; color:var(--sub); font-size:.85rem; margin:.4rem 0 .2rem; }
+.dpad{
+  flex:1; display:grid; gap:.7rem; margin:.5rem 0;
+  grid-template-areas: ". up ." "left mid right" ". down .";
+  grid-template-columns:1fr 1.15fr 1fr; grid-template-rows:1fr 1.15fr 1fr;
+  min-height:0;
+}
+.pad{
+  border:1.5px solid var(--edge); background:var(--card); border-radius:20px;
+  font-size:1.9rem; color:var(--ink); box-shadow:var(--shadow); touch-action:none;
+}
+.pad:active, .pad.lit{ background:var(--accent-soft); border-color:var(--accent); }
+.pad-up{ grid-area:up; } .pad-down{ grid-area:down; } .pad-left{ grid-area:left; } .pad-right{ grid-area:right; }
+.pad-mid{ grid-area:mid; border:none; background:none; box-shadow:none; display:flex; align-items:center; justify-content:center; color:var(--sub); font-size:.8rem; text-align:center; padding:.3rem; }
+.abc{ display:flex; gap:.7rem; }
+.abc button{
+  flex:1; min-height:74px; border-radius:20px; border:1.5px solid var(--edge);
+  background:var(--card); font-size:1.5rem; font-weight:700; box-shadow:var(--shadow); touch-action:none; color:var(--ink);
+}
+.abc button:active, .abc button.lit{ background:var(--accent-soft); border-color:var(--accent); }
+.ctl-note{ text-align:center; font-size:.82rem; color:var(--sub); min-height:1.2em; margin-top:.55rem; }
+.ctl-exit{
+  align-self:center; margin-top:.3rem; background:none; border:none;
+  color:var(--sub); font-size:.8rem; text-decoration:underline; padding:.5rem .8rem;
+}
+.freeze{
+  position:absolute; inset:0; z-index:5; display:flex; flex-direction:column; gap:.6rem;
+  align-items:center; justify-content:center; text-align:center;
+  background:rgba(250,248,244,.92); backdrop-filter:blur(3px); font-weight:700; font-size:1.2rem; padding:2rem;
+}
+.freeze .mini{ font-weight:400; }
+
+/* time's up moment */
+#timesUp{
+  position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center;
+  background:rgba(25,21,18,.88); color:#fff; font-size:1.8rem; font-weight:700; text-align:center; padding:2rem;
+}
+
+/* ── admin ── */
+.admin-head{ display:flex; align-items:center; gap:.7rem; margin-bottom:1rem; }
+.admin-head h2{ margin:0; font-size:1.3rem; flex:1; }
+#adminKeyIn{ width:100%; font-size:1rem; padding:.75rem .8rem; border:1.5px solid var(--edge); border-radius:12px; margin-bottom:.7rem; font-family:var(--disp); background:var(--card); color:var(--ink); }
+.icard .code{
+  font-family:ui-monospace, Menlo, monospace; font-weight:700; letter-spacing:.18em;
+  background:var(--accent-soft); color:var(--accent-ink); border:none;
+  border-radius:9px; padding:.3rem .55rem; font-size:.95rem;
+}
+.icard .meta{ color:var(--sub); font-size:.83rem; margin:.3rem 0 .6rem; }
+.icard .live-line{ font-size:.9rem; margin-bottom:.6rem; }
+.acts{ display:flex; flex-wrap:wrap; gap:.45rem; }
+.acts button{
+  border:1.5px solid var(--edge); background:var(--card); border-radius:10px;
+  padding:.55rem .75rem; font-size:.85rem; font-weight:600; min-height:44px; color:var(--ink);
+}
+.acts button.warn{ color:var(--warn); border-color:var(--warn-soft); }
+.edit-form{ display:grid; grid-template-columns:1fr 1fr; gap:.55rem; margin-top:.7rem; }
+.edit-form label{ font-size:.75rem; color:var(--sub); display:flex; flex-direction:column; gap:.25rem; }
+.edit-form input, .edit-form select{
+  font-size:.95rem; padding:.55rem .6rem; border:1.5px solid var(--edge); border-radius:10px;
+  font-family:var(--disp); background:var(--card); color:var(--ink); width:100%;
+}
+.edit-form .span2{ grid-column:span 2; }
+.status-line{ min-height:1.2em; font-size:.85rem; color:var(--sub); margin:.4rem 0; }
+.status-line.err{ color:var(--warn); }
+.status-line.ok{ color:var(--ok); }
+
+/* ── QR modal + print ── */
+#qrModal{
+  position:fixed; inset:0; z-index:70; background:rgba(25,21,18,.55);
+  display:flex; align-items:center; justify-content:center; padding:1.2rem;
+}
+#qrModal .sheet{
+  background:#fff; border-radius:20px; padding:1.6rem; text-align:center; max-width:420px; width:100%;
+}
+#qrModal canvas{ width:min(70vw, 300px); height:auto; image-rendering:pixelated; }
+#qrModal h3{ margin:.8rem 0 .1rem; font-size:1.3rem; }
+#qrModal .codeTxt{ font-family:ui-monospace, Menlo, monospace; letter-spacing:.3em; font-size:1.25rem; font-weight:700; color:var(--accent-ink); margin:.2rem 0 1rem; }
+@media print{
+  /* Poster mode ONLY while the QR modal is open — a plain Cmd+P on any other
+     view must print the page normally, not a blank sheet. */
+  body:has(#qrModal:not([hidden])) > *{ display:none !important; }
+  body:has(#qrModal:not([hidden])) #qrModal{ display:flex !important; position:static; background:none; padding:0; }
+  #qrModal .sheet{ box-shadow:none; max-width:none; }
+  #qrModal canvas{ width:12cm; }
+  #qrModal .no-print{ display:none !important; }
+}
+
+/* toast */
+#toast{
+  position:fixed; left:50%; bottom:1.4rem; transform:translateX(-50%); z-index:80;
+  background:var(--ink); color:#fff; font-size:.9rem; padding:.7rem 1.1rem; border-radius:999px;
+  opacity:0; pointer-events:none; transition:opacity .25s; max-width:88vw; text-align:center;
+}
+#toast.show{ opacity:1; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="top">
+    <span class="wordmark"><span class="bolt">⚡</span> Volt Control</span>
+    <a class="acct" id="acctChip" href="/account.html">sign in</a>
+    <button class="gear" id="gearBtn" aria-label="Admin">⚙</button>
+  </header>
+
+  <!-- ── 1 · code entry ── -->
+  <section id="viewEntry">
+    <h1>Take control.</h1>
+    <p class="sub">Enter the 6-character code next to the item — or scan its QR — to see it, queue up, and drive it live.</p>
+    <div class="code-wrap">
+      <input id="codeInput" placeholder="······" maxlength="6" autocomplete="off" autocapitalize="characters"
+             spellcheck="false" inputmode="latin" aria-label="6-character item code" />
+    </div>
+    <div class="err" id="codeErr"></div>
+    <button class="btn" id="goBtn">Go</button>
+    <p class="mini" style="text-align:center; margin-top:1.1rem">Watching is free. Controlling costs a slot.</p>
+  </section>
+
+  <!-- ── 2 · item view ── -->
+  <section id="viewItem" hidden>
+    <button class="back" id="backBtn">← different item</button>
+    <div class="item-head">
+      <h2 id="itemName"></h2>
+      <span class="chip live" id="itemChip">LIVE</span>
+    </div>
+    <p class="desc" id="itemDesc"></p>
+
+    <div class="card" id="holderCard" hidden>
+      <div><span class="holder-name" id="holderName"></span> <span class="mini" id="holderYou"></span></div>
+      <div class="meter" id="holderMeter"><i id="holderFill"></i></div>
+      <div class="time-line" id="holderTime"></div>
+    </div>
+
+    <div class="card" id="buyCard" hidden>
+      <div class="price" id="buyPrice"></div>
+      <button class="btn" id="buyBtn">Buy Now</button>
+      <div class="status-line" id="buyMsg"></div>
+      <ul class="queue" id="queueList"></ul>
+      <button class="btn ghost slim" id="leaveBtn" hidden>Leave the line</button>
+      <button class="btn ghost slim" id="releaseBtn" hidden>Release the controls</button>
+      <button class="btn slim" id="reopenCtl" hidden>Open controller</button>
+    </div>
+
+    <div class="card" id="bidCard" hidden>
+      <div class="bid-top">
+        <span class="amount" id="topBid"></span>
+        <span class="mini" id="topBidder"></span>
+      </div>
+      <div class="note" id="auctionClock"></div>
+      <div class="chips" id="bidChips">
+        <button data-add="0"></button>
+        <button data-add="50">+50¢</button>
+        <button data-add="100">+$1</button>
+      </div>
+      <div class="custom-bid">
+        <span class="mini">$</span>
+        <input id="bidCustom" type="number" step="0.50" min="0" inputmode="decimal" aria-label="Custom bid in dollars" />
+      </div>
+      <button class="btn" id="bidBtn">Bid</button>
+      <div class="status-line" id="bidMsg"></div>
+      <button class="btn ghost slim" id="releaseBtn2" hidden>Release the controls</button>
+    </div>
+
+    <div class="card signin" id="signinCard" hidden>
+      <b>Sign in to pay.</b>
+      <p class="note" style="margin:.4rem 0 .8rem">Watching is free — buying a slot needs an account so the controls are really yours.</p>
+      <a class="btn slim" id="signinLink" style="text-align:center; text-decoration:none" href="/account.html">Sign in / sign up</a>
+    </div>
+
+    <p class="note" id="offNote" hidden>This item is switched off right now — check back with the host.</p>
+  </section>
+
+  <!-- ── 3 · controller (full-screen while you hold the slot) ── -->
+  <section id="viewController" hidden>
+    <div class="ctl-top">
+      <div class="meter" id="ctlMeter"><i id="ctlFill"></i></div>
+      <span class="ctl-time" id="ctlTime">0:00</span>
+    </div>
+    <div class="ctl-name" id="ctlName"></div>
+    <div class="dpad">
+      <button class="pad pad-up"    data-action="pad_up"    aria-label="Up">▲</button>
+      <button class="pad pad-left"  data-action="pad_left"  aria-label="Left">◀</button>
+      <div class="pad-mid" id="ctlMid">you have<br/>the controls</div>
+      <button class="pad pad-right" data-action="pad_right" aria-label="Right">▶</button>
+      <button class="pad pad-down"  data-action="pad_down"  aria-label="Down">▼</button>
+    </div>
+    <div class="abc">
+      <button data-action="btn_a">A</button>
+      <button data-action="btn_b">B</button>
+      <button data-action="btn_c">C</button>
+    </div>
+    <div class="ctl-note" id="ctlNote">arrows + A/B/C keys work too</div>
+    <button class="ctl-exit" id="ctlRelease">release the controls</button>
+    <div class="freeze" id="ctlFreeze" hidden>
+      <span id="freezeMsg">host paused this item</span>
+      <span class="mini" id="freezeSub">your remaining time is frozen — hang tight</span>
+    </div>
+  </section>
+
+  <!-- ── 4 · admin (gear icon) ── -->
+  <section id="viewAdmin" hidden>
+    <div class="admin-head">
+      <h2>Items · ops</h2>
+      <button class="back" id="adminBack">← done</button>
+    </div>
+
+    <div id="adminGate">
+      <div class="card">
+        <p class="note" style="margin-top:0">Admin key — same <code>X-Admin-Key</code> as <a href="/admin.html">the ops room</a>. Held in memory only.</p>
+        <input id="adminKeyIn" type="password" placeholder="admin key" autocomplete="off" />
+        <button class="btn slim" id="adminUnlock">Unlock</button>
+        <div class="status-line" id="adminGateMsg"></div>
+      </div>
+    </div>
+
+    <div id="adminDash" hidden>
+      <div class="card">
+        <b>New item</b>
+        <div class="edit-form" style="margin-top:.6rem">
+          <label class="span2">name<input id="nItemName" placeholder="e.g. Lobby Lamp" /></label>
+          <label>mode<select id="nItemMode"><option value="buynow">buy now</option><option value="auction">auction</option></select></label>
+          <label>price / start ($)<input id="nItemPrice" type="number" step="0.50" value="5.00" inputmode="decimal" /></label>
+          <label>slot (seconds)<input id="nItemSlot" type="number" value="120" inputmode="numeric" /></label>
+          <label id="nAuctionWrap" hidden>auction clock (s)<input id="nItemAuction" type="number" value="60" inputmode="numeric" /></label>
+        </div>
+        <button class="btn slim" id="createBtn" style="margin-top:.7rem">Create item</button>
+        <div class="status-line" id="createMsg"></div>
+      </div>
+      <div id="adminList"></div>
+    </div>
+  </section>
+</div>
+
+<div id="timesUp" hidden><div>⏱ Time's up<div class="mini" style="font-size:1rem; font-weight:400; margin-top:.6rem">back to the item — grab another slot</div></div></div>
+
+<div id="qrModal" hidden>
+  <div class="sheet">
+    <canvas id="qrCanvas" width="0" height="0"></canvas>
+    <h3 id="qrName"></h3>
+    <div class="codeTxt" id="qrCode"></div>
+    <p class="note no-print" style="margin:.2rem 0 1rem">Scan to open this item, or type the code at <b id="qrHost"></b>/control</p>
+    <div class="row no-print">
+      <button class="btn ghost slim" id="qrClose">Close</button>
+      <button class="btn slim" id="qrPrint">Print</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" role="status"></div>
+
+<script>
+/* ═══ Volt Control client ═══
+   Structure: identity → QR encoder → net/live-link → views (entry, item,
+   controller, admin). Testability contract (like index.html): everything a
+   test needs is exposed as window.__* shims at the bottom — page-scope
+   const/let are NOT reachable from separate jsdom evals. */
+'use strict';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const fmt$ = (cents) => '$' + (cents / 100).toFixed(2).replace(/\.00$/, '');
+const fmtClock = (ms) => {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+};
+
+/* ── who is this (mirrors index.html's IDENTITY layers) ──
+   anonymous → URL-param dev identity (?uid=&name=, honored by the server
+   ONLY while auth is unconfigured) → verified session via /api/me. */
+const IDENTITY = (() => {
+  const p = new URLSearchParams(location.search);
+  const sid = Math.random().toString(36).slice(2, 10);
+  const dev = !!(p.get('uid') && p.get('name'));
+  return {
+    id: p.get('uid') || 'anon-' + sid,
+    name: p.get('name') || 'guest',
+    role: p.get('role') || 'guest',
+    verified: false, dev, sid,
+  };
+})();
+const canPay = () => IDENTITY.verified || IDENTITY.dev;
+const pubUser = () => ({ id: IDENTITY.id, name: IDENTITY.name, role: IDENTITY.role, sid: IDENTITY.sid });
+
+function hydrateIdentity(){
+  return fetch('/api/me')
+    .then(r => (r.ok ? r.json() : null))
+    .then(d => {
+      const u = d && d.user;
+      if (!u) return;
+      Object.assign(IDENTITY, { id: u.id, name: u.name || u.email, role: u.role, verified: true });
+      $('acctChip').textContent = IDENTITY.name;
+      // Re-run the full apply, not just a render: /api/me usually resolves
+      // AFTER the item GET, and S.holding was computed with the placeholder
+      // id — a signed-in holder reloading mid-slot must get the controller
+      // back, not stare at the item view until the next broadcast.
+      if (S.item) applyItem({ ...S.item });
+    })
+    .catch(() => {});
+}
+
+/* ═══ QR encoder — byte mode, EC level M, versions 1–10 ═══
+   Dependency-free (golden rule: no external JS). Standard ISO/IEC 18004
+   pipeline: bits → Reed–Solomon blocks → interleave → matrix with the
+   best-scoring mask. Round-trip verified against an independent decoder
+   in the repo's smoke tooling. Returns a size×size array of 0/1. */
+const QR = (() => {
+  // per-version tables, EC level M
+  const CAP    = [0, 14, 26, 42, 62, 84, 106, 122, 152, 180, 213];    // byte capacity
+  const ECW    = [0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26];         // ec codewords per block
+  const BLOCKS = [null, [16], [28], [44], [32, 32], [43, 43], [27, 27, 27, 27],
+    [31, 31, 31, 31], [38, 38, 39, 39], [36, 36, 36, 37, 37], [43, 43, 43, 43, 44]];
+  const ALIGN  = [null, [], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34],
+    [6, 22, 38], [6, 24, 42], [6, 26, 46], [6, 28, 50]];
+
+  // GF(256), polynomial 0x11d
+  const EXP = new Uint8Array(512), LOG = new Uint8Array(256);
+  for (let i = 0, x = 1; i < 255; i++){ EXP[i] = x; LOG[x] = i; x <<= 1; if (x & 0x100) x ^= 0x11d; }
+  for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
+  const gmul = (a, b) => (a && b ? EXP[LOG[a] + LOG[b]] : 0);
+
+  function genPoly(n){                     // monic generator, degree n
+    let p = [1];
+    for (let i = 0; i < n; i++){
+      const q = new Array(p.length + 1).fill(0);
+      for (let j = 0; j < p.length; j++){
+        q[j] ^= p[j];
+        q[j + 1] ^= gmul(p[j], EXP[i]);
+      }
+      p = q;
+    }
+    return p;
+  }
+  function rsRemainder(data, n){
+    const gen = genPoly(n), rem = new Uint8Array(n);
+    for (const d of data){
+      const f = d ^ rem[0];
+      rem.copyWithin(0, 1); rem[n - 1] = 0;
+      if (f) for (let j = 0; j < n; j++) rem[j] ^= gmul(gen[j + 1], f);
+    }
+    return rem;
+  }
+  function utf8(str){
+    const out = [];
+    for (const ch of str){
+      const cp = ch.codePointAt(0);
+      if (cp < 0x80) out.push(cp);
+      else if (cp < 0x800) out.push(0xc0 | cp >> 6, 0x80 | (cp & 63));
+      else if (cp < 0x10000) out.push(0xe0 | cp >> 12, 0x80 | (cp >> 6 & 63), 0x80 | (cp & 63));
+      else out.push(0xf0 | cp >> 18, 0x80 | (cp >> 12 & 63), 0x80 | (cp >> 6 & 63), 0x80 | (cp & 63));
+    }
+    return out;
+  }
+  // BCH-protected format/version info (standard long division over GF(2))
+  const bitLen = (v) => 32 - Math.clz32(v);
+  const G15 = 0b10100110111, G15_MASK = 0b101010000010010, G18 = 0b1111100100101;
+  const formatBits = (mask) => {                // EC level M = 00
+    const data = (0 << 3) | mask;
+    let d = data << 10;
+    while (bitLen(d) >= bitLen(G15)) d ^= G15 << (bitLen(d) - bitLen(G15));
+    return ((data << 10) | d) ^ G15_MASK;
+  };
+  const versionBits = (v) => {
+    let d = v << 12;
+    while (bitLen(d) >= bitLen(G18)) d ^= G18 << (bitLen(d) - bitLen(G18));
+    return (v << 12) | d;
+  };
+
+  function encode(text){
+    const bytes = utf8(text);
+    let v = 1;
+    while (v <= 10 && CAP[v] < bytes.length) v++;
+    if (v > 10) throw new Error('too long for QR v10');
+
+    // bit stream: mode 0100 · count (8 bits v1-9, 16 bits v10) · data
+    const dataCW = BLOCKS[v].reduce((a, b) => a + b, 0);
+    const bits = [];
+    const push = (val, n) => { for (let i = n - 1; i >= 0; i--) bits.push((val >> i) & 1); };
+    push(0b0100, 4);
+    push(bytes.length, v >= 10 ? 16 : 8);
+    for (const b of bytes) push(b, 8);
+    const capBits = dataCW * 8;
+    push(0, Math.min(4, capBits - bits.length));            // terminator
+    while (bits.length % 8) bits.push(0);
+    const cw = [];
+    for (let i = 0; i < bits.length; i += 8){
+      let b = 0; for (let j = 0; j < 8; j++) b = (b << 1) | bits[i + j];
+      cw.push(b);
+    }
+    for (let pad = 0xEC; cw.length < dataCW; pad ^= 0xEC ^ 0x11) cw.push(pad);
+
+    // split into blocks, compute EC, interleave
+    const blocks = [], ecs = [];
+    let off = 0;
+    for (const len of BLOCKS[v]){
+      const block = cw.slice(off, off + len); off += len;
+      blocks.push(block);
+      ecs.push(rsRemainder(block, ECW[v]));
+    }
+    const seq = [];
+    const maxLen = Math.max(...BLOCKS[v]);
+    for (let i = 0; i < maxLen; i++) for (const b of blocks) if (i < b.length) seq.push(b[i]);
+    for (let i = 0; i < ECW[v]; i++) for (const e of ecs) seq.push(e[i]);
+
+    // try all 8 masks, keep the best-scoring matrix
+    let best = null, bestScore = Infinity;
+    for (let mask = 0; mask < 8; mask++){
+      const m = buildMatrix(v, seq, mask);
+      const score = penalty(m);
+      if (score < bestScore){ bestScore = score; best = m; }
+    }
+    return best;
+  }
+
+  function buildMatrix(v, data, mask){
+    const size = 17 + 4 * v;
+    const M = Array.from({ length: size }, () => new Array(size).fill(null));
+
+    const finder = (r0, c0) => {
+      for (let r = -1; r <= 7; r++) for (let c = -1; c <= 7; c++){
+        const rr = r0 + r, cc = c0 + c;
+        if (rr < 0 || rr >= size || cc < 0 || cc >= size) continue;
+        M[rr][cc] = ((r >= 0 && r <= 6 && (c === 0 || c === 6)) ||
+                     (c >= 0 && c <= 6 && (r === 0 || r === 6)) ||
+                     (r >= 2 && r <= 4 && c >= 2 && c <= 4)) ? 1 : 0;
+      }
+    };
+    finder(0, 0); finder(0, size - 7); finder(size - 7, 0);
+
+    for (const r of ALIGN[v]) for (const c of ALIGN[v]){         // alignment
+      if (M[r][c] !== null) continue;                            // overlaps a finder
+      for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++)
+        M[r + dr][c + dc] = (Math.max(Math.abs(dr), Math.abs(dc)) !== 1) ? 1 : 0;
+    }
+    for (let i = 8; i < size - 8; i++){                          // timing
+      if (M[6][i] === null) M[6][i] = i % 2 ? 0 : 1;
+      if (M[i][6] === null) M[i][6] = i % 2 ? 0 : 1;
+    }
+
+    const fmt = formatBits(mask);                                // format info (two copies)
+    for (let i = 0; i < 15; i++){
+      const bit = (fmt >> i) & 1;
+      if (i < 6) M[i][8] = bit;
+      else if (i < 8) M[i + 1][8] = bit;
+      else M[size - 15 + i][8] = bit;
+      if (i < 8) M[8][size - i - 1] = bit;
+      else if (i < 9) M[8][15 - i] = bit;
+      else M[8][15 - i - 1] = bit;
+    }
+    M[size - 8][8] = 1;                                          // dark module
+
+    if (v >= 7){                                                 // version info
+      const vb = versionBits(v);
+      for (let i = 0; i < 18; i++){
+        const bit = (vb >> i) & 1;
+        M[Math.floor(i / 3)][i % 3 + size - 11] = bit;
+        M[i % 3 + size - 11][Math.floor(i / 3)] = bit;
+      }
+    }
+
+    const maskAt = (r, c) => {                                   // ISO mask conditions
+      switch (mask){
+        case 0: return (r + c) % 2 === 0;
+        case 1: return r % 2 === 0;
+        case 2: return c % 3 === 0;
+        case 3: return (r + c) % 3 === 0;
+        case 4: return (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0;
+        case 5: return (r * c) % 2 + (r * c) % 3 === 0;
+        case 6: return ((r * c) % 2 + (r * c) % 3) % 2 === 0;
+        default: return ((r * c) % 3 + (r + c) % 2) % 2 === 0;
+      }
+    };
+    let inc = -1, row = size - 1, bitIdx = 7, byteIdx = 0;       // zigzag data placement
+    for (let col = size - 1; col > 0; col -= 2){
+      if (col === 6) col--;
+      for (;;){
+        for (let c = 0; c < 2; c++){
+          if (M[row][col - c] !== null) continue;
+          let dark = 0;
+          if (byteIdx < data.length) dark = (data[byteIdx] >>> bitIdx) & 1;
+          if (maskAt(row, col - c)) dark ^= 1;
+          M[row][col - c] = dark;
+          if (--bitIdx === -1){ byteIdx++; bitIdx = 7; }
+        }
+        row += inc;
+        if (row < 0 || row >= size){ row -= inc; inc = -inc; break; }
+      }
+    }
+    return M;
+  }
+
+  function penalty(M){                                           // the 4 ISO scoring rules
+    const size = M.length;
+    let score = 0;
+    for (let axis = 0; axis < 2; axis++){                        // rule 1: runs ≥5
+      for (let i = 0; i < size; i++){
+        let run = 1;
+        for (let j = 1; j <= size; j++){
+          const cur = j < size ? (axis ? M[j][i] : M[i][j]) : -1;
+          const prev = axis ? M[j - 1][i] : M[i][j - 1];
+          if (cur === prev) run++;
+          else { if (run >= 5) score += run - 2; run = 1; }
+        }
+      }
+    }
+    for (let r = 0; r < size - 1; r++) for (let c = 0; c < size - 1; c++){   // rule 2: 2×2
+      const x = M[r][c];
+      if (x === M[r][c + 1] && x === M[r + 1][c] && x === M[r + 1][c + 1]) score += 3;
+    }
+    const P1 = [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0], P2 = [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1];
+    for (let axis = 0; axis < 2; axis++){                        // rule 3: finder-alikes
+      for (let i = 0; i < size; i++) for (let j = 0; j <= size - 11; j++){
+        let m1 = true, m2 = true;
+        for (let k = 0; k < 11; k++){
+          const cell = axis ? M[j + k][i] : M[i][j + k];
+          if (cell !== P1[k]) m1 = false;
+          if (cell !== P2[k]) m2 = false;
+        }
+        if (m1 || m2) score += 40;
+      }
+    }
+    let dark = 0;                                                // rule 4: balance
+    for (const row of M) for (const cell of row) dark += cell;
+    score += Math.floor(Math.abs((dark * 100) / (size * size) - 50) / 5) * 10;
+    return score;
+  }
+
+  return { encode };
+})();
+
+function drawQR(canvas, text){
+  const m = QR.encode(text);
+  const quiet = 4, scale = 8, size = (m.length + quiet * 2) * scale;
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = '#111';
+  for (let r = 0; r < m.length; r++) for (let c = 0; c < m.length; c++)
+    if (m[r][c]) ctx.fillRect((c + quiet) * scale, (r + quiet) * scale, scale, scale);
+}
+
+/* ═══ state + networking ═══ */
+const S = {
+  view: 'entry',
+  code: null, item: null,          // current item's public payload
+  holding: false,                  // am I the active holder?
+  ws: null, wsDelay: 1000,
+  adminKey: null, adminItems: [],  // admin key lives in MEMORY only
+  bidChoice: 0,                    // selected extra cents over the min next bid
+};
+
+async function api(method, path, body, headers){
+  const res = await fetch(path, {
+    method,
+    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(headers || {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = res.status === 204 ? null : await res.json().catch(() => ({}));
+  if (!res.ok){
+    const e = new Error((data && data.error) || ('error ' + res.status));
+    e.status = res.status;
+    throw e;
+  }
+  return data;
+}
+// Dev-identity rider: only meaningful while the server runs auth-unconfigured
+// (the documented escape hatch); in production the session cookie is the identity.
+const payBody = (extra) => ({ ...(extra || {}), ...(IDENTITY.dev && !IDENTITY.verified ? { user: { id: IDENTITY.id, name: IDENTITY.name } } : {}) });
+
+/* live link: WS room `item:<CODE>` with backoff; while the socket is down a
+   4s poll of GET /api/items/:code keeps the page honest (graceful degrade).
+   Switching items closes the old room's socket first (S.wsRoom tracks it —
+   an early-return on the stale socket would silently freeze live updates). */
+function liveSync(){
+  const want = !!S.code && typeof WebSocket === 'function';
+  if (S.ws && (!want || S.wsRoom !== S.code)){ try { S.ws.close(); } catch {} S.ws = null; }
+  if (!want || S.ws) return;
+  S.wsRoom = S.code;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  let sock;
+  try { sock = new WebSocket(`${proto}://${location.host}/api/bus?channel=${encodeURIComponent('item:' + S.code)}`); }
+  catch { return; }
+  S.ws = sock;
+  // Every handler checks it still owns S.ws — a deliberately-closed old
+  // socket's async onclose must not null out (or reconnect over) its
+  // replacement.
+  sock.onopen = () => { if (S.ws === sock) S.wsDelay = 1000; };
+  sock.onerror = () => {};
+  sock.onclose = () => {
+    if (S.ws !== sock) return;
+    S.ws = null;
+    if (S.code) setTimeout(liveSync, S.wsDelay = Math.min(S.wsDelay * 2, 8000));
+  };
+  sock.onmessage = (e) => {
+    if (S.ws !== sock) return;
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.type === 'item_queues' && m.item === S.code) applyItem(m);
+    else if (m.type === 'item') onAnnounce(m);
+    else if (m.type === 'denied') $('ctlNote').textContent = m.reason || 'not allowed';
+  };
+}
+setInterval(() => {                                    // poll fallback
+  if (S.code && (!S.ws || S.ws.readyState !== 1))
+    api('GET', '/api/items/' + S.code).then(applyItem).catch((e) => {
+      if (e.status !== 404) return;                    // transient — keep polling
+      // The item was deleted while we watched: stop the reconnect/poll loop
+      // and say so, instead of leaving a live-looking page forever.
+      S.code = null; S.item = null; S.holding = false;
+      liveSync();
+      toast('this item is gone — ask the host');
+      if (S.view !== 'admin') show('entry');
+    });
+}, 4000);
+
+const ANNOUNCE_TOASTS = {
+  pause: 'the host paused this item', resume: 'back on — clock running',
+  off: 'the host switched this item off', on: 'this item is back on',
+  skip: 'the host ended the slot',
+};
+function onAnnounce(m){
+  if (m.item !== S.code) return;               // a stale room's socket may still be draining
+  if (m.action === 'auction_won') toast(`🔨 ${m.user?.name || 'someone'} won the round`);
+  else if (ANNOUNCE_TOASTS[m.action]) toast(ANNOUNCE_TOASTS[m.action]);
+}
+
+let toastTimer = null;
+function toast(msg){
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+/* ═══ views ═══ */
+function show(view){
+  S.view = view;
+  for (const [v, id] of Object.entries({ entry: 'viewEntry', item: 'viewItem', controller: 'viewController', admin: 'viewAdmin' }))
+    $(id).hidden = v !== view;
+  $('gearBtn').hidden = view === 'controller';
+}
+
+/* ── entry ── */
+async function submitCode(raw){
+  const code = String(raw || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{6}$/.test(code)){ $('codeErr').textContent = 'codes are 6 letters/numbers'; return false; }
+  $('codeErr').textContent = '';
+  try {
+    const item = await api('GET', '/api/items/' + code);
+    S.code = code;
+    applyItem(item);
+    show(S.holding && item.status === 'on' ? 'controller' : 'item');
+    liveSync();
+    return true;
+  } catch (e){
+    $('codeErr').textContent = e.status === 404 ? 'no item with that code — double-check the 6 characters' : String(e.message);
+    return false;
+  }
+}
+$('goBtn').addEventListener('click', () => submitCode($('codeInput').value));
+$('codeInput').addEventListener('input', () => {
+  const v = $('codeInput').value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  if (v !== $('codeInput').value) $('codeInput').value = v;
+  if (v.length === 6) submitCode(v);                    // auto-advance → auto-go
+});
+$('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitCode($('codeInput').value); });
+$('backBtn').addEventListener('click', () => {
+  S.code = null; S.item = null; S.holding = false;
+  if (S.ws){ try { S.ws.close(); } catch {} S.ws = null; }
+  show('entry');
+});
+
+/* ── item view ── */
+function applyItem(p){
+  if (!p || p.item !== S.code) return;
+  // Staleness guard: a slow poll response must not roll back a fresher
+  // buy/broadcast (it would flash "time's up" at someone who just paid).
+  if (p.ts && S.item && S.item.ts > p.ts) return;
+  const wasHolding = S.holding;
+  S.item = p;
+  S.holding = !!(p.active && p.active.userId === IDENTITY.id);
+  if (S.view !== 'admin'){
+    if (S.holding && p.status === 'on' && S.view !== 'controller') show('controller');
+    else if (wasHolding && !S.holding && S.view === 'controller') timesUp();
+  }
+  renderItem();
+  renderController();
+}
+
+function timesUp(){
+  if (S.surrender){ show('item'); return; }    // voluntary release — no "time's up" theater
+  $('timesUp').hidden = false;
+  setTimeout(() => { $('timesUp').hidden = true; if (S.view === 'controller') show('item'); }, 2200);
+}
+
+function remainingMs(active){
+  return active.paused ? active.remainingMs : Math.max(0, active.endsAt - Date.now());
+}
+
+function renderItem(){
+  const p = S.item;
+  if (!p) return;
+  $('itemName').textContent = p.name;
+  $('itemDesc').textContent = p.description || '';
+  $('itemDesc').hidden = !p.description;
+  const chip = $('itemChip');
+  const paused = !!(p.active && p.active.paused);
+  chip.textContent = p.status !== 'on' ? 'OFF' : paused ? 'PAUSED' : 'LIVE';
+  chip.className = 'chip ' + (p.status !== 'on' ? 'off' : paused ? 'paused' : 'live');
+  $('offNote').hidden = p.status === 'on';
+
+  // current controller
+  $('holderCard').hidden = !p.active;
+  if (p.active){
+    $('holderName').textContent = p.active.name + ' has the controls';
+    $('holderYou').textContent = p.active.userId === IDENTITY.id ? '(you!)' : '';
+    $('holderMeter').className = 'meter' + (paused ? ' paused' : '');
+  }
+
+  const mine = S.holding;
+  const queued = p.queue.some(q => q.userId === IDENTITY.id);
+
+  // buy-now
+  $('buyCard').hidden = p.mode !== 'buynow';
+  if (p.mode === 'buynow'){
+    $('buyPrice').innerHTML = `${fmt$(p.priceCents)}<small>· ${fmtClock(p.slotSeconds * 1000)} of control</small>`;
+    $('buyBtn').hidden = mine || queued;
+    $('buyBtn').disabled = p.status !== 'on';
+    $('buyBtn').textContent = p.active || p.queue.length ? 'Buy Now · join the line' : 'Buy Now';
+    $('leaveBtn').hidden = !queued;
+    $('releaseBtn').hidden = !mine;
+    $('reopenCtl').hidden = !(mine && p.status === 'on');
+    $('queueList').innerHTML = p.queue.map(q => `
+      <li class="${q.userId === IDENTITY.id ? 'me' : ''}">
+        <span class="pos">${q.position}</span> ${esc(q.name)}${q.userId === IDENTITY.id ? ' (you)' : ''}
+        <span class="eta">~${new Date(q.estimatedStartAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+      </li>`).join('');
+  }
+
+  // auction
+  $('bidCard').hidden = p.mode !== 'auction';
+  if (p.mode === 'auction'){
+    const a = p.auction;
+    if (a){
+      $('topBid').textContent = fmt$(a.topCents);
+      $('topBidder').textContent = a.topUserId === IDENTITY.id
+        ? 'your bid leads' : `${a.topName} leads · ${a.bidCount} bid${a.bidCount === 1 ? '' : 's'}`;
+    } else {
+      $('topBid').textContent = fmt$(p.priceCents);
+      $('topBidder').textContent = 'starting bid — none yet';
+    }
+    const capClosed = !!(a && a.minNextCents === null);   // top bid at the $500 cap
+    $('bidChips').firstElementChild.textContent = capClosed ? 'cap reached' : 'min · ' + fmt$(minNextCents());
+    $('bidBtn').disabled = p.status !== 'on' || !!p.active || capClosed;
+    if (capClosed) $('bidMsg').textContent = 'the top bid hit the $500 cap — this round just plays out';
+    $('releaseBtn2').hidden = !mine;
+    syncBidChoice();
+  }
+
+  renderTimers();
+}
+
+const minNextCents = () => {
+  const p = S.item;
+  return p.auction ? p.auction.minNextCents : p.priceCents;
+};
+function syncBidChoice(){
+  for (const b of $('bidChips').children)
+    b.setAttribute('aria-pressed', String(+b.dataset.add === S.bidChoice && $('bidCustom').value === ''));
+}
+$('bidChips').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  S.bidChoice = +b.dataset.add;
+  $('bidCustom').value = '';
+  syncBidChoice();
+});
+
+function chosenBidCents(){
+  const custom = parseFloat($('bidCustom').value);
+  if (!Number.isNaN(custom) && custom > 0) return Math.round(custom * 100);
+  return minNextCents() + S.bidChoice;
+}
+
+/* ticking clocks (progress bars, countdowns) — cheap, 4×/s */
+function renderTimers(){
+  const p = S.item;
+  if (!p) return;
+  if (p.active){
+    const rem = remainingMs(p.active);
+    const total = p.slotSeconds * 1000;
+    $('holderFill').style.width = Math.max(0, Math.min(100, (rem / total) * 100)) + '%';
+    $('holderTime').textContent = (p.active.paused ? '⏸ paused · ' : '') + `${fmtClock(rem)} left of ${fmtClock(total)}`;
+    $('ctlFill').style.width = Math.max(0, Math.min(100, (rem / total) * 100)) + '%';
+    $('ctlTime').textContent = fmtClock(rem);
+  }
+  if (p.mode === 'auction'){
+    if (p.auction){
+      const rem = p.auction.endsAt - Date.now();
+      $('auctionClock').textContent = rem > 0
+        ? `⏳ ${fmtClock(rem)} left — a bid in the final 10s adds 10s`
+        : 'round closing…';
+    } else {
+      $('auctionClock').textContent = p.active
+        ? 'next round opens when this slot ends'
+        : `first bid starts a ${p.auctionSeconds}s countdown`;
+    }
+  }
+}
+setInterval(renderTimers, 250);
+
+/* buy / bid / cancel */
+function needSignin(){
+  if (canPay()) return false;
+  $('signinCard').hidden = false;
+  $('signinLink').href = '/account.html?return=' + encodeURIComponent('/control?item=' + S.code);
+  return true;
+}
+async function doBuy(){
+  if (needSignin()) return;
+  const msg = $('buyMsg');
+  msg.className = 'status-line'; msg.textContent = '…';
+  try {
+    applyItem(await api('POST', `/api/items/${S.code}/buy`, payBody()));
+    msg.className = 'status-line ok';
+    msg.textContent = S.holding ? 'the controls are yours!' : 'you are in line — this page will open the controller when it is your turn';
+  } catch (e){
+    if (e.status === 401){ $('signinCard').hidden = false; $('signinLink').href = '/account.html?return=' + encodeURIComponent('/control?item=' + S.code); }
+    msg.className = 'status-line err'; msg.textContent = String(e.message);
+  }
+}
+async function doBid(){
+  if (needSignin()) return;
+  const msg = $('bidMsg');
+  msg.className = 'status-line'; msg.textContent = '…';
+  try {
+    applyItem(await api('POST', `/api/items/${S.code}/bid`, payBody({ cents: chosenBidCents() })));
+    msg.className = 'status-line ok'; msg.textContent = 'bid placed ✓';
+    $('bidCustom').value = ''; S.bidChoice = 0;
+  } catch (e){
+    if (e.status === 401){ $('signinCard').hidden = false; $('signinLink').href = '/account.html?return=' + encodeURIComponent('/control?item=' + S.code); }
+    msg.className = 'status-line err'; msg.textContent = String(e.message);
+  }
+}
+async function doCancel(){
+  S.surrender = true;
+  try { applyItem(await api('POST', `/api/items/${S.code}/cancel`, payBody())); }
+  catch (e){ toast(String(e.message)); }
+  finally { S.surrender = false; }
+}
+$('buyBtn').addEventListener('click', doBuy);
+$('bidBtn').addEventListener('click', doBid);
+$('leaveBtn').addEventListener('click', doCancel);
+$('releaseBtn').addEventListener('click', doCancel);
+$('releaseBtn2').addEventListener('click', doCancel);
+$('ctlRelease').addEventListener('click', doCancel);   // the controller's only exit while holding
+$('reopenCtl').addEventListener('click', () => show('controller'));
+
+/* ── controller ── */
+/* Client-side send budget: the bus allows burst 20 / 8 msg·s⁻¹ per socket —
+   we stay strictly under (10 burst, 7/s refill) so a held button NEVER hits
+   the server's silent drop. Hold-to-repeat fires every 150 ms ≈ 6.7 Hz. */
+const BUCKET = { tokens: 10, cap: 10, rate: 7, last: Date.now() };
+function takeToken(){
+  const now = Date.now();
+  BUCKET.tokens = Math.min(BUCKET.cap, BUCKET.tokens + ((now - BUCKET.last) / 1000) * BUCKET.rate);
+  BUCKET.last = now;
+  if (BUCKET.tokens < 1) return false;
+  BUCKET.tokens -= 1;
+  return true;
+}
+
+function fire(action){
+  if (!takeToken()) return false;
+  const msg = { type: 'key', action, user: pubUser(), ts: Date.now() };
+  if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify(msg));
+  if (navigator.vibrate) navigator.vibrate(10);
+  return true;
+}
+
+const REPEAT_MS = 150;
+const holds = new Map();     // pointerId -> interval
+function bindPress(el){
+  const action = el.dataset.action;
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    el.classList.add('lit');
+    fire(action);
+    try { el.setPointerCapture(e.pointerId); } catch {}
+    clearInterval(holds.get(e.pointerId));
+    holds.set(e.pointerId, setInterval(() => fire(action), REPEAT_MS));
+  });
+  const stop = (e) => {
+    el.classList.remove('lit');
+    clearInterval(holds.get(e.pointerId));
+    holds.delete(e.pointerId);
+  };
+  el.addEventListener('pointerup', stop);
+  el.addEventListener('pointercancel', stop);
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+document.querySelectorAll('#viewController [data-action]').forEach(bindPress);
+
+// desktop testing fallback — this page has no console KEY_MAP to collide with
+const KEYPAD = { ArrowUp: 'pad_up', ArrowDown: 'pad_down', ArrowLeft: 'pad_left', ArrowRight: 'pad_right',
+  a: 'btn_a', b: 'btn_b', c: 'btn_c', A: 'btn_a', B: 'btn_b', C: 'btn_c' };
+window.addEventListener('keydown', (e) => {
+  if (S.view !== 'controller') return;
+  const action = KEYPAD[e.key];
+  if (!action) return;
+  e.preventDefault();
+  fire(action);
+});
+
+function renderController(){
+  const p = S.item;
+  if (!p) return;
+  $('ctlName').textContent = p.name;
+  const freeze = $('ctlFreeze');
+  if (p.status !== 'on'){
+    freeze.hidden = false;
+    $('freezeMsg').textContent = 'the host switched this item off';
+    // honest: off does NOT freeze the clock (pause does) — don't promise it
+    $('freezeSub').textContent = 'your clock keeps running — ask the host to pause or skip';
+  } else if (p.active && p.active.paused){
+    freeze.hidden = false;
+    $('freezeMsg').textContent = 'host paused this item';
+    $('freezeSub').textContent = 'your remaining time is frozen — hang tight';
+  } else freeze.hidden = true;
+}
+
+/* ── admin ── */
+$('gearBtn').addEventListener('click', () => {
+  show('admin');
+  ($('adminDash').hidden ? $('adminKeyIn') : $('adminList')).focus?.();
+});
+$('adminBack').addEventListener('click', () => show(S.code ? 'item' : 'entry'));
+
+async function unlockAdmin(key){
+  const msg = $('adminGateMsg');
+  msg.className = 'status-line'; msg.textContent = '…';
+  try {
+    const items = await api('GET', '/api/items', null, { 'X-Admin-Key': key });
+    S.adminKey = key;
+    S.adminItems = items;
+    $('adminGate').hidden = true;
+    $('adminDash').hidden = false;
+    renderAdmin();
+    return true;
+  } catch (e){
+    msg.className = 'status-line err';
+    msg.textContent = e.status === 401 ? 'wrong key' : String(e.message);
+    return false;
+  }
+}
+$('adminUnlock').addEventListener('click', () => unlockAdmin($('adminKeyIn').value));
+$('adminKeyIn').addEventListener('keydown', (e) => { if (e.key === 'Enter') unlockAdmin($('adminKeyIn').value); });
+
+const adminApi = (method, path, body) => api(method, path, body, { 'X-Admin-Key': S.adminKey });
+async function refreshAdmin(){
+  if (!S.adminKey || S.view !== 'admin') return;
+  // Never clobber work in progress: an open edit form (or focus anywhere in
+  // the list) would lose typed values + focus to the innerHTML rebuild.
+  if (document.querySelector('#adminList form[data-edit]:not([hidden])')
+      || $('adminList').contains(document.activeElement)) return;
+  try { S.adminItems = await adminApi('GET', '/api/items'); renderAdmin(); } catch {}
+}
+setInterval(refreshAdmin, 4000);
+
+$('nItemMode').addEventListener('change', () => { $('nAuctionWrap').hidden = $('nItemMode').value !== 'auction'; });
+
+async function createItem(){
+  const msg = $('createMsg');
+  msg.className = 'status-line'; msg.textContent = '…';
+  try {
+    const item = await adminApi('POST', '/api/items', {
+      name: $('nItemName').value,
+      mode: $('nItemMode').value,
+      priceCents: Math.round(parseFloat($('nItemPrice').value || '0') * 100),
+      slotSeconds: parseInt($('nItemSlot').value, 10) || 120,
+      auctionSeconds: parseInt($('nItemAuction').value, 10) || 60,
+    });
+    $('nItemName').value = '';
+    msg.className = 'status-line ok';
+    msg.textContent = `created — code ${item.item}`;
+    await refreshAdmin();
+    openQR(item.item, item.name);                   // the code IS the product — show it big
+  } catch (e){
+    msg.className = 'status-line err'; msg.textContent = String(e.message);
+  }
+}
+$('createBtn').addEventListener('click', createItem);
+
+function adminCard(p){
+  const a = p.active;
+  const live = p.status !== 'on' ? '○ off'
+    : a ? `◉ ${esc(a.name)}${a.paused ? ' · ⏸ paused' : ''} · ${fmtClock(remainingMs(a))} left`
+    : p.auction ? `🔨 ${fmt$(p.auction.topCents)} (${esc(p.auction.topName)}) · ${fmtClock(Math.max(0, p.auction.endsAt - Date.now()))}`
+    : '· idle';
+  const depth = p.mode === 'buynow' ? `${p.queue.length} in line` : (p.auction ? `${p.auction.bidCount} bids` : 'no round');
+  return `
+  <div class="card icard" data-code="${p.item}">
+    <div style="display:flex; align-items:center; gap:.6rem">
+      <b style="flex:1">${esc(p.name)}</b>
+      <button class="code" data-act="copy" title="copy code">${p.item}</button>
+    </div>
+    <div class="meta">${p.mode === 'buynow' ? 'buy now' : 'auction'} · ${fmt$(p.priceCents)} · ${p.slotSeconds}s slot · ${depth}</div>
+    <div class="live-line">${live}</div>
+    <div class="acts">
+      <button data-act="qr">QR</button>
+      <button data-act="skip">Skip</button>
+      <button data-act="pauseresume">${a && a.paused ? 'Resume' : 'Pause'}</button>
+      <button data-act="onoff">${p.status === 'on' ? 'Off' : 'On'}</button>
+      <button data-act="edit">Edit</button>
+      <button data-act="del" class="warn">Delete</button>
+    </div>
+    <form class="edit-form" data-edit hidden>
+      <label class="span2">name<input name="name" value="${esc(p.name)}" /></label>
+      <label>mode<select name="mode">
+        <option value="buynow"${p.mode === 'buynow' ? ' selected' : ''}>buy now</option>
+        <option value="auction"${p.mode === 'auction' ? ' selected' : ''}>auction</option></select></label>
+      <label>price ($)<input name="price" type="number" step="0.50" value="${(p.priceCents / 100).toFixed(2)}" /></label>
+      <label>slot (s)<input name="slot" type="number" value="${p.slotSeconds}" /></label>
+      <label>auction clock (s)<input name="auction" type="number" value="${p.auctionSeconds}" /></label>
+      <label class="span2">min bid step ($)<input name="step" type="number" step="0.25" value="${(p.minIncrementCents / 100).toFixed(2)}" /></label>
+      <button class="btn slim span2" type="submit">Save</button>
+    </form>
+    <div class="status-line" data-cardmsg></div>
+  </div>`;
+}
+function renderAdmin(){
+  $('adminList').innerHTML = S.adminItems.map(adminCard).join('')
+    || '<div class="card note">no items yet — create one above, print its QR, tape it to the thing.</div>';
+}
+
+$('adminList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-act]'); if (!btn) return;
+  const card = e.target.closest('[data-code]');
+  const code = card.dataset.code;
+  const p = S.adminItems.find(i => i.item === code);
+  const msg = card.querySelector('[data-cardmsg]');
+  const say = (t, cls) => { msg.className = 'status-line ' + (cls || ''); msg.textContent = t; };
+  try {
+    switch (btn.dataset.act){
+      case 'copy':
+        if (navigator.clipboard) await navigator.clipboard.writeText(code);
+        say('code copied', 'ok'); break;
+      case 'qr': openQR(code, p.name); break;
+      case 'skip': await adminApi('POST', `/api/items/${code}/skip`, {}); say('slot ended', 'ok'); break;
+      case 'pauseresume': {
+        const action = p.active && p.active.paused ? 'resume' : 'pause';
+        await adminApi('POST', `/api/items/${code}/state`, { action });
+        say(action + 'd', 'ok'); break;
+      }
+      case 'onoff': {
+        const action = p.status === 'on' ? 'off' : 'on';
+        await adminApi('POST', `/api/items/${code}/state`, { action });
+        say('turned ' + action, 'ok'); break;
+      }
+      case 'edit': card.querySelector('[data-edit]').hidden = !card.querySelector('[data-edit]').hidden; return;
+      case 'del':
+        if (!confirm(`Delete "${p.name}" (${code})? Its QR codes stop working.`)) return;
+        await adminApi('DELETE', `/api/items/${code}`);
+        say('deleted', 'ok'); break;
+    }
+    await refreshAdmin();
+  } catch (err){ say(String(err.message), 'err'); }
+});
+$('adminList').addEventListener('submit', async (e) => {
+  const form = e.target.closest('form[data-edit]'); if (!form) return;
+  e.preventDefault();
+  const card = e.target.closest('[data-code]');
+  const msg = card.querySelector('[data-cardmsg]');
+  const f = new FormData(form);
+  try {
+    await adminApi('PATCH', '/api/items/' + card.dataset.code, {
+      name: f.get('name'),
+      mode: f.get('mode'),
+      priceCents: Math.round(parseFloat(f.get('price') || '0') * 100),
+      slotSeconds: parseInt(f.get('slot'), 10),
+      auctionSeconds: parseInt(f.get('auction'), 10),
+      minIncrementCents: Math.round(parseFloat(f.get('step') || '0.5') * 100),
+    });
+    msg.className = 'status-line ok'; msg.textContent = 'saved';
+    await refreshAdmin();
+  } catch (err){ msg.className = 'status-line err'; msg.textContent = String(err.message); }
+});
+
+/* QR modal (+ print) */
+function openQR(code, name){
+  drawQR($('qrCanvas'), `${location.origin}/control?item=${code}`);
+  $('qrName').textContent = name || '';
+  $('qrCode').textContent = code;
+  $('qrHost').textContent = location.host;
+  $('qrModal').hidden = false;
+}
+$('qrClose').addEventListener('click', () => { $('qrModal').hidden = true; });
+$('qrPrint').addEventListener('click', () => window.print());
+$('qrModal').addEventListener('click', (e) => { if (e.target === $('qrModal')) $('qrModal').hidden = true; });
+
+/* ── boot ── */
+function boot(){
+  hydrateIdentity();
+  const qrItem = new URLSearchParams(location.search).get('item');
+  if (qrItem){
+    $('codeInput').value = qrItem.toUpperCase().slice(0, 6);
+    submitCode(qrItem);                                // QR target: straight to the item
+  }
+  show(S.view);
+}
+boot();
+
+/* ── test shims (jsdom smoke: page-scope const/let are unreachable from
+      separate evals — everything the suite drives hangs off window) ── */
+window.__S = S;
+window.__IDENTITY = IDENTITY;
+window.__show = show;
+window.__submitCode = submitCode;
+window.__applyItem = applyItem;
+window.__renderTimers = renderTimers;
+window.__fire = fire;
+window.__bucket = BUCKET;
+window.__qrEncode = QR.encode;
+window.__unlockAdmin = unlockAdmin;
+window.__refreshAdmin = refreshAdmin;
+window.__createItem = createItem;
+window.__doBuy = doBuy;
+window.__doBid = doBid;
+window.__chosenBidCents = chosenBidCents;
+</script>
+</body>
+</html>

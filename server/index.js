@@ -39,6 +39,17 @@
      GET    /api/shop/library                     your purchases
      POST   /api/shop/buy                         { itemId }
      GET    /api/shop/records/:albumId/:n         stream a purchased track
+   Volt Control — pay-to-control items (server/items.js, /control page):
+     GET    /api/items/:code                      public — item meta + live state
+     POST   /api/items/:code/buy                  buy-now: take/queue a control slot
+     POST   /api/items/:code/bid                  { cents } soft-close auction bid
+     POST   /api/items/:code/cancel               leave the line / surrender the slot
+     GET    /api/items                            all items + live state       (admin)
+     POST   /api/items                            create (server makes the code) (admin)
+     PATCH  /api/items/:code                      edit price/slot/mode/…        (admin)
+     DELETE /api/items/:code                                                    (admin)
+     POST   /api/items/:code/skip                 end the current slot          (admin)
+     POST   /api/items/:code/state                { action: pause|resume|on|off } (admin)
 */
 import express from 'express';
 import path from 'node:path';
@@ -50,6 +61,7 @@ import { initAuth, mountAuth, authConfigured } from './auth.js';
 import { attachBus } from './bus.js';
 import { attachPaid } from './paid.js';
 import { attachShop } from './shop.js';
+import { attachItems } from './items.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.PORT || 8787;
@@ -154,6 +166,9 @@ attachPaid(app, requireAdmin);
 
 /* ── shop + cabinet: records + art packs (server/shop.js) ── */
 attachShop(app);
+
+/* ── Volt Control: pay-to-control items (server/items.js, /control page) ── */
+await attachItems(app, requireAdmin, store);
 
 /* ── the site itself (console + admin + audio/) ── */
 // albums/ holds PURCHASE-GATED records — never serve it statically; tracks

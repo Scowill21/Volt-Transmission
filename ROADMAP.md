@@ -144,7 +144,19 @@ slot holder's Live 1–4 actions (vj/radio/admin bypass); the console shows
 the queue, locks the caps, and a Paid-queues host view lives in
 admin.html. Song requests ride the same panel (queued → played/refund).
 Payment is stubbed at marked STRIPE seams — Tier 2b turns stubPay() into
-Checkout + webhook and moves the in-memory queues to Postgres. Still
+Checkout + webhook and moves the in-memory queues to Postgres.
+**Third slice shipped — VOLT CONTROL, pay-to-control ITEMS (test tier):**
+`server/items.js` + `control.html`: physical/visual items driven by TD,
+each with a 6-char code + printable QR to `/control?item=<CODE>`. Buy-now
+queue (auto-promote, estimated starts) or soft-close auction (first bid
+arms the clock, final-10s bids add 10s, top bid wins) grants a timed slot;
+the holder gets a full-screen d-pad/A-B-C controller whose presses ride
+the bus room `item:<CODE>` (`pad_*`/`btn_*` — the OSC bridge forwards them
+unchanged) behind the same verified-session gate discipline as the takeover
+(bus.js now runs a gate REGISTRY; the two products' territories are
+disjoint). Admin (create/edit/QR/skip/pause/off) lives in control.html's
+gear view. Same STRIPE stub seams; runtime queues in-memory until 2b —
+bids become authorize/capture/release there. Still
 open here: pooled FX from other viewers' keys, account-tied rate limits. Two modes worth building: **pooled** (everyone's hits spawn effects,
 rate-limited per user) and **takeover** (one paid user holds the controls
 for N minutes — this is a *product*, pairs beautifully with Stripe from

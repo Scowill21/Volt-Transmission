@@ -118,6 +118,20 @@
 const $ = (id) => document.getElementById(id);
 let mode = 'in';   // 'in' | 'up'
 
+// ?return=/some/path — where to bounce after sign-in (Volt Control items link
+// here from their pay prompts). Same-site paths only, so a crafted link can't
+// bounce a fresh session to another origin. The second char must not be '/'
+// OR '\' — browsers normalize backslashes to slashes, so '/\evil.com' would
+// otherwise become a protocol-relative redirect to evil.com. Belt and
+// suspenders: resolve it and require our own origin.
+const RETURN_TO = (() => {
+  const r = new URLSearchParams(location.search).get('return') || '';
+  if (!/^\/(?![\/\\])/.test(r)) return null;
+  try { if (new URL(r, location.origin).origin !== location.origin) return null; }
+  catch { return null; }
+  return r;
+})();
+
 function setStatus(el, msg, cls){ el.textContent = msg; el.className = 'status ' + (cls || ''); }
 
 async function api(path, body){
@@ -175,6 +189,7 @@ $('applyRadio').onclick = () => apply('radio');
 async function refresh(){
   let user = null;
   try { user = (await api('/api/me')).user; } catch {}
+  if (user && RETURN_TO){ location.href = RETURN_TO; return; }
   $('authBox').hidden = !!user;
   $('meBox').hidden = !user;
   if (!user) return;

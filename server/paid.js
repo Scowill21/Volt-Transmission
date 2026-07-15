@@ -24,7 +24,7 @@
    URL-param escape hatch applies instead: the request body may declare
    { user: { id, name } } — that path switches off automatically the
    moment auth is configured, so production always requires real sessions. */
-import { publish, setKeyGate } from './bus.js';
+import { publish, registerKeyGate } from './bus.js';
 import { userFromRequest, devIdentityAllowed } from './auth.js';
 import { httpError } from './store.js';
 
@@ -116,12 +116,24 @@ export async function requester(req){
   return null;
 }
 
+/* Cross-product territory guard: item:-prefixed bus rooms belong to the item
+   control product (server/items.js). The paid takeover/song endpoints must
+   never materialize queue state there, and this gate never rules on them. */
+const assertRadioChannel = (id) => {
+  if (String(id).startsWith('item:'))
+    throw httpError(404, 'item rooms have no radio queues — see /api/items/:code');
+};
+
 export function attachPaid(app, requireAdmin){
-  /* The permission gate the bus consults for LIVE ACTIONS (scene_1..4).
-     No active slot → open (today's behavior). Active slot → only the slot
-     holder or a privileged verified role passes. In unconfigured-auth dev,
-     the payload identity is trusted (documented escape hatch). */
-  setKeyGate((channelId, sender, msg) => {
+  /* The permission gate the bus consults for key actions. This gate claims
+     ONLY the Live 1–4 actions (scene_1..4) in radio-channel rooms — anything
+     else answers null ("not mine"). No active slot → open (today's
+     behavior). Active slot → only the slot holder or a privileged verified
+     role passes. In unconfigured-auth dev, the payload identity is trusted
+     (documented escape hatch). */
+  registerKeyGate((channelId, sender, msg) => {
+    if (String(channelId).startsWith('item:')) return null;    // items.js territory
+    if (!/^scene_[1-4]$/.test(msg.action || '')) return null;  // overlay/other keys stay open
     const c = state.get(channelId);
     if (!c || !c.active) return { ok: true };
     const u = sender && sender._user;
@@ -132,13 +144,17 @@ export function attachPaid(app, requireAdmin){
   });
 
   // Everyone can see the queues (the console polls this on channel change).
-  app.get('/api/channels/:id/queues', (req, res) => {
-    res.json(publicQueues(req.params.id));
+  app.get('/api/channels/:id/queues', (req, res, next) => {
+    try {
+      assertRadioChannel(req.params.id);
+      res.json(publicQueues(req.params.id));
+    } catch (e){ next(e); }
   });
 
   // Bid for the visual controls (STRIPE seam — stub-pays today).
   app.post('/api/channels/:id/control/request', async (req, res, next) => {
     try {
+      assertRadioChannel(req.params.id);
       const who = await requester(req);
       if (!who) throw httpError(401, 'sign in to bid for the controls');
       const c = chan(req.params.id);
@@ -163,6 +179,7 @@ export function attachPaid(app, requireAdmin){
   // Leave the queue / give up an active slot.
   app.post('/api/channels/:id/control/cancel', async (req, res, next) => {
     try {
+      assertRadioChannel(req.params.id);
       const who = await requester(req);
       if (!who) throw httpError(401, 'sign in first');
       const c = chan(req.params.id);
@@ -176,6 +193,7 @@ export function attachPaid(app, requireAdmin){
   // Request a song (STRIPE seam — stub-pays today).
   app.post('/api/channels/:id/songs/request', async (req, res, next) => {
     try {
+      assertRadioChannel(req.params.id);
       const who = await requester(req);
       if (!who) throw httpError(401, 'sign in to request a song');
       const title = String(req.body?.title || '').trim().slice(0, 120);
@@ -200,6 +218,7 @@ export function attachPaid(app, requireAdmin){
   /* Host/ops actions (admin room, X-Admin-Key) */
   app.post('/api/channels/:id/songs/:songId', requireAdmin, (req, res, next) => {
     try {
+      assertRadioChannel(req.params.id);
       const action = req.body?.action;
       if (!['played', 'refund'].includes(action)) throw httpError(400, 'action must be played|refund');
       const c = chan(req.params.id);
@@ -212,6 +231,7 @@ export function attachPaid(app, requireAdmin){
   });
   app.post('/api/channels/:id/control/skip', requireAdmin, (req, res, next) => {
     try {
+      assertRadioChannel(req.params.id);
       // STRIPE: ending a PAID slot early is a partial-refund/credit decision —
       // 2b should refund the unused minutes (or comp a fresh slot) here.
       startNext(req.params.id);                                          // end current slot, promote next
