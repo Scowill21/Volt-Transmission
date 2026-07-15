@@ -36,6 +36,7 @@ Object.defineProperty(w.navigator, 'vibrate', { value: () => true, configurable:
 const now = () => Date.now();
 const DB = {
   PSDV7H: { type: 'item_queues', item: 'PSDV7H', name: 'Lobby Lamp', description: 'tilt + strobe',
+    instructions: '▲▼ tilt the lamp · A strobe',
     mode: 'buynow', priceCents: 500, slotSeconds: 120, auctionSeconds: 60, minIncrementCents: 50,
     status: 'on', active: null, queue: [], auction: null, ts: 0 },
   '2AWK6P': { type: 'item_queues', item: '2AWK6P', name: 'Laser Head', description: null,
@@ -125,11 +126,25 @@ const ok = (label) => { console.log('OK  ', passed + 1, label); passed++; };
   assert.match(ws.url, /\/api\/bus\?channel=item%3APSDV7H$/, 'subscribed to the item room');
   ok('code entry → buy-now item view + bus room item:PSDV7H');
 
+  // the admin-written controls guide shows on the item (bid) page…
+  assert.ok(!w.document.getElementById('instrCard').hidden, 'controls guide card visible');
+  assert.match(w.document.getElementById('instrText').textContent, /tilt the lamp/);
+  ok('controls guide renders on the item page');
+
   // buy → slot granted → controller auto-shows
   await w.__doBuy(); await tick();
   assert.strictEqual(w.__S.holding, true);
   assert.strictEqual(w.__S.view, 'controller');
   ok('buy → slot granted → controller view auto-shows');
+
+  // …and behind the controller's (i) button as a dismissible popup
+  assert.ok(!w.document.getElementById('ctlInfo').hidden, '(i) button visible when a guide exists');
+  w.document.getElementById('ctlInfo').click();
+  assert.ok(!w.document.getElementById('ctlInstr').hidden, '(i) opens the guide popup');
+  assert.match(w.document.getElementById('ctlInstrText').textContent, /tilt the lamp/);
+  w.document.getElementById('ctlInstr').click();
+  assert.ok(w.document.getElementById('ctlInstr').hidden, 'tap dismisses the popup');
+  ok('controller (i) → guide popup opens and dismisses');
 
   // a press produces the stamped key schema on the socket
   const before = ws.sent.length;

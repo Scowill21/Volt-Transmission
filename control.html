@@ -164,6 +164,14 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
   align-self:center; margin-top:.3rem; background:none; border:none;
   color:var(--sub); font-size:.8rem; text-decoration:underline; padding:.5rem .8rem;
 }
+.ctl-info{
+  flex:none; width:2rem; height:2rem; border-radius:50%; border:1.5px solid var(--edge);
+  background:var(--card); color:var(--accent-ink); font-weight:700; font-size:.95rem;
+  font-family:Georgia, serif; font-style:italic; line-height:1;
+}
+.card.instr{ background:var(--accent-soft); border-color:var(--accent); }
+.card.instr .note{ margin:.45rem 0 0; white-space:pre-line; color:var(--ink); }
+.instr-pop{ z-index:6; }   /* sits above the pads AND the freeze overlay */
 .freeze{
   position:absolute; inset:0; z-index:5; display:flex; flex-direction:column; gap:.6rem;
   align-items:center; justify-content:center; text-align:center;
@@ -196,9 +204,9 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
 .acts button.warn{ color:var(--warn); border-color:var(--warn-soft); }
 .edit-form{ display:grid; grid-template-columns:1fr 1fr; gap:.55rem; margin-top:.7rem; }
 .edit-form label{ font-size:.75rem; color:var(--sub); display:flex; flex-direction:column; gap:.25rem; }
-.edit-form input, .edit-form select{
+.edit-form input, .edit-form select, .edit-form textarea{
   font-size:.95rem; padding:.55rem .6rem; border:1.5px solid var(--edge); border-radius:10px;
-  font-family:var(--disp); background:var(--card); color:var(--ink); width:100%;
+  font-family:var(--disp); background:var(--card); color:var(--ink); width:100%; resize:vertical;
 }
 .edit-form .span2{ grid-column:span 2; }
 .status-line{ min-height:1.2em; font-size:.85rem; color:var(--sub); margin:.4rem 0; }
@@ -271,6 +279,11 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
       <div class="time-line" id="holderTime"></div>
     </div>
 
+    <div class="card instr" id="instrCard" hidden>
+      <b>ⓘ what the controls do</b>
+      <p class="note" id="instrText"></p>
+    </div>
+
     <div class="card" id="buyCard" hidden>
       <div class="price" id="buyPrice"></div>
       <button class="btn" id="buyBtn">Buy Now</button>
@@ -315,6 +328,7 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
     <div class="ctl-top">
       <div class="meter" id="ctlMeter"><i id="ctlFill"></i></div>
       <span class="ctl-time" id="ctlTime">0:00</span>
+      <button class="ctl-info" id="ctlInfo" aria-label="What the controls do" hidden>i</button>
     </div>
     <div class="ctl-name" id="ctlName"></div>
     <div class="dpad">
@@ -334,6 +348,11 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
     <div class="freeze" id="ctlFreeze" hidden>
       <span id="freezeMsg">host paused this item</span>
       <span class="mini" id="freezeSub">your remaining time is frozen — hang tight</span>
+    </div>
+    <div class="freeze instr-pop" id="ctlInstr" hidden>
+      <b>what the controls do</b>
+      <p class="note" id="ctlInstrText" style="max-width:32ch; text-align:left; white-space:pre-line"></p>
+      <button class="btn slim" id="ctlInstrClose" style="width:auto; padding:.6rem 2rem">got it</button>
     </div>
   </section>
 
@@ -358,6 +377,8 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
         <b>New item</b>
         <div class="edit-form" style="margin-top:.6rem">
           <label class="span2">name<input id="nItemName" placeholder="e.g. Lobby Lamp" /></label>
+          <label class="span2">controls guide — what the d-pad and A/B/C do (shown to players)
+            <textarea id="nItemInstr" rows="3" placeholder="▲▼ tilt the lamp · ◀▶ swing it · A strobe · B color · C chaos"></textarea></label>
           <label>mode<select id="nItemMode"><option value="buynow">buy now</option><option value="auction">auction</option></select></label>
           <label>price / start ($)<input id="nItemPrice" type="number" step="0.50" value="5.00" inputmode="decimal" /></label>
           <label>slot (seconds)<input id="nItemSlot" type="number" value="120" inputmode="numeric" /></label>
@@ -776,6 +797,7 @@ function show(view){
   for (const [v, id] of Object.entries({ entry: 'viewEntry', item: 'viewItem', controller: 'viewController', admin: 'viewAdmin' }))
     $(id).hidden = v !== view;
   $('gearBtn').hidden = view === 'controller';
+  if (view === 'controller') $('ctlInstr').hidden = true;   // fresh slot, fresh start — (i) reopens it
 }
 
 /* ── entry ── */
@@ -841,6 +863,8 @@ function renderItem(){
   $('itemName').textContent = p.name;
   $('itemDesc').textContent = p.description || '';
   $('itemDesc').hidden = !p.description;
+  $('instrCard').hidden = !p.instructions;
+  $('instrText').textContent = p.instructions || '';
   const chip = $('itemChip');
   const paused = !!(p.active && p.active.paused);
   chip.textContent = p.status !== 'on' ? 'OFF' : paused ? 'PAUSED' : 'LIVE';
@@ -991,6 +1015,8 @@ $('leaveBtn').addEventListener('click', doCancel);
 $('releaseBtn').addEventListener('click', doCancel);
 $('releaseBtn2').addEventListener('click', doCancel);
 $('ctlRelease').addEventListener('click', doCancel);   // the controller's only exit while holding
+$('ctlInfo').addEventListener('click', () => { $('ctlInstr').hidden = false; });
+$('ctlInstr').addEventListener('click', () => { $('ctlInstr').hidden = true; });  // tap anywhere dismisses
 $('reopenCtl').addEventListener('click', () => show('controller'));
 
 /* ── controller ── */
@@ -1053,6 +1079,8 @@ function renderController(){
   const p = S.item;
   if (!p) return;
   $('ctlName').textContent = p.name;
+  $('ctlInfo').hidden = !p.instructions;
+  $('ctlInstrText').textContent = p.instructions || '';
   const freeze = $('ctlFreeze');
   if (p.status !== 'on'){
     freeze.hidden = false;
@@ -1112,12 +1140,13 @@ async function createItem(){
   try {
     const item = await adminApi('POST', '/api/items', {
       name: $('nItemName').value,
+      instructions: $('nItemInstr').value,
       mode: $('nItemMode').value,
       priceCents: Math.round(parseFloat($('nItemPrice').value || '0') * 100),
       slotSeconds: parseInt($('nItemSlot').value, 10) || 120,
       auctionSeconds: parseInt($('nItemAuction').value, 10) || 60,
     });
-    $('nItemName').value = '';
+    $('nItemName').value = ''; $('nItemInstr').value = '';
     msg.className = 'status-line ok';
     msg.textContent = `created — code ${item.item}`;
     await refreshAdmin();
@@ -1153,6 +1182,7 @@ function adminCard(p){
     </div>
     <form class="edit-form" data-edit hidden>
       <label class="span2">name<input name="name" value="${esc(p.name)}" /></label>
+      <label class="span2">controls guide<textarea name="instructions" rows="3">${esc(p.instructions || '')}</textarea></label>
       <label>mode<select name="mode">
         <option value="buynow"${p.mode === 'buynow' ? ' selected' : ''}>buy now</option>
         <option value="auction"${p.mode === 'auction' ? ' selected' : ''}>auction</option></select></label>
@@ -1212,6 +1242,7 @@ $('adminList').addEventListener('submit', async (e) => {
   try {
     await adminApi('PATCH', '/api/items/' + card.dataset.code, {
       name: f.get('name'),
+      instructions: f.get('instructions'),
       mode: f.get('mode'),
       priceCents: Math.round(parseFloat(f.get('price') || '0') * 100),
       slotSeconds: parseInt(f.get('slot'), 10),

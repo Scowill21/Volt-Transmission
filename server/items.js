@@ -99,7 +99,7 @@ function publicItem(item){
   })() : null;
   return {
     type: 'item_queues', item: item.code,
-    name: item.name, description: item.description, mode: item.mode,
+    name: item.name, description: item.description, instructions: item.instructions, mode: item.mode,
     priceCents: item.priceCents, slotSeconds: item.slotSeconds,
     auctionSeconds: item.auctionSeconds, minIncrementCents: item.minIncrementCents,
     status: item.status,

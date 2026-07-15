@@ -531,8 +531,11 @@ the item's bus URL. Additions to the address table:
 ### Running it (operator)
 
 1. `/control` → **⚙ gear** → your admin key → **Create item** (name, mode,
-   price, slot seconds). The code + QR appear — **Print** makes a
-   poster-ready sheet (big QR, name, code as text fallback).
+   price, slot seconds, and a **controls guide** — a short player-facing
+   note on what the d-pad and A/B/C actually do to your rig; it shows on
+   the item page and behind the controller's **ⓘ** button). The code + QR
+   appear — **Print** makes a poster-ready sheet (big QR, name, code as
+   text fallback).
 2. Wire TD to `item:<CODE>` (above) and test without a phone:
    ```bash
    curl -X POST https://<site>/api/channels/item:<CODE>/actions \

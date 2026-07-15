@@ -83,9 +83,11 @@ Follow `PAYMENTS-SETUP.md` §2–§3. In order:
   issue the Stripe refund.)*
 
 ### Volt Control items — `/control` → ⚙ gear (same admin key)
-- **Create an item:** name, buy-now or auction, price, slot seconds → the
-  6-char code appears with its QR. **Print** gives a poster-ready sheet
-  (big QR + name + code); tape it to the physical thing.
+- **Create an item:** name, buy-now or auction, price, slot seconds, and a
+  **controls guide** (what ▲▼◀▶/A/B/C do — players see it on the item page
+  and under the controller's ⓘ) → the 6-char code appears with its QR.
+  **Print** gives a poster-ready sheet (big QR + name + code); tape it to
+  the physical thing.
 - **Event day, one-handed:** each item card has **Skip** (end the current
   slot), **Pause/Resume** (freezes the holder's remaining time + their
   controls), **Off/On** (off = not sellable, controller dead — pause first

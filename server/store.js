@@ -81,6 +81,9 @@ function normalizeNewItem(props = {}){
   const defaults = { priceCents: 500, slotSeconds: 120, auctionSeconds: 60, minIncrementCents: 50 };
   const item = { code: null, name, mode,
     description: String(props.description || '').trim().slice(0, 200) || null,
+    // What the controls DO to the rig (admin-written, player-facing): shown
+    // on the item page and behind the controller's (i) button.
+    instructions: String(props.instructions || '').trim().slice(0, 500) || null,
     status: 'on', createdAt: new Date().toISOString() };
   for (const [f, [min, max]] of Object.entries(ITEM_FIELDS))
     item[f] = props[f] === undefined ? defaults[f] : itemInt(props[f], min, max, f);
@@ -95,6 +98,8 @@ function applyItemPatch(item, patch = {}){
   }
   if (patch.description !== undefined)
     item.description = String(patch.description || '').trim().slice(0, 200) || null;
+  if (patch.instructions !== undefined)
+    item.instructions = String(patch.instructions || '').trim().slice(0, 500) || null;
   if (patch.mode !== undefined){
     if (!ITEM_MODES.includes(patch.mode)) throw httpError(400, `mode must be one of ${ITEM_MODES.join('|')}`);
     item.mode = patch.mode;
@@ -290,6 +295,8 @@ class PgStore {
         created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
       );
     `);
+    // Controls guide — additive migration for tables created before it.
+    await this.pool.query('ALTER TABLE items ADD COLUMN IF NOT EXISTS instructions TEXT');
     const { rows } = await this.pool.query('SELECT COUNT(*)::int AS n FROM channels');
     if (rows[0].n === 0) for (const c of SEED){
       await this.pool.query('INSERT INTO channels (id, name, default_scene) VALUES ($1,$2,$3)', [c.id, c.name, c.defaultScene]);
@@ -390,6 +397,7 @@ class PgStore {
   /* items (Volt Control) — same client shape as the FileStore */
   _itemRow(r){
     return { code: r.code, name: r.name, description: r.description, mode: r.mode,
+      instructions: r.instructions,
       priceCents: r.price_cents, slotSeconds: r.slot_seconds, auctionSeconds: r.auction_seconds,
       minIncrementCents: r.min_increment_cents, status: r.status,
       createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at };
@@ -406,11 +414,11 @@ class PgStore {
       item.code = randomItemCode();
       try {
         await this.pool.query(
-          `INSERT INTO items (code, name, description, mode, price_cents, slot_seconds,
+          `INSERT INTO items (code, name, description, instructions, mode, price_cents, slot_seconds,
              auction_seconds, min_increment_cents, status, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [item.code, item.name, item.description, item.mode, item.priceCents, item.slotSeconds,
-           item.auctionSeconds, item.minIncrementCents, item.status, item.createdAt]);
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          [item.code, item.name, item.description, item.instructions, item.mode, item.priceCents,
+           item.slotSeconds, item.auctionSeconds, item.minIncrementCents, item.status, item.createdAt]);
         return item;
       } catch (e){
         if (e.code !== '23505') throw e;        // anything but a code collision is real
@@ -423,10 +431,10 @@ class PgStore {
     if (!rows.length) throw httpError(404, 'item not found');
     const item = applyItemPatch(this._itemRow(rows[0]), patch);
     await this.pool.query(
-      `UPDATE items SET name=$2, description=$3, mode=$4, price_cents=$5, slot_seconds=$6,
-         auction_seconds=$7, min_increment_cents=$8, status=$9 WHERE code=$1`,
-      [code, item.name, item.description, item.mode, item.priceCents, item.slotSeconds,
-       item.auctionSeconds, item.minIncrementCents, item.status]);
+      `UPDATE items SET name=$2, description=$3, instructions=$4, mode=$5, price_cents=$6,
+         slot_seconds=$7, auction_seconds=$8, min_increment_cents=$9, status=$10 WHERE code=$1`,
+      [code, item.name, item.description, item.instructions, item.mode, item.priceCents,
+       item.slotSeconds, item.auctionSeconds, item.minIncrementCents, item.status]);
     return item;
   }
 

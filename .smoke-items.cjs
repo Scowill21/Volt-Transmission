@@ -83,14 +83,16 @@ const ok = (label) => { console.log('OK  ', passed + 1, label); passed++; };
   assert.strictEqual(r.statusCode, 401);
   ok('create without admin key → 401');
 
-  // 2. create (buy-now) returns a well-formed 6-char code
+  // 2. create (buy-now) returns a well-formed 6-char code + the controls guide
   r = await call(app, 'POST', '/api/items', { headers: ADMIN,
-    body: { name: 'Lamp', mode: 'buynow', priceCents: 300, slotSeconds: 60 } });
+    body: { name: 'Lamp', mode: 'buynow', priceCents: 300, slotSeconds: 60,
+            instructions: '▲▼ tilt · A strobe' } });
   assert.strictEqual(r.statusCode, 201);
   const CODE = r.body.item;
   assert.match(CODE, /^[A-HJ-NP-Z2-9]{6}$/, 'code uses the unambiguous alphabet');
   assert.strictEqual(r.body.mode, 'buynow');
-  ok(`create item → 201, code ${CODE} (no 0/O/1/I)`);
+  assert.strictEqual(r.body.instructions, '▲▼ tilt · A strobe', 'controls guide rides the public payload');
+  ok(`create item → 201, code ${CODE} (no 0/O/1/I), instructions carried`);
 
   // 3. survives a restart: a fresh module attach re-reads the store
   assert.strictEqual((await store.listItems()).length, 1, 'item persisted durably');
@@ -286,8 +288,10 @@ const ok = (label) => { console.log('OK  ', passed + 1, label); passed++; };
   // 22. dashboard lists both items; PATCH edits; status via PATCH is refused
   r = await call(app, 'GET', '/api/items', { headers: ADMIN });
   assert.strictEqual(r.body.length, 2);
-  r = await call(app, 'PATCH', '/api/items/:code', { params: { code: CODE }, headers: ADMIN, body: { priceCents: 700 } });
+  r = await call(app, 'PATCH', '/api/items/:code', { params: { code: CODE }, headers: ADMIN,
+    body: { priceCents: 700, instructions: 'B = new colorway' } });
   assert.strictEqual(r.body.priceCents, 700);
+  assert.strictEqual(r.body.instructions, 'B = new colorway', 'PATCH updates the controls guide');
   r = await call(app, 'PATCH', '/api/items/:code', { params: { code: CODE }, headers: ADMIN, body: { status: 'off' } });
   assert.strictEqual(r.statusCode, 400, 'status flips must go through /state (announced to TD)');
   r = await call(app, 'DELETE', '/api/items/:code', { params: { code: AUC }, headers: ADMIN });
