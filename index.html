@@ -2326,8 +2326,8 @@ function makeAmbient(){
    Skyline blooms + streaks thicken with BASS (searchlight beams brighten
    with it, sweeping faster on MIDS, and FLASH on the SNARE) · window grids
    ride MIDS · neon flicker + drone strobes ride TREBLE · a sign flashes white
-   (and may re-letter) on the SNARE · the frame shakes and the wet road ripples
-   on the KICK · traffic surges +25% on the BASS · one tower is a giant equalizer. */
+   (and may re-letter) on the SNARE · the wet road ripples on the KICK ·
+   traffic surges +25% on the BASS · one tower is a giant equalizer. */
 function makePulse(){
   const KATA = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワンパルス東京';
   const kchar = () => KATA[(Math.random() * KATA.length) | 0];
@@ -2362,7 +2362,6 @@ function makePulse(){
   return { draw(g, t, dt, S){
     g.save();
     const bars = S.bars(12);                     // one spectrum read — billboard + EQ tower share it
-    if (S.kick > .05) g.translate(rnd(-1, 1) * 7 * S.kick, rnd(-1, 1) * 4 * S.kick);
     let gr = g.createLinearGradient(0, 0, 0, 720);
     gr.addColorStop(0, '#07031a'); gr.addColorStop(.6, '#140636'); gr.addColorStop(1, '#1c0a3e');
     g.fillStyle = gr; g.fillRect(-20, -20, 1320, 760);
