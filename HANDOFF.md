@@ -32,12 +32,14 @@ paid features (test tier), and a shop — served by a small Express API
 | `SETUP.md` | Operator guide: TD, songs, action bus, paid tier, shop |
 | `ROADMAP.md` | Tier plan; what's shipped vs open |
 | `PAYMENTS-SETUP.md` | The full Supabase + Stripe (2b) go-live playbook |
+| `PROMPT-CONTROL-SPLIT.md` | **The queued next mission**: split Volt Control user vs admin into an independent site |
+| `PROMPT-ITEM-CONTROL.md` | The original Volt Control build spec (owner decisions, executed) |
 | `ARCHITECTURE.md` | One-pager: Render vs Supabase vs backend |
 | `README.md` | Mostly the archived React variant — low value |
 
 ---
 
-## 2. Current state (verified live, 2026-07-13)
+## 2. Current state (verified live, 2026-07-15)
 
 Everything below is **deployed and working in production** unless marked.
 
@@ -72,7 +74,9 @@ Everything below is **deployed and working in production** unless marked.
   **range-adaptive** (commit 1eff2e8): rolling floor/ceiling, fire on upward
   crossing into the top of the band's own range; snare `makeOnset(.80,420)` ≈
   backbeat, kick `(.75,300)` ≈ four-on-floor. Pulse: cars +25% on bass,
-  searchlights flash on snare (alpha ~.2→~.74).
+  searchlights flash on snare (alpha ~.2→~.74). AUDIO-DRIVEN frame shake is
+  REMOVED (commit 5c5b924 — Pulse used to lurch ±7px per kick); the
+  player-controlled W punch zoom+shake (`FX.punch`) is deliberately kept.
 - **Drive Mode** — phone-only audio-first view; auto-suggests on phones.
 - **VOLT CONTROL — pay-to-control items (test tier)** — `server/items.js` +
   `control.html` (+ items table/JSON in `store.js`): items with 6-char codes
@@ -88,7 +92,13 @@ Everything below is **deployed and working in production** unless marked.
   cross-links. account.html grew a validated `?return=` redirect. The QR
   encoder is hand-written in control.html (byte mode, EC-M, v1–10) and was
   round-trip-verified against jsqr. Same STRIPE stub seams as paid.js;
-  runtime resets on deploy.
+  runtime resets on deploy. Items also carry an admin-written
+  **controls guide** (`instructions`, ≤500 chars — commit `c3058a6`): shown
+  as a card on the item page and behind the controller's (i) button.
+  **NEXT MISSION (William's ask): split control.html's user vs admin
+  experiences into an independent site — the full build prompt is
+  `PROMPT-CONTROL-SPLIT.md` (architecture decision, line-mapped inventory,
+  test plan).**
 - **⚠️ CABINET DEMO LOOK IS ON** — `CABINET_DEMO = true` in `index.html`
   renders a furnished, NON-functional cabinet preview (3 fake records + 12
   prints; clicks explain). **When William says "remove demo": flip that one
@@ -111,8 +121,8 @@ Everything below is **deployed and working in production** unless marked.
 node .smoke-test.cjs        # client: whole console in jsdom (~20 steps)
 node .smoke-server.cjs      # server: paid gate + shop gates (15 checks, hermetic)
 node .smoke-failclosed.cjs  # boots real server w/ Supabase env set + DB down → 401s (incl. item buy/bid)
-node .smoke-items.cjs       # server: Volt Control items (23 checks, hermetic)
-node .smoke-control.cjs     # client: control.html in jsdom (14 checks)
+node .smoke-items.cjs       # server: Volt Control items (26 checks, hermetic)
+node .smoke-control.cjs     # client: control.html in jsdom (18 checks)
 ```
 
 Extend them with every feature (CLAUDE.md rule). They are the ONLY gate —
@@ -141,6 +151,9 @@ there is no CI.
 
 ## 5. Open items, in priority order
 
+0. **BUILD NEXT: the Volt Control split** — user site vs admin/ops page
+   (`PROMPT-CONTROL-SPLIT.md` is the complete plan; settle its §1
+   architecture question with William before coding).
 1. **William flips** local `.env` to `:6543` + rotates the DB password
    (MANAGE.md has both runbooks). Also Supabase dashboard: "Confirm email"
    OFF; delete test users `volttest23980@gmail.com`, `volt-ada-23122@gmail.com`.
@@ -228,6 +241,8 @@ there is no CI.
 
 ## 8. Ready-made next prompts
 
+- ***"Split Volt Control per PROMPT-CONTROL-SPLIT.md"*** → the queued-up
+  mission: user site vs admin/ops page, full plan + inventory in that file.
 - *"Fix my local DB: switch .env to the transaction pooler and verify
   CONNECTED, then walk me through the password rotation."*
 - *"remove demo"* → flip `CABINET_DEMO` to false, run suites, push.
