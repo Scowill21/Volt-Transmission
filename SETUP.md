@@ -557,6 +557,37 @@ them; item definitions persist in the store). Money is stubbed at `STRIPE:`
 seams in `server/items.js` — Tier 2b converts buys to Checkout and bids to
 authorize-on-bid / capture-winner / release-losers.
 
+### Output chains + failover (never sell dead air)
+
+An item can carry an **ordered output chain** — the server drives whichever is
+online, in priority order, and fails over automatically. Manage it in the ⚙
+ops view → each item's **Outputs** section.
+
+- **Rig outputs** (`kind: rig`) — TouchDesigner, a Raspberry Pi
+  (`tools/bus-to-pi.mjs` + **HARDWARE.md**), or a `stage.html` projector.
+  A rig connects with identity: `wss://…/api/bus?channel=item:<CODE>&rig=<name>&rigKey=<key>`.
+  **Adding a rig output shows its key ONCE** (only the hash is stored); a bad
+  key is refused at the socket (close code `4401`). Rigs **self-mute** when
+  they aren't the elected program.
+- **Scene outputs** (`kind: scene`, one of `orb`/`grid`) — browser-rendered by
+  **`stage.html?item=<CODE>`**. A scene counts as **always online**, so putting
+  one at the bottom of the chain means the item never stops selling. Open
+  `stage.html?item=<CODE>&rig=<name>&rigKey=<key>` on a projector to make it a
+  real rig in the election; without a key it's a passive spectator mirror with
+  an attract screen + "scan to control" QR.
+- **Election + grace:** program = the lowest-priority ONLINE output. If the
+  program rig drops, a **5 s grace** passes before failover (no flapping); a
+  higher-priority rig reconnecting preempts immediately. With a chain
+  configured and **nothing** online, buy/bid return **503** ("not selling")
+  and any **running slot auto-pauses** (the holder's clock freezes) until an
+  output returns. Back-compat: an item with **no chain** behaves exactly as
+  before — always sellable, no presence tracking.
+- **Duty-cycle limits** (`limits.maxPerMin` / `cooldownMs`, per item) throttle
+  how fast an item can be driven, enforced server-side before fan-out.
+  Verified vj/radio/admin senders **bypass** them (owner's call).
+- The OSC bridge (`tools/bus-to-osc.mjs`) forwards `/volt/output/<program>`;
+  `stage.html` and `bus-to-pi.mjs` honor the self-mute automatically.
+
 ---
 
 ## The shop + cabinet (records & art — test tier)

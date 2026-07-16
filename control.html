@@ -160,6 +160,42 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
 }
 .abc button:active, .abc button.lit{ background:var(--accent-soft); border-color:var(--accent); }
 .ctl-note{ text-align:center; font-size:.82rem; color:var(--sub); min-height:1.2em; margin-top:.55rem; }
+
+/* output-offline banner + spectator strip (redundancy layer) */
+.offline-banner{ border-color:var(--warn); background:var(--warn-soft); }
+.offline-banner b{ color:var(--warn); }
+.spectator .spec-head{ font-size:.78rem; color:var(--sub); margin-bottom:.6rem; letter-spacing:.02em; }
+.spec-pad{
+  display:grid; grid-template-columns:repeat(4, 1fr); gap:.4rem; align-items:center;
+}
+.spec-pad .sp{
+  display:flex; align-items:center; justify-content:center; height:2.4rem; border-radius:10px;
+  border:1px solid var(--edge); background:var(--bg); color:var(--sub); font-size:.95rem; font-weight:700;
+  transition:background .05s, color .05s, border-color .05s;
+}
+.spec-pad .sp.lit{ background:var(--accent); color:#fff; border-color:var(--accent); }
+.sp-u{ grid-column:1; } .sp-l{ grid-column:2; } .sp-r{ grid-column:3; } .sp-d{ grid-column:4; }
+.sp-a, .sp-b, .sp-c{ margin-top:.1rem; }
+
+/* admin: output chain manager */
+.chain{ list-style:none; margin:.5rem 0 0; padding:0; }
+.chain li{
+  display:flex; align-items:center; gap:.55rem; padding:.5rem .3rem; border-top:1px solid var(--edge); font-size:.9rem;
+}
+.chain .dot{ width:.6rem; height:.6rem; border-radius:50%; background:var(--edge); flex:none; }
+.chain .dot.on{ background:var(--ok); box-shadow:0 0 0 3px var(--ok-soft); }
+.chain .dot.prog{ background:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+.chain .oname{ font-weight:600; }
+.chain .okind{ color:var(--sub); font-size:.78rem; }
+.chain .oprog{ margin-left:auto; font-size:.7rem; font-weight:700; letter-spacing:.06em; color:var(--accent-ink); }
+.chain .ox{ background:none; border:none; color:var(--warn); font-size:1.1rem; padding:.2rem .4rem; }
+.keyReveal{
+  margin-top:.6rem; padding:.7rem .8rem; border-radius:12px; background:var(--ok-soft);
+  border:1px solid var(--ok); font-size:.82rem; word-break:break-all;
+}
+.keyReveal code{ font-weight:700; }
+.pill-ok{ color:var(--ok); font-weight:700; font-size:.72rem; letter-spacing:.04em; }
+.pill-warn{ color:var(--warn); font-weight:700; font-size:.72rem; letter-spacing:.04em; }
 .ctl-exit{
   align-self:center; margin-top:.3rem; background:none; border:none;
   color:var(--sub); font-size:.8rem; text-decoration:underline; padding:.5rem .8rem;
@@ -272,6 +308,27 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
       <span class="chip live" id="itemChip">LIVE</span>
     </div>
     <p class="desc" id="itemDesc"></p>
+
+    <!-- output offline: a configured item with nothing listening (not selling) -->
+    <div class="card offline-banner" id="offlineCard" hidden>
+      <b>⚠ Output offline</b>
+      <p class="note" id="offlineNote">Nothing is connected to drive right now — this item isn't selling. Hang tight, it comes back automatically.</p>
+    </div>
+
+    <!-- spectator strip: a mini pad/A-B-C that lights up with the room's live
+         key traffic while you watch/wait -->
+    <div class="card spectator" id="spectatorCard" hidden>
+      <div class="spec-head"><span id="specWho">live now</span></div>
+      <div class="spec-pad">
+        <span class="sp sp-u" data-spec="pad_up">▲</span>
+        <span class="sp sp-l" data-spec="pad_left">◀</span>
+        <span class="sp sp-r" data-spec="pad_right">▶</span>
+        <span class="sp sp-d" data-spec="pad_down">▼</span>
+        <span class="sp sp-a" data-spec="btn_a">A</span>
+        <span class="sp sp-b" data-spec="btn_b">B</span>
+        <span class="sp sp-c" data-spec="btn_c">C</span>
+      </div>
+    </div>
 
     <div class="card" id="holderCard" hidden>
       <div><span class="holder-name" id="holderName"></span> <span class="mini" id="holderYou"></span></div>
@@ -755,8 +812,25 @@ function liveSync(){
     let m; try { m = JSON.parse(e.data); } catch { return; }
     if (m.type === 'item_queues' && m.item === S.code) applyItem(m);
     else if (m.type === 'item') onAnnounce(m);
+    else if (m.type === 'output' && m.item === S.code){    // election result → refresh (server also sends item_queues)
+      if (S.item){ S.item.program = m.program; S.item.outputsOnline = m.online || []; renderItem(); }
+    }
+    else if (m.type === 'key') specFlash(m.action);        // spectator mirror: someone else's live press
     else if (m.type === 'denied') $('ctlNote').textContent = m.reason || 'not allowed';
   };
+}
+
+// Light the matching cell of the spectator strip when a holder's key rides by.
+function specFlash(action){
+  if ($('spectatorCard').hidden) return;
+  // constrain before building a selector — a privileged sender can broadcast an
+  // arbitrary `action`, and a quote/bracket would throw out of querySelector.
+  if (!/^(pad_(up|down|left|right)|btn_[abc])$/.test(action)) return;
+  const el = document.querySelector(`.spec-pad [data-spec="${action}"]`);
+  if (!el) return;
+  el.classList.add('lit');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('lit'), 160);
 }
 setInterval(() => {                                    // poll fallback
   if (S.code && (!S.ws || S.ws.readyState !== 1))
@@ -866,10 +940,25 @@ function renderItem(){
   $('instrCard').hidden = !p.instructions;
   $('instrText').textContent = p.instructions || '';
   const chip = $('itemChip');
-  const paused = !!(p.active && p.active.paused);
-  chip.textContent = p.status !== 'on' ? 'OFF' : paused ? 'PAUSED' : 'LIVE';
+  const outGap = !!(p.active && p.active.outputPaused);
+  const paused = !!(p.active && (p.active.paused || p.active.outputPaused));
+  chip.textContent = p.status !== 'on' ? 'OFF' : outGap ? 'OUTPUT GAP' : paused ? 'PAUSED' : 'LIVE';
   chip.className = 'chip ' + (p.status !== 'on' ? 'off' : paused ? 'paused' : 'live');
   $('offNote').hidden = p.status === 'on';
+
+  // output layer: a configured chain with nothing online = not selling.
+  // `sellable` is authoritative (server-computed); fall back gracefully for
+  // older payloads that predate it.
+  const configured = Array.isArray(p.outputs) && p.outputs.length > 0;
+  const sellable = p.sellable !== undefined ? p.sellable
+    : (p.status === 'on' && (!configured || (p.program != null)));
+  $('offlineCard').hidden = !(configured && p.status === 'on' && !sellable);
+
+  // spectator strip: shown whenever SOMEONE ELSE holds the controls (a live
+  // mini-mirror while you watch/wait). Hidden when you hold or it's yours.
+  const showSpec = !!(p.active && p.active.userId !== IDENTITY.id) && !S.holding;
+  $('spectatorCard').hidden = !showSpec;
+  if (showSpec) $('specWho').textContent = `${p.active.name} is driving`;
 
   // current controller
   $('holderCard').hidden = !p.active;
@@ -887,8 +976,9 @@ function renderItem(){
   if (p.mode === 'buynow'){
     $('buyPrice').innerHTML = `${fmt$(p.priceCents)}<small>· ${fmtClock(p.slotSeconds * 1000)} of control</small>`;
     $('buyBtn').hidden = mine || queued;
-    $('buyBtn').disabled = p.status !== 'on';
-    $('buyBtn').textContent = p.active || p.queue.length ? 'Buy Now · join the line' : 'Buy Now';
+    $('buyBtn').disabled = p.status !== 'on' || !sellable;
+    $('buyBtn').textContent = !sellable ? 'Output offline — not selling'
+      : p.active || p.queue.length ? 'Buy Now · join the line' : 'Buy Now';
     $('leaveBtn').hidden = !queued;
     $('releaseBtn').hidden = !mine;
     $('reopenCtl').hidden = !(mine && p.status === 'on');
@@ -913,7 +1003,8 @@ function renderItem(){
     }
     const capClosed = !!(a && a.minNextCents === null);   // top bid at the $500 cap
     $('bidChips').firstElementChild.textContent = capClosed ? 'cap reached' : 'min · ' + fmt$(minNextCents());
-    $('bidBtn').disabled = p.status !== 'on' || !!p.active || capClosed;
+    $('bidBtn').disabled = p.status !== 'on' || !!p.active || capClosed || !sellable;
+    if (!sellable) $('bidBtn').textContent = 'Output offline';
     if (capClosed) $('bidMsg').textContent = 'the top bid hit the $500 cap — this round just plays out';
     $('releaseBtn2').hidden = !mine;
     syncBidChoice();
@@ -1099,7 +1190,7 @@ $('gearBtn').addEventListener('click', () => {
   show('admin');
   ($('adminDash').hidden ? $('adminKeyIn') : $('adminList')).focus?.();
 });
-$('adminBack').addEventListener('click', () => show(S.code ? 'item' : 'entry'));
+$('adminBack').addEventListener('click', () => { revealed = null; show(S.code ? 'item' : 'entry'); });
 
 async function unlockAdmin(key){
   const msg = $('adminGateMsg');
@@ -1171,7 +1262,8 @@ function adminCard(p){
       <button class="code" data-act="copy" title="copy code">${p.item}</button>
     </div>
     <div class="meta">${p.mode === 'buynow' ? 'buy now' : 'auction'} · ${fmt$(p.priceCents)} · ${p.slotSeconds}s slot · ${depth}</div>
-    <div class="live-line">${live}</div>
+    <div class="live-line">${live}${outputSummary(p)}</div>
+    ${chainBlock(p)}
     <div class="acts">
       <button data-act="qr">QR</button>
       <button data-act="skip">Skip</button>
@@ -1195,6 +1287,52 @@ function adminCard(p){
     <div class="status-line" data-cardmsg></div>
   </div>`;
 }
+// One-glance output summary on the live line: none / N online / OFFLINE.
+function outputSummary(p){
+  const outs = p.outputs || [];
+  if (!outs.length) return '';
+  const online = (p.outputsOnline || []).length + outs.filter(o => o.kind === 'scene').length;
+  const cls = p.sellable === false ? 'warn' : online ? 'ok' : 'warn';
+  const txt = p.sellable === false ? 'OUTPUT OFFLINE' : `${online}/${outs.length} online`;
+  return ` · <span class="pill-${cls}">${txt}</span>`;
+}
+// The chain manager: dots for presence (grey/green/amber=program), remove,
+// and the add-rig / add-scene controls (rig create reveals its key ONCE).
+function chainBlock(p){
+  const outs = p.outputs || [];
+  const prog = p.program;
+  const online = new Set(p.outputsOnline || []);
+  const rows = outs.map(o => {
+    const isProg = prog && prog.name === o.name;
+    const up = o.kind === 'scene' || online.has(o.name);
+    const dot = isProg ? 'dot on prog' : up ? 'dot on' : 'dot';
+    return `<li>
+      <span class="${dot}"></span>
+      <span class="oname">${esc(o.name)}</span>
+      <span class="okind">${o.kind === 'scene' ? 'scene · ' + esc(o.scene) : 'rig · #' + o.priority}</span>
+      ${isProg ? '<span class="oprog">● PROGRAM</span>' : ''}
+      <button class="ox" data-out="del" data-name="${esc(o.name)}" title="remove">✕</button>
+    </li>`;
+  }).join('');
+  return `
+  <details class="chain-wrap">
+    <summary style="cursor:pointer; font-size:.82rem; color:var(--sub); padding:.4rem 0">
+      Outputs — failover chain${outs.length ? ` (${outs.length})` : ' · none (always sellable)'}</summary>
+    <ul class="chain">${rows || '<li class="okind" style="border:none">no outputs — this item is always sellable (legacy behavior)</li>'}</ul>
+    <div class="edit-form" style="margin-top:.5rem">
+      <label>add rig — name<input data-out="rigname" placeholder="td-main" /></label>
+      <button class="btn ghost slim" data-out="addrig">Add rig + get key</button>
+      <label>add scene<select data-out="scene">${STAGE_SCENE_OPTS}</select></label>
+      <button class="btn ghost slim" data-out="addscene">Add scene output</button>
+    </div>
+    ${revealed && revealed.code === p.item ? `<div class="keyReveal">${revealed.html}</div>` : ''}
+  </details>`;
+}
+// The just-created rig key, held so it survives list re-renders (shown ONCE
+// per the security model — cleared when the admin leaves the dashboard).
+let revealed = null;
+const STAGE_SCENE_OPTS = ['orb', 'grid'].map(s => `<option value="${s}">${s}</option>`).join('');
+
 function renderAdmin(){
   $('adminList').innerHTML = S.adminItems.map(adminCard).join('')
     || '<div class="card note">no items yet — create one above, print its QR, tape it to the thing.</div>';
@@ -1233,6 +1371,46 @@ $('adminList').addEventListener('click', async (e) => {
     await refreshAdmin();
   } catch (err){ say(String(err.message), 'err'); }
 });
+// Output-chain controls (separate data-out namespace from the data-act row).
+// These re-render the list directly (not via the focus-guarded refreshAdmin)
+// so the update lands even though the clicked button is inside #adminList.
+function mergeItem(updated){
+  const i = S.adminItems.findIndex(x => x.item === updated.item);
+  if (i >= 0) S.adminItems[i] = updated; else S.adminItems.push(updated);
+  renderAdmin();
+}
+$('adminList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-out]'); if (!btn) return;
+  const card = e.target.closest('[data-code]');
+  const code = card.dataset.code;
+  const msg = card.querySelector('[data-cardmsg]');
+  const say = (t, cls) => { msg.className = 'status-line ' + (cls || ''); msg.textContent = t; };
+  try {
+    if (btn.dataset.out === 'addrig'){
+      const name = (card.querySelector('[data-out="rigname"]').value || '').trim();
+      if (!name) return say('name the rig first', 'err');
+      const res = await adminApi('POST', `/api/items/${code}/outputs`, { kind: 'rig', name });
+      revealed = { code, html:
+        `Rig key for <b>${esc(name)}</b> — shown once, save it now:<br>` +
+        `<code>${esc(res.rigKey)}</code><br>` +
+        `<span class="note">connect: <code>node tools/bus-to-pi.mjs --item ${code} --rig ${esc(name)} --key …</code></span>` };
+      mergeItem(res.item);
+      say('rig added — copy the key now (shown once)', 'ok');
+    } else if (btn.dataset.out === 'addscene'){
+      const scene = card.querySelector('[data-out="scene"]').value;
+      const res = await adminApi('POST', `/api/items/${code}/outputs`, { kind: 'scene', name: 'stage-' + scene, scene });
+      mergeItem(res.item);
+      say('scene output added — always online', 'ok');
+    } else if (btn.dataset.out === 'del'){
+      const name = btn.dataset.name;
+      if (!confirm(`Remove output "${name}"? A rig key is revoked and its connection drops.`)) return;
+      const updated = await adminApi('DELETE', `/api/items/${code}/outputs/${encodeURIComponent(name)}`);
+      mergeItem(updated);
+      say('output removed', 'ok');
+    }
+  } catch (err){ say(String(err.message), 'err'); }
+});
+
 $('adminList').addEventListener('submit', async (e) => {
   const form = e.target.closest('form[data-edit]'); if (!form) return;
   e.preventDefault();

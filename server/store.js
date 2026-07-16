@@ -73,6 +73,59 @@ const ITEM_FIELDS = {
   minIncrementCents: [1, 10000],
 };
 
+/* ── output chains + duty limits (the redundancy layer, items.js) ──
+   outputs = ORDERED failover chain, best first:
+     { kind:'rig',   name:'td-main', priority:1, keyHash:'<sha256 hex>' }
+     { kind:'scene', name:'stage',   priority:2, scene:'orb' }
+   keyHash is server-side only — it must never appear in a public payload
+   (items.js strips it). limits = duty-cycle safety for physical rigs.
+   BACK-COMPAT: items with an empty chain behave exactly as before the
+   redundancy layer existed (always sellable, no presence tracking). */
+export const STAGE_SCENES = ['orb', 'grid'];
+const OUTPUT_NAME_RE = /^[a-z0-9][a-z0-9-]{0,23}$/;
+const LIMIT_FIELDS = { maxPerMin: [10, 1000], cooldownMs: [0, 10000] };
+export const DEFAULT_LIMITS = { maxPerMin: 240, cooldownMs: 0 };
+
+export function normalizeOutputs(arr){
+  if (!Array.isArray(arr)) throw httpError(400, 'outputs must be an array');
+  if (arr.length > 12) throw httpError(400, 'at most 12 outputs per item');
+  const seen = new Set();
+  const out = arr.map((o) => {
+    const kind = o && o.kind;
+    if (!['rig', 'scene'].includes(kind)) throw httpError(400, 'output kind must be rig|scene');
+    const name = String(o.name || '').trim();
+    if (!OUTPUT_NAME_RE.test(name)) throw httpError(400, 'output name: lowercase letters/digits/dashes, max 24');
+    if (seen.has(name)) throw httpError(400, `duplicate output name "${name}"`);
+    seen.add(name);
+    const entry = { kind, name, priority: itemInt(o.priority ?? 1, 1, 99, 'priority') };
+    if (kind === 'scene'){
+      if (!STAGE_SCENES.includes(o.scene)) throw httpError(400, `scene must be one of ${STAGE_SCENES.join('|')}`);
+      entry.scene = o.scene;
+    } else {
+      if (!/^[0-9a-f]{64}$/.test(String(o.keyHash || ''))) throw httpError(400, 'rig outputs need a keyHash');
+      entry.keyHash = o.keyHash;
+    }
+    return entry;
+  });
+  out.sort((a, b) => a.priority - b.priority);
+  return out;
+}
+function normalizeLimits(raw){
+  const limits = { ...DEFAULT_LIMITS };
+  if (raw === undefined || raw === null) return limits;
+  if (typeof raw !== 'object') throw httpError(400, 'limits must be an object');
+  for (const [f, [min, max]] of Object.entries(LIMIT_FIELDS))
+    if (raw[f] !== undefined) limits[f] = itemInt(raw[f], min, max, f);
+  return limits;
+}
+// Reads may hand back rows/objects written before this layer existed —
+// normalize in one place so every backend returns the same shape.
+function withOutputDefaults(item){
+  if (!Array.isArray(item.outputs)) item.outputs = [];
+  item.limits = { ...DEFAULT_LIMITS, ...(item.limits || {}) };
+  return item;
+}
+
 function normalizeNewItem(props = {}){
   const name = String(props.name || '').trim().slice(0, 60);
   if (!name) throw httpError(400, 'name required');
@@ -84,7 +137,10 @@ function normalizeNewItem(props = {}){
     // What the controls DO to the rig (admin-written, player-facing): shown
     // on the item page and behind the controller's (i) button.
     instructions: String(props.instructions || '').trim().slice(0, 500) || null,
-    status: 'on', createdAt: new Date().toISOString() };
+    status: 'on', createdAt: new Date().toISOString(),
+    // Output chain edits go through the dedicated /outputs endpoints, not
+    // create — new items start unconfigured (= legacy behavior).
+    outputs: [], limits: normalizeLimits(props.limits) };
   for (const [f, [min, max]] of Object.entries(ITEM_FIELDS))
     item[f] = props[f] === undefined ? defaults[f] : itemInt(props[f], min, max, f);
   return item;
@@ -110,6 +166,9 @@ function applyItemPatch(item, patch = {}){
   }
   for (const [f, [min, max]] of Object.entries(ITEM_FIELDS))
     if (patch[f] !== undefined) item[f] = itemInt(patch[f], min, max, f);
+  if (patch.limits !== undefined) item.limits = normalizeLimits(patch.limits);
+  if (patch.outputs !== undefined)   // chain edits use POST/PATCH/DELETE …/outputs
+    throw httpError(400, 'use the /api/items/:code/outputs endpoints to edit the output chain');
   return item;
 }
 
@@ -152,7 +211,7 @@ export class FileStore {
     fs.renameSync(tmp, this.itemsFile);
   }
 
-  async listItems(){ return this._readItems(); }
+  async listItems(){ return this._readItems().map(withOutputDefaults); }
 
   async createItem(props){
     const item = normalizeNewItem(props);
@@ -168,7 +227,16 @@ export class FileStore {
     const data = this._readItems();
     const item = data.find(i => i.code === code);
     if (!item) throw httpError(404, 'item not found');
-    applyItemPatch(item, patch);
+    applyItemPatch(withOutputDefaults(item), patch);
+    this._writeItems(data);
+    return item;
+  }
+
+  async updateItemOutputs(code, outputs){
+    const data = this._readItems();
+    const item = data.find(i => i.code === code);
+    if (!item) throw httpError(404, 'item not found');
+    withOutputDefaults(item).outputs = normalizeOutputs(outputs);
     this._writeItems(data);
     return item;
   }
@@ -297,6 +365,9 @@ class PgStore {
     `);
     // Controls guide — additive migration for tables created before it.
     await this.pool.query('ALTER TABLE items ADD COLUMN IF NOT EXISTS instructions TEXT');
+    // Output chains + duty limits (redundancy layer) — additive, default = legacy behavior.
+    await this.pool.query(`ALTER TABLE items ADD COLUMN IF NOT EXISTS outputs JSONB NOT NULL DEFAULT '[]'`);
+    await this.pool.query('ALTER TABLE items ADD COLUMN IF NOT EXISTS limits JSONB');
     const { rows } = await this.pool.query('SELECT COUNT(*)::int AS n FROM channels');
     if (rows[0].n === 0) for (const c of SEED){
       await this.pool.query('INSERT INTO channels (id, name, default_scene) VALUES ($1,$2,$3)', [c.id, c.name, c.defaultScene]);
@@ -396,11 +467,12 @@ class PgStore {
 
   /* items (Volt Control) — same client shape as the FileStore */
   _itemRow(r){
-    return { code: r.code, name: r.name, description: r.description, mode: r.mode,
+    return withOutputDefaults({ code: r.code, name: r.name, description: r.description, mode: r.mode,
       instructions: r.instructions,
       priceCents: r.price_cents, slotSeconds: r.slot_seconds, auctionSeconds: r.auction_seconds,
       minIncrementCents: r.min_increment_cents, status: r.status,
-      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at };
+      outputs: r.outputs, limits: r.limits,
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at });
   }
 
   async listItems(){
@@ -415,10 +487,11 @@ class PgStore {
       try {
         await this.pool.query(
           `INSERT INTO items (code, name, description, instructions, mode, price_cents, slot_seconds,
-             auction_seconds, min_increment_cents, status, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+             auction_seconds, min_increment_cents, status, outputs, limits, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
           [item.code, item.name, item.description, item.instructions, item.mode, item.priceCents,
-           item.slotSeconds, item.auctionSeconds, item.minIncrementCents, item.status, item.createdAt]);
+           item.slotSeconds, item.auctionSeconds, item.minIncrementCents, item.status,
+           JSON.stringify(item.outputs), JSON.stringify(item.limits), item.createdAt]);
         return item;
       } catch (e){
         if (e.code !== '23505') throw e;        // anything but a code collision is real
@@ -432,9 +505,19 @@ class PgStore {
     const item = applyItemPatch(this._itemRow(rows[0]), patch);
     await this.pool.query(
       `UPDATE items SET name=$2, description=$3, instructions=$4, mode=$5, price_cents=$6,
-         slot_seconds=$7, auction_seconds=$8, min_increment_cents=$9, status=$10 WHERE code=$1`,
+         slot_seconds=$7, auction_seconds=$8, min_increment_cents=$9, status=$10, limits=$11 WHERE code=$1`,
       [code, item.name, item.description, item.instructions, item.mode, item.priceCents,
-       item.slotSeconds, item.auctionSeconds, item.minIncrementCents, item.status]);
+       item.slotSeconds, item.auctionSeconds, item.minIncrementCents, item.status,
+       JSON.stringify(item.limits)]);
+    return item;
+  }
+
+  async updateItemOutputs(code, outputs){
+    const { rows } = await this.pool.query('SELECT * FROM items WHERE code = $1', [code]);
+    if (!rows.length) throw httpError(404, 'item not found');
+    const item = this._itemRow(rows[0]);
+    item.outputs = normalizeOutputs(outputs);
+    await this.pool.query('UPDATE items SET outputs=$2 WHERE code=$1', [code, JSON.stringify(item.outputs)]);
     return item;
   }
 

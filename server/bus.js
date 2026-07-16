@@ -25,10 +25,14 @@ const RATE = { burst: 20, perSec: 8 };         // per-socket publish budget
 const ADMIN_KEY = process.env.ADMIN_KEY || 'dev';   // single source (mirrors index.js)
 
 // Control-plane message types the SERVER originates (paid.js broadcasts
-// 'queues'; items.js broadcasts 'item' + 'item_queues'). Clients may never
-// inject them — otherwise any peer could forge queue/lock/auction state or
-// fake "denied" notices to the whole room.
-const RESERVED = new Set(['queues', 'denied', 'item', 'item_queues']);
+// 'queues'; items.js broadcasts 'item' + 'item_queues' + 'output' election
+// results). Clients may never inject them — otherwise any peer could forge
+// queue/lock/auction/program state or fake "denied" notices to the room.
+const RESERVED = new Set(['queues', 'denied', 'item', 'item_queues', 'output']);
+// Types only RIGS (authenticated hardware/renderers) or privileged senders
+// may originate — plain viewers' copies are dropped exactly like RESERVED.
+const RIG_ONLY = new Set(['score', 'telemetry']);
+const PRIVILEGED = new Set(['vj', 'radio', 'admin']);
 
 // Pluggable permission checks for {type:'key'} actions. Each paid product
 // registers ONE gate; every key message is offered to every gate, which
@@ -46,6 +50,14 @@ function gateVerdict(channel, sender, msg){
   }
   return { ok: true };
 }
+
+// Rig identity (items.js registers this): rigs — TD bridges, Pis, stage.html
+// projectors — connect with &rig=<name>&rigKey=<key> and get presence-tracked
+// so the output election knows who's listening. One hook object, same style
+// as the gate registry: auth() rules on the key at the upgrade, connected/
+// closed/seen feed presence. No hooks registered → rig params are ignored.
+let rigHooks = null;
+export function registerRigHooks(hooks){ rigHooks = hooks; }
 
 export function publish(channel, msg, exceptWs){
   const room = rooms.get(channel);
@@ -66,12 +78,21 @@ export function attachBus(server, app){
     const q = new URL(req.url, 'http://x').searchParams;
     const channel = (q.get('channel') || '').slice(0, 40);
     if (!channel){ ws.close(4000, 'channel query param required'); return; }
+    // Rig identity: validated BEFORE the socket joins the room — a bad key
+    // never sees a single message. No rig params → plain viewer, as always.
+    const rigName = (q.get('rig') || '').slice(0, 24);
+    if (rigName && rigHooks){
+      const verdict = rigHooks.auth(channel, rigName, q.get('rigKey') || '');
+      if (!verdict || !verdict.ok){ ws.close(4401, 'bad rig key'); return; }
+      ws._rig = { name: rigName };
+    }
     ws._tokens = RATE.burst;
     ws._alive = true;
     ws._user = undefined;                      // undefined = session bind in flight
     ws._pending = [];                          // messages that arrived before the bind settled
     if (!rooms.has(channel)) rooms.set(channel, new Set());
     rooms.get(channel).add(ws);
+    if (ws._rig && rigHooks) rigHooks.connected(channel, ws._rig.name, ws);
 
     // Bind the VERIFIED account (session cookie on the upgrade request) to the
     // socket — takeover permission checks trust this, never the payload. Until
@@ -88,6 +109,9 @@ export function attachBus(server, app){
       try { msg = JSON.parse(String(data).slice(0, 4096)); } catch { return; }
       if (!msg || typeof msg.type !== 'string') return;
       if (RESERVED.has(msg.type)) return;      // clients can't forge server control-plane types
+      // score/telemetry come from RIGS (or privileged sessions) only — a
+      // plain viewer's copy is dropped exactly like a RESERVED forgery.
+      if (RIG_ONLY.has(msg.type) && !ws._rig && !(ws._user && PRIVILEGED.has(ws._user.role))) return;
       // Gating: key actions only pass for whoever holds the relevant controls
       // (paid.js: scene_1..4 takeover · items.js: pad/btn in item rooms).
       if (msg.type === 'key'){
@@ -100,7 +124,10 @@ export function attachBus(server, app){
       publish(channel, msg, ws);
     }
 
-    ws.on('pong', () => { ws._alive = true; });
+    ws.on('pong', () => {
+      ws._alive = true;
+      if (ws._rig && rigHooks) rigHooks.seen(channel, ws._rig.name);
+    });
     ws.on('message', (data) => {
       // Still binding? Buffer (bounded by the burst budget) and replay on bind.
       if (ws._user === undefined && ws._pending){
@@ -112,6 +139,7 @@ export function attachBus(server, app){
     ws.on('close', () => {
       const room = rooms.get(channel);
       if (room){ room.delete(ws); if (!room.size) rooms.delete(channel); }
+      if (ws._rig && rigHooks) rigHooks.closed(channel, ws._rig.name, ws);
     });
     ws.on('error', () => {});
   });
@@ -137,9 +165,12 @@ export function attachBus(server, app){
       return res.status(400).json({ error: 'body must be a message with a "type"' });
     if (RESERVED.has(msg.type))
       return res.status(400).json({ error: 'reserved (server-originated) message type' });
+    const admin = req.get('x-admin-key') === ADMIN_KEY;
+    // score/telemetry are rig-originated — over HTTP only X-Admin-Key may inject.
+    if (RIG_ONLY.has(msg.type) && !admin)
+      return res.status(403).json({ error: 'rig-originated message type — rigs or X-Admin-Key only' });
     // Same gates as the socket path (X-Admin-Key acts as privileged).
     if (msg.type === 'key'){
-      const admin = req.get('x-admin-key') === ADMIN_KEY;
       const verdict = gateVerdict(req.params.id, { _user: admin ? { role: 'admin' } : null }, msg);
       if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
     }

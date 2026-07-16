@@ -156,8 +156,20 @@ unchanged) behind the same verified-session gate discipline as the takeover
 (bus.js now runs a gate REGISTRY; the two products' territories are
 disjoint). Admin (create/edit/QR/skip/pause/off) lives in control.html's
 gear view. Same STRIPE stub seams; runtime queues in-memory until 2b —
-bids become authorize/capture/release there. Still
-open here: pooled FX from other viewers' keys, account-tied rate limits. Two modes worth building: **pooled** (everyone's hits spawn effects,
+bids become authorize/capture/release there.
+**Fourth slice shipped — the OUTPUT LAYER (TD-independence, test tier):**
+items carry an ordered failover chain of outputs — authenticated,
+presence-tracked **rigs** (TD / Raspberry Pi via `tools/bus-to-pi.mjs` /
+`stage.html` projectors) and browser **scenes** (always online). The server
+elects the best online output as "program", fails over on a 5s grace,
+preempts on higher-priority reconnect, refuses to sell when nothing's
+listening (503), and pauses the holder's clock during output gaps.
+`stage.html` is the never-offline browser venue renderer (Orb/Grid scenes +
+attract mode). Rig keys hashed at rest, shown once; duty-cycle limits per
+item (privileged bypass). Empty chain = pre-redundancy behavior. Still
+open here: pooled FX from other viewers' keys, account-tied rate limits;
+Phase-2 menu (web-app outputs, scores, pay-to-extend/jump, camera, pooled
+free mode, schedules, push) in `PROMPT-OUTPUTS-REDUNDANCY.md`. Two modes worth building: **pooled** (everyone's hits spawn effects,
 rate-limited per user) and **takeover** (one paid user holds the controls
 for N minutes — this is a *product*, pairs beautifully with Stripe from
 Tier 2). The console is already staged for it: keys 1–4 are the **live

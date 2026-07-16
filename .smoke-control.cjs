@@ -76,6 +76,17 @@ w.fetch = (url, opts = {}) => {
     return respond(201, payload(m[1]));
   }
 
+  m = u.match(/\/api\/items\/([A-Z0-9]{6})\/outputs$/);
+  if (m && method === 'POST'){
+    if (headers['X-Admin-Key'] !== 'dev') return respond(401, { error: 'bad admin key' });
+    const p = DB[m[1]];
+    p.outputs = p.outputs || [];
+    p.outputs.push({ kind: body.kind, name: body.name, priority: body.priority || p.outputs.length + 1,
+      ...(body.scene ? { scene: body.scene } : {}) });
+    const item = payload(m[1]);
+    return respond(201, body.kind === 'rig' ? { rigKey: 'k'.repeat(32), item } : { item });
+  }
+
   if (/\/api\/items$/.test(u)){
     if (headers['X-Admin-Key'] !== 'dev') return respond(401, { error: 'bad admin key' });
     if (method === 'GET') return respond(200, Object.keys(DB).map(payload));
@@ -273,6 +284,54 @@ const ok = (label) => { console.log('OK  ', passed + 1, label); passed++; };
     assert.ok(m.every(row => row.length === s && row.every(v => v === 0 || v === 1)), 'square 0/1 matrix');
   }
   ok('QR matrices: correct versions + finder patterns (decode: qr tooling)');
+
+  /* ── redundancy UI: offline banner, spectator strip, chain manager ── */
+  // reset to the item view for a clean canvas
+  await w.__submitCode('psdv7h'); await tick();
+
+  // configured chain + nothing online → OFFLINE banner + buy disabled
+  const offItem = { ...payload('PSDV7H'), outputs: [{ kind: 'rig', name: 'td-main', priority: 1 }],
+    program: null, outputsOnline: [], sellable: false, active: null };
+  w.__applyItem(offItem);
+  assert.ok(!w.document.getElementById('offlineCard').hidden, 'output-offline banner shown');
+  assert.strictEqual(w.document.getElementById('buyBtn').disabled, true, 'buy disabled while offline');
+  assert.match(w.document.getElementById('buyBtn').textContent, /not selling/i);
+  ok('output offline: banner shown + buy button disabled ("not selling")');
+
+  // a rig online → banner clears, buy re-enabled
+  const onItem = { ...offItem, program: { kind: 'rig', name: 'td-main' }, outputsOnline: ['td-main'], sellable: true };
+  w.__applyItem(onItem);
+  assert.ok(w.document.getElementById('offlineCard').hidden, 'banner clears when an output is online');
+  assert.strictEqual(w.document.getElementById('buyBtn').disabled, false, 'buy re-enabled');
+  ok('output back online: banner clears, buy re-enabled');
+
+  // someone else holds → spectator strip shows and lights on a key message
+  const heldItem = { ...onItem, active: { userId: 'u-other', name: 'Rex', paused: false, outputPaused: false, remainingMs: 60000 } };
+  w.__applyItem(heldItem);
+  assert.ok(!w.document.getElementById('spectatorCard').hidden, 'spectator strip shown while another drives');
+  const specSock = w.__wsInstances[w.__wsInstances.length - 1];
+  specSock.onmessage({ data: JSON.stringify({ type: 'key', action: 'pad_left' }) });
+  assert.ok(w.document.querySelector('.spec-pad [data-spec="pad_left"]').classList.contains('lit'),
+    'spectator cell lights on the live key');
+  ok('spectator strip: visible while another holds, lights on live key traffic');
+
+  // output gap mid-slot → chip shows the gap, buy stays off
+  const gapItem = { ...heldItem, active: { ...heldItem.active, outputPaused: true } };
+  w.__applyItem(gapItem);
+  assert.match(w.document.getElementById('itemChip').textContent, /OUTPUT GAP/);
+  ok('output gap mid-slot surfaces on the item chip');
+
+  // chain manager in the admin dashboard: add a rig → key revealed ONCE
+  await w.__unlockAdmin('dev'); await tick();
+  const card0 = w.document.querySelector('#adminList .icard');
+  const code0 = card0.dataset.code;
+  card0.querySelector('[data-out="rigname"]').value = 'pi-lamp';
+  card0.querySelector('[data-out="addrig"]').click(); await tick();
+  const reveal = w.document.querySelector(`.icard[data-code="${code0}"] .keyReveal`);
+  assert.ok(reveal, 'rig key revealed after add');
+  assert.match(reveal.textContent, /shown once/i);
+  assert.match(reveal.querySelector('code').textContent, /.{20,}/, 'plaintext key present once');
+  ok('chain manager: add rig → key shown once, chain re-renders in place');
 
   console.log(`\nALL CLEAR — ${passed} control-page checks passed`);
   w.close();

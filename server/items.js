@@ -25,19 +25,22 @@
    become authorize-on-bid → capture-winner → release-losers, and this
    runtime state moves to Postgres. Until then queues/auctions are in-memory
    and reset on deploy (documented, same as paid.js). */
-import { publish, registerKeyGate } from './bus.js';
+import crypto from 'node:crypto';
+import { publish, registerKeyGate, registerRigHooks } from './bus.js';
 import { requester } from './paid.js';
 import { devIdentityAllowed } from './auth.js';
-import { httpError, ITEM_CODE_RE } from './store.js';
+import { httpError, ITEM_CODE_RE, STAGE_SCENES, DEFAULT_LIMITS } from './store.js';
 
 const PRIVILEGED = new Set(['vj', 'radio', 'admin']);
 const MAX_QUEUE = 25;              // waiting buyers per item
 const MAX_BID_CENTS = 50000;       // hard cap: $500
 const SOFT_CLOSE_MS = 10000;       // a bid in the final 10 s extends the clock 10 s
 const BID_COOLDOWN_MS = 1500;      // per-user bid rate limit
+const OUTPUT_GRACE_MS = 5000;      // program rig drops → this long to come back before failover
 const PAD_BTN_RE = /^(pad_(up|down|left|right)|btn_[abc])$/;
 
 export const itemRoom = (code) => 'item:' + code;
+const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 
 // Durable item definitions, mirrored in memory so the bus gate (synchronous)
 // and public reads never touch the store. Loaded once at attach; every admin
@@ -59,6 +62,114 @@ const chan = (code) => {                                            // write: cr
   if (!state.has(code)) state.set(code, { active: null, queue: [], auction: null, lastBidAt: new Map() });
   return state.get(code);
 };
+
+/* ── the OUTPUT layer (redundancy) — kept OUTSIDE `state` on purpose: rig
+   presence must survive the idle-state eviction in the tick, and it only
+   ever materializes for codes that exist in `items` (rig auth checks the
+   durable chain first, so unknown codes can't grow these maps). ──────── */
+const rigsOnline = new Map();      // code -> Map<rigName, {since, lastSeen, ws}>
+const programs   = new Map();      // code -> {kind,name} | null   (last ELECTED output)
+const graceUntil = new Map();      // code -> ts — failover pending while the program rig may return
+const duty       = new Map();      // code -> { times:[], last:Map<action,ts> }   (sliding window)
+
+const onlineNames = (code) => [...(rigsOnline.get(code)?.keys() || [])];
+
+/* Election: lowest priority number wins among ONLINE outputs. Scenes are
+   browser-rendered and count as always online. An EMPTY chain returns
+   undefined — "unconfigured", the pre-redundancy behavior (always sellable,
+   nothing tracked). null = a chain exists but every output is down. */
+function elect(code){
+  const item = items.get(code);
+  if (!item || !item.outputs.length) return undefined;
+  const online = rigsOnline.get(code);
+  for (const o of item.outputs){   // store keeps the chain priority-sorted
+    if (o.kind === 'scene') return { kind: 'scene', name: o.name };
+    if (online && online.has(o.name)) return { kind: 'rig', name: o.name };
+  }
+  return null;
+}
+const outputRank = (item, out) => item.outputs.find(o => o.name === out.name)?.priority ?? 99;
+
+/* Recompute the election and act on the result: broadcast {type:'output'} on
+   any change, and clear an output-pause the moment something is listening
+   again. Engaging the pause is the TICK's job (it owns the grace window). */
+const rosters = new Map();                     // code -> last-broadcast online roster string
+function applyElection(item){
+  const code = item.code;
+  const held = programs.get(code) ?? null;
+  let next = elect(code) ?? null;
+
+  // Anti-flap: while a failover grace is pending we HOLD the dropped program,
+  // so unrelated churn (a spare joining/leaving, a chain edit) can't promote a
+  // backup early and cause an A→B→A flap. We only resolve the grace now if the
+  // held program itself returned, or a STRICTLY higher-priority output appeared.
+  if (graceUntil.has(code) && held){
+    const heldBack = next && next.name === held.name;
+    const preempt = next && outputRank(item, next) < outputRank(item, held);
+    if (!heldBack && !preempt){ programs.set(code, held); maybeBroadcastRoster(item, held); return held; }
+    graceUntil.delete(code);
+  } else if (next){
+    graceUntil.delete(code);                   // something is listening — no failover pending
+  }
+
+  const changed = !programs.has(code)
+    || (held === null) !== (next === null)
+    || (held && next && (held.kind !== next.kind || held.name !== next.name));
+  programs.set(code, next);
+  if (changed && item.outputs.length){
+    rosters.set(code, onlineNames(code).join(','));
+    publish(itemRoom(code), { type: 'output', item: code,
+      program: next, online: onlineNames(code), ts: Date.now() }, null);
+  } else {
+    maybeBroadcastRoster(item, next);          // program same but the online set may have moved
+  }
+  const c = state.get(code);
+  if (next && c && c.active && c.active.outputPaused){   // output returned mid-slot → resume the clock
+    c.active.outputPaused = false;
+    thaw(c.active);
+    announce(code, 'output_resume');
+    broadcastState(item);
+  }
+  return next;
+}
+// Keep observers' online roster fresh even when the elected program is unchanged
+// (a spare rig toggling): re-broadcast only when the online set actually moved.
+function maybeBroadcastRoster(item, program){
+  const code = item.code;
+  if (!item.outputs.length) return;
+  const now = onlineNames(code).join(',');
+  if (rosters.get(code) === now) return;
+  rosters.set(code, now);
+  publish(itemRoom(code), { type: 'output', item: code, program, online: onlineNames(code), ts: Date.now() }, null);
+}
+
+/* Duty-cycle guard (William's call: privileged senders BYPASS this — the
+   gate returns ok for them before duty is consulted). Sliding one-minute
+   window + optional per-action cooldown, per item. */
+function dutyAllows(item, action){
+  const lim = item.limits || DEFAULT_LIMITS;
+  if (!duty.has(item.code)) duty.set(item.code, { times: [], last: new Map() });
+  const d = duty.get(item.code);
+  const now = Date.now();
+  while (d.times.length && d.times[0] <= now - 60000) d.times.shift();
+  if (d.times.length >= lim.maxPerMin) return false;
+  if (lim.cooldownMs && now - (d.last.get(action) || 0) < lim.cooldownMs) return false;
+  d.times.push(now); d.last.set(action, now);
+  return true;
+}
+
+/* Slot freeze/thaw — ONE clock, TWO independent reasons (admin pause vs
+   output gap). The remaining time is captured when the FIRST reason engages
+   and the clock restarts only when the LAST one clears, so admin-resume
+   during an output gap (or an output returning mid-admin-pause) can never
+   double-credit or eat the holder's time. */
+const isFrozen = (a) => !!(a.paused || a.outputPaused);
+function freeze(a){ if (a.pausedRemainingMs === undefined) a.pausedRemainingMs = Math.max(0, a.endsAt - Date.now()); }
+function thaw(a){
+  if (isFrozen(a) || a.pausedRemainingMs === undefined) return;   // still frozen by the other reason
+  a.endsAt = Date.now() + a.pausedRemainingMs;
+  delete a.pausedRemainingMs;
+}
 
 // Codes reach us uppercase or lowercase (typed on phones) — normalize, and
 // validate the SHAPE before anything else so junk never probes further.
@@ -82,7 +193,7 @@ function publicItem(item){
   const c = peek(item.code);
   const now = Date.now();
   const activeRemainingMs = c.active
-    ? (c.active.paused ? c.active.pausedRemainingMs : Math.max(0, c.active.endsAt - now))
+    ? (isFrozen(c.active) ? c.active.pausedRemainingMs : Math.max(0, c.active.endsAt - now))
     : 0;
   const auction = c.auction ? (() => {
     const top = topBid(c.auction);
@@ -103,10 +214,18 @@ function publicItem(item){
     priceCents: item.priceCents, slotSeconds: item.slotSeconds,
     auctionSeconds: item.auctionSeconds, minIncrementCents: item.minIncrementCents,
     status: item.status,
+    // The output layer (additive — phones built before it ignore these).
+    // keyHash is deliberately stripped: chain names are public, keys never.
+    outputs: item.outputs.map(o => ({ kind: o.kind, name: o.name, priority: o.priority,
+                                      ...(o.scene ? { scene: o.scene } : {}) })),
+    program: item.outputs.length ? (programs.get(item.code) ?? elect(item.code) ?? null) : null,
+    outputsOnline: onlineNames(item.code),
+    sellable: item.status === 'on' && (!item.outputs.length || (elect(item.code) ?? null) !== null),
     active: c.active ? {
       userId: c.active.userId, name: c.active.name,
       startedAt: c.active.startedAt, endsAt: c.active.endsAt,
-      paused: !!c.active.paused, remainingMs: activeRemainingMs,
+      paused: !!c.active.paused, outputPaused: !!c.active.outputPaused,
+      remainingMs: activeRemainingMs,
     } : null,
     queue: c.queue.map((q, i) => ({
       userId: q.userId, name: q.name, position: i + 1,
@@ -129,6 +248,14 @@ function startSlot(item, winner){
   const now = Date.now();
   c.active = { userId: winner.userId, name: winner.name, startedAt: now, endsAt: now + item.slotSeconds * 1000 };
   announce(item.code, 'slot_start', { id: winner.userId, name: winner.name });
+  // Never hand a live clock to a slot that STARTS on a dead output (a buy-now
+  // promotion or auction win that lands during an ongoing gap) — freeze it at
+  // once so nobody is billed for dead air. applyElection() thaws it when an
+  // output returns; the tick's safety net is the belt-and-suspenders.
+  if (item.outputs.length && (elect(item.code) ?? null) === null){
+    freeze(c.active); c.active.outputPaused = true;
+    announce(item.code, 'output_pause');
+  }
 }
 
 // End the running slot ('slot_end' on expiry/surrender, 'skip' from admin)
@@ -144,14 +271,61 @@ function slotOver(item, why){
   }
 }
 
+/* Rig liveness sweep: a CLEANLY disconnected rig fires a 'close' at once, but
+   a power-yanked / network-partitioned one only stops answering pings. We ping
+   rig sockets on a short cadence (each pong refreshes lastSeen via bus.seen)
+   and fail out any rig that's gone silent past RIG_STALE_MS — so a hard rig
+   death fails over in ~12s instead of waiting ~60s for the bus heartbeat. */
+const RIG_STALE_MS = 12000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, rigs] of rigsOnline){
+    for (const [name, rec] of rigs){
+      try { if (rec.ws.readyState === rec.ws.OPEN) rec.ws.ping(); } catch { /* closing */ }
+      if (now - rec.lastSeen <= RIG_STALE_MS) continue;
+      rigs.delete(name);                       // silent too long → treat as gone
+      const item = items.get(code);
+      if (!item) continue;
+      const prog = programs.get(code);
+      if (prog && prog.kind === 'rig' && prog.name === name) graceUntil.set(code, now + OUTPUT_GRACE_MS);
+      else applyElection(item);
+    }
+    if (!rigs.size) rigsOnline.delete(code);
+  }
+}, 4000).unref();
+
 // Expiry tick: end run-out slots, resolve finished auctions, evict idle
 // state (keeps the Map bounded, mirrors paid.js).
 setInterval(() => {
   const now = Date.now();
+  // Failover grace ran out: the program rig didn't come back — re-elect
+  // (promotes the next output or goes dark) and pause any running clock.
+  for (const [code, until] of graceUntil){
+    if (now < until) continue;
+    graceUntil.delete(code);
+    const item = items.get(code);
+    if (!item) continue;
+    const program = applyElection(item);
+    const c = state.get(code);
+    if (program === null && item.outputs.length && c && c.active && !c.active.outputPaused){
+      freeze(c.active);                       // capture remaining BEFORE flagging
+      c.active.outputPaused = true;
+      announce(code, 'output_pause');
+      broadcastState(item);
+    }
+  }
   for (const [code, c] of state){
     const item = items.get(code);
     if (!item){ state.delete(code); continue; }         // definition deleted → drop runtime
-    if (c.active && !c.active.paused && now >= c.active.endsAt){
+    // Safety net: any running, non-output-paused slot whose configured chain
+    // has gone fully dark gets frozen here (catches every start/promote path
+    // in one place, so dead air is never billed no matter how the slot began).
+    if (c.active && !c.active.outputPaused && item.outputs.length && (elect(code) ?? null) === null){
+      freeze(c.active); c.active.outputPaused = true;
+      announce(code, 'output_pause');
+      broadcastState(item);
+    }
+    if (c.active && !isFrozen(c.active) && now >= c.active.endsAt){
       slotOver(item, 'slot_end');
       broadcastState(item);
     }
@@ -184,7 +358,9 @@ export async function attachItems(app, requireAdmin, store){
   registerKeyGate((channelId, sender, msg) => {
     if (!String(channelId).startsWith('item:')) return null;      // not our territory
     const u = sender && sender._user;
-    if (u && PRIVILEGED.has(u.role)) return { ok: true };         // verified vj/radio/admin
+    // Verified vj/radio/admin pass first — including past the duty limits
+    // (owner's explicit call: privileged senders bypass the cooldowns).
+    if (u && PRIVILEGED.has(u.role)) return { ok: true };
     if (!PAD_BTN_RE.test(msg.action || ''))
       return { ok: false, reason: 'item rooms only carry pad/btn controls' };
     const item = items.get(String(channelId).slice(5));
@@ -193,10 +369,65 @@ export async function attachItems(app, requireAdmin, store){
     const c = state.get(item.code);
     if (!c || !c.active) return { ok: false, reason: 'no one holds the controls — buy a slot first' };
     if (c.active.paused) return { ok: false, reason: 'the host paused this item' };
-    if (u && u.id === c.active.userId) return { ok: true };
-    if (devIdentityAllowed() && msg.user && msg.user.id === c.active.userId) return { ok: true };
-    return { ok: false, reason: `${c.active.name} has the controls` };
+    if (c.active.outputPaused) return { ok: false, reason: 'output offline — your clock is paused until it returns' };
+    const holds = (u && u.id === c.active.userId)
+      || (devIdentityAllowed() && msg.user && msg.user.id === c.active.userId);
+    if (!holds) return { ok: false, reason: `${c.active.name} has the controls` };
+    if (!dutyAllows(item, msg.action))
+      return { ok: false, reason: 'cooling down — this item limits how fast it can be driven' };
+    return { ok: true };
   });
+
+  /* Rig identity + presence (bus.js hooks). auth() rules at the WS upgrade:
+     the code must exist in the DURABLE chain (unknown codes can never grow
+     the presence maps) and the key must hash-match. connect/close drive the
+     election; a dropping PROGRAM rig gets a grace window before failover so
+     a network blip doesn't flap outputs. */
+  const rigHooks = {
+    auth(channel, rigName, rigKey){
+      if (!String(channel).startsWith('item:')) return { ok: false };
+      const item = items.get(String(channel).slice(5));
+      if (!item) return { ok: false };
+      const entry = item.outputs.find(o => o.kind === 'rig' && o.name === rigName);
+      if (!entry) return { ok: false };
+      return { ok: sha256(rigKey) === entry.keyHash };
+    },
+    connected(channel, rigName, ws){
+      const code = String(channel).slice(5);
+      const item = items.get(code);
+      if (!item) return;
+      if (!rigsOnline.has(code)) rigsOnline.set(code, new Map());
+      // Dedupe: a reconnect-before-close (or a second holder of the same key)
+      // would orphan the prior socket — it'd survive a later revoke while still
+      // authenticated. Close it now so there is ONLY EVER one socket per rig.
+      const prev = rigsOnline.get(code).get(rigName);
+      if (prev && prev.ws !== ws){ try { prev.ws.close(4409, 'superseded by a newer connection'); } catch {} }
+      const now = Date.now();
+      rigsOnline.get(code).set(rigName, { since: now, lastSeen: now, ws });
+      applyElection(item);                     // may preempt a lower-priority program immediately
+    },
+    closed(channel, rigName, ws){
+      const code = String(channel).slice(5);
+      const rec = rigsOnline.get(code)?.get(rigName);
+      if (!rec || rec.ws !== ws) return;       // an older socket for a reconnected rig — ignore
+      rigsOnline.get(code).delete(rigName);
+      if (!rigsOnline.get(code).size) rigsOnline.delete(code);
+      const item = items.get(code);
+      if (!item) return;
+      const prog = programs.get(code);
+      if (prog && prog.kind === 'rig' && prog.name === rigName){
+        graceUntil.set(code, Date.now() + OUTPUT_GRACE_MS);   // was program → grace before failover
+      } else {
+        applyElection(item);                   // spare rig left — just refresh the online list
+      }
+    },
+    seen(channel, rigName){
+      const rec = rigsOnline.get(String(channel).slice(5))?.get(rigName);
+      if (rec) rec.lastSeen = Date.now();
+    },
+  };
+  registerRigHooks(rigHooks);
+  __test.rigHooks = rigHooks;                  // suites drive auth/presence directly
 
   /* ── public: anyone can watch an item (no account, no state created) ── */
   app.get('/api/items/:code', (req, res, next) => {
@@ -215,6 +446,9 @@ export async function attachItems(app, requireAdmin, store){
       const item = findItem(normCode(req.params.code));
       if (item.status !== 'on') throw httpError(409, 'this item is off right now');
       if (item.mode !== 'buynow') throw httpError(409, 'this item sells by auction — place a bid instead');
+      // Never sell dead air: a configured chain with nothing online = no sale.
+      if (item.outputs.length && (elect(item.code) ?? null) === null)
+        throw httpError(503, 'output offline — this item is not selling right now');
       const c = chan(item.code);
       if (c.active && c.active.userId === who.id) throw httpError(409, 'you already have the controls');
       if (c.queue.some(q => q.userId === who.id)) throw httpError(409, 'you are already in line');
@@ -238,6 +472,9 @@ export async function attachItems(app, requireAdmin, store){
       const item = findItem(normCode(req.params.code));
       if (item.status !== 'on') throw httpError(409, 'this item is off right now');
       if (item.mode !== 'auction') throw httpError(409, 'this item sells by buy-now — no auction here');
+      // Never sell dead air (same rule as buy-now).
+      if (item.outputs.length && (elect(item.code) ?? null) === null)
+        throw httpError(503, 'output offline — this item is not selling right now');
       const c = chan(item.code);
       if (c.active) throw httpError(409, 'a control slot is running — the next round opens when it ends');
       const cents = req.body?.cents;
@@ -332,6 +569,10 @@ export async function attachItems(app, requireAdmin, store){
       announce(code, 'off');                   // rigs/phones: this item is gone
       items.delete(code);
       state.delete(code);
+      for (const rec of rigsOnline.get(code)?.values() || []){
+        try { rec.ws.close(4401, 'item deleted'); } catch { /* already gone */ }
+      }
+      rigsOnline.delete(code); programs.delete(code); graceUntil.delete(code); duty.delete(code); rosters.delete(code);
       res.status(204).end();
     } catch (e){ next(e); }
   });
@@ -362,15 +603,14 @@ export async function attachItems(app, requireAdmin, store){
       if (action === 'pause'){
         const c = state.get(code);
         if (!c || !c.active || c.active.paused) throw httpError(409, 'no running slot to pause');
+        freeze(c.active);                      // no-op if already frozen by an output gap
         c.active.paused = true;
-        c.active.pausedRemainingMs = Math.max(0, c.active.endsAt - now);
         announce(code, 'pause');
       } else if (action === 'resume'){
         const c = state.get(code);
         if (!c || !c.active || !c.active.paused) throw httpError(409, 'nothing is paused');
-        c.active.endsAt = now + c.active.pausedRemainingMs;
         c.active.paused = false;
-        delete c.active.pausedRemainingMs;
+        thaw(c.active);                        // stays frozen if an output gap still holds it
         announce(code, 'resume');
       } else if (action === 'on' || action === 'off'){
         item = await store.updateItem(code, { status: action });
@@ -381,8 +621,69 @@ export async function attachItems(app, requireAdmin, store){
       res.json(publicItem(item));
     } catch (e){ next(e); }
   });
+
+  /* ── admin: the OUTPUT CHAIN (ordered failover list) ──────────────
+     Rig entries get a server-generated key: the PLAINTEXT is returned once
+     from create and never again — only its sha256 lands in the store. */
+  app.post('/api/items/:code/outputs', requireAdmin, async (req, res, next) => {
+    try {
+      const code = normCode(req.params.code);
+      const item = findItem(code);
+      const { kind, name, priority, scene } = req.body || {};
+      const entry = { kind, name, priority: priority ?? (item.outputs.length + 1), scene };
+      let rigKey;
+      if (kind === 'rig'){
+        rigKey = crypto.randomBytes(24).toString('base64url');
+        entry.keyHash = sha256(rigKey);
+      }
+      const updated = await store.updateItemOutputs(code, [...item.outputs, entry]);
+      items.set(code, updated);
+      applyElection(updated);
+      broadcastState(updated);
+      res.status(201).json({ ...(rigKey ? { rigKey } : {}), item: publicItem(updated) });
+    } catch (e){ next(e); }
+  });
+
+  app.patch('/api/items/:code/outputs/:name', requireAdmin, async (req, res, next) => {
+    try {
+      const code = normCode(req.params.code);
+      const item = findItem(code);
+      const cur = item.outputs.find(o => o.name === req.params.name);
+      if (!cur) throw httpError(404, 'no output with that name');
+      const next_ = item.outputs.map(o => o !== cur ? o : {
+        ...o,
+        ...(req.body?.priority !== undefined ? { priority: req.body.priority } : {}),
+        ...(o.kind === 'scene' && req.body?.scene !== undefined ? { scene: req.body.scene } : {}),
+      });
+      const updated = await store.updateItemOutputs(code, next_);
+      items.set(code, updated);
+      applyElection(updated);
+      broadcastState(updated);
+      res.json(publicItem(updated));
+    } catch (e){ next(e); }
+  });
+
+  app.delete('/api/items/:code/outputs/:name', requireAdmin, async (req, res, next) => {
+    try {
+      const code = normCode(req.params.code);
+      const item = findItem(code);
+      if (!item.outputs.some(o => o.name === req.params.name)) throw httpError(404, 'no output with that name');
+      const updated = await store.updateItemOutputs(code, item.outputs.filter(o => o.name !== req.params.name));
+      items.set(code, updated);
+      // Revoke = the rig's socket dies with its key.
+      const rec = rigsOnline.get(code)?.get(req.params.name);
+      if (rec){
+        try { rec.ws.close(4401, 'output revoked'); } catch { /* closing */ }
+        rigsOnline.get(code).delete(req.params.name);
+        if (!rigsOnline.get(code).size) rigsOnline.delete(code);
+      }
+      applyElection(updated);
+      broadcastState(updated);
+      res.json(publicItem(updated));
+    } catch (e){ next(e); }
+  });
 }
 
 // Test hook (.smoke-items.cjs): drive the expiry tick deterministically by
-// rewinding endsAt timestamps instead of sleeping through real slots.
-export const __test = { state, items };
+// rewinding endsAt/graceUntil timestamps instead of sleeping through them.
+export const __test = { state, items, rigsOnline, programs, graceUntil, duty, elect, applyElection, sha256 };

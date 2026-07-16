@@ -32,7 +32,9 @@ paid features (test tier), and a shop — served by a small Express API
 | `SETUP.md` | Operator guide: TD, songs, action bus, paid tier, shop |
 | `ROADMAP.md` | Tier plan; what's shipped vs open |
 | `PAYMENTS-SETUP.md` | The full Supabase + Stripe (2b) go-live playbook |
-| `PROMPT-CONTROL-SPLIT.md` | **The queued next mission**: split Volt Control user vs admin into an independent site |
+| `HARDWARE.md` | Raspberry Pi rig guide (`tools/bus-to-pi.mjs`): wiring, pins.json, systemd, failover |
+| `PROMPT-CONTROL-SPLIT.md` | A queued mission: split Volt Control user vs admin into an independent site (NOT yet shipped) |
+| `PROMPT-OUTPUTS-REDUNDANCY.md` | The output-layer build spec — Phase 1 SHIPPED this session; §9 Phase-2 menu open |
 | `PROMPT-ITEM-CONTROL.md` | The original Volt Control build spec (owner decisions, executed) |
 | `ARCHITECTURE.md` | One-pager: Render vs Supabase vs backend |
 | `README.md` | Mostly the archived React variant — low value |
@@ -99,6 +101,36 @@ Everything below is **deployed and working in production** unless marked.
   experiences into an independent site — the full build prompt is
   `PROMPT-CONTROL-SPLIT.md` (architecture decision, line-mapped inventory,
   test plan).**
+- **VOLT CONTROL v2 — OUTPUT LAYER / redundancy (test tier)** — items now
+  carry an ordered **output chain** (`store.js`: `outputs` + `limits`, JSONB
+  migration, empty = legacy behavior). `bus.js` gained **rig identity** (a
+  `registerRigHooks` object beside the gate registry: `&rig=&rigKey=` at the
+  upgrade, bad key → close 4401) and two more unforgeable types (`output`
+  reserved; `score`/`telemetry` rig-or-admin only). `items.js` runs the
+  **election** (lowest-priority online output = program; scenes always online),
+  **5 s failover grace**, preemption, "never sell dead air" (503 + auto-pause
+  the holder's clock on a full output gap — a SEPARATE `outputPaused` flag from
+  admin `paused`, the two compose correctly), and **duty-cycle limits**
+  (privileged bypass, owner's call). Admin chain CRUD:
+  `POST/PATCH/DELETE /api/items/:code/outputs` (rig create returns the key
+  ONCE). New **`stage.html`** = the browser output plane (`?item=CODE`,
+  scenes `orb`/`grid`, attract mode + scan-QR, `&rig=&rigKey=` registers it as
+  a real output). `control.html` gained an output-offline banner, a spectator
+  strip, and the chain manager in the ⚙ view. New **`tools/bus-to-pi.mjs`** +
+  **`HARDWARE.md`** = the Raspberry Pi rig (sysfs GPIO, log-only off-Pi,
+  self-mute). Owner calls this session: duty limits DO bypass for privileged;
+  existing items default to no chain; stage scenes = Orb + Grid; `sw.js` for
+  Phase-2 push is PRE-APPROVED. Phase 2 menu still open (web-app outputs,
+  scores/leaderboard, pay-to-extend/jump, live camera, pooled free mode,
+  schedules, push) — see `PROMPT-OUTPUTS-REDUNDANCY.md` §9.
+  **Adversarial 4-lens review ran + fixes applied before ship:** a slot
+  promoted during an output gap now freezes (startSlot + tick safety net — no
+  dead-air billing); election is grace-aware (unrelated churn can't defeat the
+  anti-flap hold); rig sockets dedupe on reconnect (revoke fully cuts a rig
+  off); a lastSeen liveness reaper fails a power-yanked rig over in ~12s (not
+  ~60s); stage self-mute requires a key; canvas resizes only on change (Orb
+  trail works); roster re-broadcasts on spare toggles; specFlash guarded.
+  Regression tests items #39–41 lock these in.
 - **⚠️ CABINET DEMO LOOK IS ON** — `CABINET_DEMO = true` in `index.html`
   renders a furnished, NON-functional cabinet preview (3 fake records + 12
   prints; clicks explain). **When William says "remove demo": flip that one
@@ -121,8 +153,9 @@ Everything below is **deployed and working in production** unless marked.
 node .smoke-test.cjs        # client: whole console in jsdom (~20 steps)
 node .smoke-server.cjs      # server: paid gate + shop gates (15 checks, hermetic)
 node .smoke-failclosed.cjs  # boots real server w/ Supabase env set + DB down → 401s (incl. item buy/bid)
-node .smoke-items.cjs       # server: Volt Control items (26 checks, hermetic)
-node .smoke-control.cjs     # client: control.html in jsdom (18 checks)
+node .smoke-items.cjs       # server: Volt Control items + OUTPUT LAYER (38 checks, hermetic)
+node .smoke-control.cjs     # client: control.html in jsdom (23 checks)
+node .smoke-stage.cjs       # client: stage.html browser output plane (7 checks)
 ```
 
 Extend them with every feature (CLAUDE.md rule). They are the ONLY gate —

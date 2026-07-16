@@ -74,8 +74,9 @@ npm i jsdom              # once
 node .smoke-test.cjs     # client: headless run of every console path (jsdom)
 node .smoke-server.cjs   # server: the paid control gate (in-process, auth-unconfigured)
 node .smoke-failclosed.cjs  # server: fail-closed on DB outage (boots a child w/ Supabase env set + DB down)
-node .smoke-items.cjs    # server: Volt Control items (queue, auction, gate, territory)
-node .smoke-control.cjs  # client: control.html in jsdom (views, controller, throttle, QR)
+node .smoke-items.cjs    # server: Volt Control items + output layer (queue, auction, gate, election, failover)
+node .smoke-control.cjs  # client: control.html in jsdom (views, controller, throttle, QR, chain UI)
+node .smoke-stage.cjs    # client: stage.html browser output plane (scenes, election, attract)
 ```
 
 `.smoke-test.cjs` evals the whole page script (also catches syntax errors) and
@@ -87,10 +88,15 @@ headline security invariant: with Supabase env set but Postgres down, the
 payload-identity escape hatch stays CLOSED (bids AND item buys/bids 401).
 `.smoke-items.cjs` covers the items product end to end (create → buy/queue →
 expiry/skip/pause/off → auction arm/soft-close/win → gate verdicts → the
-paid-vs-items territory split). `.smoke-control.cjs` drives control.html
-headlessly (code entry, both item modes, slot-grant → controller, stamped
-presses, the ≤8 Hz throttle, admin unlock, QR structure). Keep all five green
-and extend them when adding features.
+paid-vs-items territory split) PLUS the output layer (chain CRUD, rig auth,
+election, failover grace, preemption, output-gap clock pause, the admin×output
+pause matrix, duty limits, forged-type drops). `.smoke-control.cjs` drives
+control.html headlessly (code entry, both item modes, slot-grant → controller,
+stamped presses, the ≤8 Hz throttle, admin unlock, QR structure, the
+output-offline banner / spectator strip / chain manager). `.smoke-stage.cjs`
+drives stage.html (scenes render + react, output election self-mute, attract
+mode, resync staleness guard). Keep all six green and extend them when adding
+features.
 
 ## Deploy
 

@@ -345,6 +345,255 @@ const ok = (label) => { console.log('OK  ', passed + 1, label); passed++; };
   assert.doesNotThrow(() => JSON.parse(fs.readFileSync(store.itemsFile, 'utf8')), 'store healed with valid JSON');
   ok('corrupt items.json → set aside + empty store, never a boot crash');
 
+  /* ═══ OUTPUT LAYER (redundancy) — chains, rig auth, election, failover ═══ */
+  const tick = () => new Promise(res => setTimeout(res, 1150));   // one pass of the 1s interval
+  const ROOM = (c) => 'item:' + c;
+
+  // 27. Back-compat: an EMPTY chain = exactly the old behavior.
+  const legacy = (await call(app, 'POST', '/api/items', { headers: ADMIN,
+    body: { name: 'Legacy', mode: 'buynow', priceCents: 100 } })).body.item;
+  r = await call(app, 'GET', '/api/items/:code', { params: { code: legacy } });
+  assert.deepStrictEqual(r.body.outputs, [], 'empty chain');
+  assert.strictEqual(r.body.program, null);
+  assert.strictEqual(r.body.sellable, true, 'unconfigured item stays sellable');
+  r = await call(app, 'POST', '/api/items/:code/buy', { params: { code: legacy }, body: AS('u-old', 'Old') });
+  assert.strictEqual(r.statusCode, 201, 'empty-chain buy works with zero rigs online');
+  await call(app, 'POST', '/api/items/:code/cancel', { params: { code: legacy }, body: AS('u-old', 'Old') });
+  ok('back-compat: empty chain = always sellable, no presence rules');
+
+  // 28. Chain CRUD: rig create returns the key ONCE; hash never leaks anywhere public.
+  const rig1 = await call(app, 'POST', '/api/items/:code/outputs', { params: { code: legacy },
+    headers: ADMIN, body: { kind: 'rig', name: 'td-main', priority: 1 } });
+  assert.strictEqual(rig1.statusCode, 201);
+  const KEY1 = rig1.body.rigKey;
+  assert.match(KEY1, /^[A-Za-z0-9_-]{20,}$/, 'plaintext key returned once');
+  assert.ok(!JSON.stringify(rig1.body.item).includes('keyHash'), 'no hash in the create payload');
+  const rig2 = await call(app, 'POST', '/api/items/:code/outputs', { params: { code: legacy },
+    headers: ADMIN, body: { kind: 'rig', name: 'td-backup', priority: 2 } });
+  const KEY2 = rig2.body.rigKey;
+  r = await call(app, 'GET', '/api/items/:code', { params: { code: legacy } });
+  const pub = JSON.stringify(r.body);
+  assert.ok(!pub.includes('keyHash') && !pub.includes(KEY1) && !pub.includes(KEY2), 'keys never public');
+  assert.deepStrictEqual(r.body.outputs.map(o => o.name), ['td-main', 'td-backup'], 'chain listed, priority-sorted');
+  r = await call(app, 'POST', '/api/items/:code/outputs', { params: { code: legacy },
+    headers: ADMIN, body: { kind: 'scene', name: 'stage', priority: 3, scene: 'nope' } });
+  assert.strictEqual(r.statusCode, 400, 'unknown scene rejected');
+  r = await call(app, 'POST', '/api/items/:code/outputs', { params: { code: legacy },
+    body: { kind: 'rig', name: 'evil' } });
+  assert.strictEqual(r.statusCode, 401, 'chain edits are admin-only');
+  ok('output chain CRUD: rigKey shown once, hashes/keys never in public payloads');
+
+  // 29. With a chain configured and NOTHING online → not selling (503), not sellable.
+  r = await call(app, 'GET', '/api/items/:code', { params: { code: legacy } });
+  assert.strictEqual(r.body.sellable, false, 'chain configured + all outputs down = not sellable');
+  r = await call(app, 'POST', '/api/items/:code/buy', { params: { code: legacy }, body: AS('u-den', 'Denied') });
+  assert.strictEqual(r.statusCode, 503, 'buy refused while output offline');
+  assert.match(r.body.error, /output offline/);
+  ok('never sell dead air: configured chain + nothing online → 503 buy');
+
+  // 30. Rig auth: bad key refused, good key marks presence + elects program.
+  const hooks = rt.rigHooks;
+  assert.strictEqual(hooks.auth(ROOM(legacy), 'td-main', 'wrong-key').ok, false, 'bad key refused');
+  assert.strictEqual(hooks.auth(ROOM('ZZZZZZ'), 'td-main', KEY1).ok, false, 'unknown code refused');
+  assert.strictEqual(rt.rigsOnline.size, 0, 'failed auth grew no presence state');
+  assert.strictEqual(hooks.auth(ROOM(legacy), 'td-main', KEY1).ok, true, 'good key accepted');
+  const wsMain = { closed: false, close(){ this.closed = true; } };
+  hooks.connected(ROOM(legacy), 'td-main', wsMain);
+  r = await call(app, 'GET', '/api/items/:code', { params: { code: legacy } });
+  assert.deepStrictEqual(r.body.program, { kind: 'rig', name: 'td-main' }, 'program elected');
+  assert.deepStrictEqual(r.body.outputsOnline, ['td-main']);
+  assert.strictEqual(r.body.sellable, true, 'selling resumes when a rig is online');
+  ok('rig auth: bad key/code refused (no state growth) · good key → presence + program');
+
+  // 31. Failover: program rig drops → grace → backup promoted.
+  const wsBackup = { close(){} };
+  assert.strictEqual(hooks.auth(ROOM(legacy), 'td-backup', KEY2).ok, true);
+  hooks.connected(ROOM(legacy), 'td-backup', wsBackup);
+  hooks.closed(ROOM(legacy), 'td-main', wsMain);
+  assert.deepStrictEqual(rt.programs.get(legacy), { kind: 'rig', name: 'td-main' },
+    'program HELD during the grace window (no flapping)');
+  rt.graceUntil.set(legacy, Date.now() - 1);            // rewind the grace instead of sleeping 5s
+  await tick();
+  assert.deepStrictEqual(rt.programs.get(legacy), { kind: 'rig', name: 'td-backup' }, 'backup promoted');
+  ok('failover: program drop → grace window → next-in-chain promoted');
+
+  // 32. Preemption: the higher-priority rig reconnects → takes program back immediately.
+  hooks.connected(ROOM(legacy), 'td-main', { close(){} });
+  assert.deepStrictEqual(rt.programs.get(legacy), { kind: 'rig', name: 'td-main' }, 'immediate preempt');
+  ok('preemption: higher-priority rig reconnect retakes program, no grace needed');
+
+  // 33. Output gap mid-slot: clock pauses; output return resumes it.
+  r = await call(app, 'POST', '/api/items/:code/buy', { params: { code: legacy }, body: AS('u-hold', 'Holder') });
+  assert.strictEqual(r.statusCode, 201);
+  hooks.closed(ROOM(legacy), 'td-backup', wsBackup);    // spare leaves — program unaffected
+  hooks.closed(ROOM(legacy), 'td-main', rt.rigsOnline.get(legacy).get('td-main').ws);
+  rt.graceUntil.set(legacy, Date.now() - 1);
+  await tick();
+  r = await call(app, 'GET', '/api/items/:code', { params: { code: legacy } });
+  assert.strictEqual(r.body.active.outputPaused, true, 'slot auto-paused on output gap');
+  assert.strictEqual(r.body.active.paused, false, 'admin-pause flag untouched');
+  const frozenAt = r.body.active.remainingMs;
+  await tick();
+  r = await call(app, 'GET', '/api/items/:code', { params: { code: legacy } });
+  assert.strictEqual(r.body.active.remainingMs, frozenAt, 'clock is actually frozen');
+  hooks.connected(ROOM(legacy), 'td-main', { close(){} });
+  r = await call(app, 'GET', '/api/items/:code', { params: { code: legacy } });
+  assert.strictEqual(r.body.active.outputPaused, false, 'output back → clock resumes');
+  assert.ok(r.body.active.remainingMs >= frozenAt - 100, 'no time was eaten by the gap');
+  ok('output gap mid-slot: clock freezes at the gap, resumes intact when output returns');
+
+  // 34. Pause matrix: admin pause and output pause are independent reasons.
+  //  (a) output-pause engaged → admin pause too → output returns → STILL admin-paused
+  hooks.closed(ROOM(legacy), 'td-main', rt.rigsOnline.get(legacy).get('td-main').ws);
+  rt.graceUntil.set(legacy, Date.now() - 1);
+  await tick();
+  r = await call(app, 'POST', '/api/items/:code/state', { params: { code: legacy },
+    headers: ADMIN, body: { action: 'pause' } });
+  assert.strictEqual(r.body.active.paused, true);
+  assert.strictEqual(r.body.active.outputPaused, true, 'both reasons held at once');
+  const bothFrozen = r.body.active.remainingMs;
+  hooks.connected(ROOM(legacy), 'td-main', { close(){} });     // output returns…
+  r = await call(app, 'GET', '/api/items/:code', { params: { code: legacy } });
+  assert.strictEqual(r.body.active.outputPaused, false);
+  assert.strictEqual(r.body.active.paused, true, '…but the admin pause still holds the clock');
+  assert.strictEqual(r.body.active.remainingMs, bothFrozen, 'frozen across the reason handoff');
+  //  (b) admin resume while output is down again → stays output-frozen
+  hooks.closed(ROOM(legacy), 'td-main', rt.rigsOnline.get(legacy).get('td-main').ws);
+  rt.graceUntil.set(legacy, Date.now() - 1);
+  await tick();
+  r = await call(app, 'POST', '/api/items/:code/state', { params: { code: legacy },
+    headers: ADMIN, body: { action: 'resume' } });
+  assert.strictEqual(r.body.active.paused, false, 'admin resume accepted');
+  assert.strictEqual(r.body.active.outputPaused, true, 'output gap still freezes the clock');
+  hooks.connected(ROOM(legacy), 'td-main', { close(){} });
+  r = await call(app, 'GET', '/api/items/:code', { params: { code: legacy } });
+  assert.strictEqual(r.body.active.outputPaused, false);
+  assert.ok(!r.body.active.paused && r.body.active.remainingMs > 0, 'fully resumed, time intact');
+  ok('pause matrix: admin × output flags compose — all four states behave');
+
+  // 35. A scene in the chain keeps the item sellable with zero rigs online.
+  const sceneItem = (await call(app, 'POST', '/api/items', { headers: ADMIN,
+    body: { name: 'Sceney', mode: 'buynow', priceCents: 100 } })).body.item;
+  await call(app, 'POST', '/api/items/:code/outputs', { params: { code: sceneItem },
+    headers: ADMIN, body: { kind: 'rig', name: 'td-x', priority: 1 } });
+  await call(app, 'POST', '/api/items/:code/outputs', { params: { code: sceneItem },
+    headers: ADMIN, body: { kind: 'scene', name: 'stage', priority: 2, scene: 'orb' } });
+  r = await call(app, 'GET', '/api/items/:code', { params: { code: sceneItem } });
+  assert.deepStrictEqual(r.body.program, { kind: 'scene', name: 'stage' }, 'scene elected when rigs are down');
+  assert.strictEqual(r.body.sellable, true);
+  r = await call(app, 'POST', '/api/items/:code/buy', { params: { code: sceneItem }, body: AS('u-s', 'S') });
+  assert.strictEqual(r.statusCode, 201, 'scene output keeps sales open');
+  ok('scene in the chain = always-online output → item never stops selling');
+
+  // 36. Duty-cycle: holder throttled, privileged (admin inject) bypasses (owner call).
+  const dutyItem = (await call(app, 'POST', '/api/items', { headers: ADMIN,
+    body: { name: 'Relay', mode: 'buynow', priceCents: 100 } })).body.item;
+  await call(app, 'PATCH', '/api/items/:code', { params: { code: dutyItem },
+    headers: ADMIN, body: { limits: { maxPerMin: 10, cooldownMs: 0 } } });
+  await call(app, 'POST', '/api/items/:code/buy', { params: { code: dutyItem }, body: AS('u-d', 'D') });
+  const fire = () => call(app, 'POST', '/api/channels/:id/actions', {
+    params: { id: ROOM(dutyItem) }, body: { type: 'key', action: 'btn_a', user: { id: 'u-d', name: 'D' } } });
+  for (let i = 0; i < 10; i++){
+    r = await fire();
+    assert.strictEqual(r.statusCode, 200, 'within budget action ' + i);
+  }
+  r = await fire();
+  assert.strictEqual(r.statusCode, 403, '11th action in the minute denied');
+  assert.match(r.body.error, /cooling down/);
+  r = await call(app, 'POST', '/api/channels/:id/actions', { params: { id: ROOM(dutyItem) },
+    headers: ADMIN, body: { type: 'key', action: 'btn_a' } });
+  assert.strictEqual(r.statusCode, 200, 'privileged sender bypasses duty limits (owner call)');
+  ok('duty-cycle: maxPerMin enforced on holders, privileged bypass honored');
+
+  // 37. Rig-originated + server-only types are unforgeable via HTTP inject.
+  r = await call(app, 'POST', '/api/channels/:id/actions', { params: { id: ROOM(dutyItem) },
+    body: { type: 'output', program: { kind: 'rig', name: 'evil' } } });
+  assert.strictEqual(r.statusCode, 400, 'output is RESERVED (server-only)');
+  r = await call(app, 'POST', '/api/channels/:id/actions', { params: { id: ROOM(dutyItem) },
+    body: { type: 'score', value: 999999 } });
+  assert.strictEqual(r.statusCode, 403, 'score from a plain client refused');
+  r = await call(app, 'POST', '/api/channels/:id/actions', { params: { id: ROOM(dutyItem) },
+    headers: ADMIN, body: { type: 'telemetry', temp: 42 } });
+  assert.strictEqual(r.statusCode, 200, 'X-Admin-Key may inject rig types');
+  ok('forgeries blocked: output reserved · score/telemetry rig-or-admin only');
+
+  // 38. Revoking a rig output kicks its live socket and re-elects.
+  const kicked = { closedWith: 0, close(c){ this.closedWith = c; } };
+  const rev = await call(app, 'POST', '/api/items/:code/outputs', { params: { code: sceneItem },
+    headers: ADMIN, body: { kind: 'rig', name: 'kickme', priority: 1 } });
+  assert.strictEqual(hooks.auth(ROOM(sceneItem), 'kickme', rev.body.rigKey).ok, true);
+  hooks.connected(ROOM(sceneItem), 'kickme', kicked);
+  assert.deepStrictEqual(rt.programs.get(sceneItem), { kind: 'rig', name: 'kickme' });
+  r = await call(app, 'DELETE', '/api/items/:code/outputs/:name',
+    { params: { code: sceneItem, name: 'kickme' }, headers: ADMIN });
+  assert.strictEqual(r.statusCode, 200);
+  assert.strictEqual(kicked.closedWith, 4401, 'revoked rig socket closed');
+  assert.strictEqual(hooks.auth(ROOM(sceneItem), 'kickme', rev.body.rigKey).ok, false, 'old key dead');
+  assert.deepStrictEqual(rt.programs.get(sceneItem), { kind: 'scene', name: 'stage' }, 're-elected to the scene');
+  ok('revocation: DELETE output kicks the socket, kills the key, re-elects');
+
+  // 39. PATCH an output's priority → chain re-sorts and re-elects (own item,
+  //     no scene, so rig priority actually decides the program).
+  const prioItem = (await call(app, 'POST', '/api/items', { headers: ADMIN,
+    body: { name: 'Prio', mode: 'buynow', priceCents: 100 } })).body.item;
+  await call(app, 'POST', '/api/items/:code/outputs', { params: { code: prioItem },
+    headers: ADMIN, body: { kind: 'rig', name: 'lo', priority: 5 } });
+  await call(app, 'POST', '/api/items/:code/outputs', { params: { code: prioItem },
+    headers: ADMIN, body: { kind: 'rig', name: 'hi', priority: 6 } });
+  rt.rigHooks.connected(ROOM(prioItem), 'lo', { close(){} });
+  rt.rigHooks.connected(ROOM(prioItem), 'hi', { close(){} });
+  assert.deepStrictEqual(rt.programs.get(prioItem), { kind: 'rig', name: 'lo' }, 'priority 5 beats 6');
+  r = await call(app, 'PATCH', '/api/items/:code/outputs/:name',
+    { params: { code: prioItem, name: 'hi' }, headers: ADMIN, body: { priority: 1 } });
+  assert.strictEqual(r.statusCode, 200);
+  assert.deepStrictEqual(rt.programs.get(prioItem), { kind: 'rig', name: 'hi' }, 'reprioritized hi → program');
+  ok('PATCH output priority → chain re-sorts + re-elects');
+
+  // 40. THE dead-air-on-promotion path (regression guard for the review's
+  //     major finding): buyer promoted DURING an output gap must not get a
+  //     live clock; the tick safety net (or startSlot) freezes it.
+  const gapItem = (await call(app, 'POST', '/api/items', { headers: ADMIN,
+    body: { name: 'GapPromo', mode: 'buynow', priceCents: 100, slotSeconds: 600 } })).body.item;
+  const gk = (await call(app, 'POST', '/api/items/:code/outputs', { params: { code: gapItem },
+    headers: ADMIN, body: { kind: 'rig', name: 'only', priority: 1 } })).body.rigKey;
+  const gws = { close(){} };
+  rt.rigHooks.connected(ROOM(gapItem), 'only', gws);
+  await call(app, 'POST', '/api/items/:code/buy', { params: { code: gapItem }, body: AS('u-a', 'Alice') });
+  await call(app, 'POST', '/api/items/:code/buy', { params: { code: gapItem }, body: AS('u-b', 'Bob') });   // queued
+  rt.rigHooks.closed(ROOM(gapItem), 'only', gws);            // rig gone → grace
+  rt.graceUntil.set(gapItem, Date.now() - 1);
+  await tick();                                             // grace fires → Alice frozen
+  let g = (await call(app, 'GET', '/api/items/:code', { params: { code: gapItem } })).body;
+  assert.strictEqual(g.active.outputPaused, true, 'holder frozen on the gap');
+  await call(app, 'POST', '/api/items/:code/skip', { params: { code: gapItem }, headers: ADMIN });  // promote Bob mid-gap
+  await tick();                                             // safety net must re-freeze the promoted slot
+  g = (await call(app, 'GET', '/api/items/:code', { params: { code: gapItem } })).body;
+  assert.strictEqual(g.active.name, 'Bob', 'Bob promoted');
+  assert.strictEqual(g.active.outputPaused, true, 'promoted slot is FROZEN — no dead-air billing');
+  // a non-holder press is refused while the output is dark
+  r = await call(app, 'POST', '/api/channels/:id/actions', { params: { id: ROOM(gapItem) },
+    body: { type: 'key', action: 'btn_a', user: { id: 'u-b', name: 'Bob' } } });
+  assert.strictEqual(r.statusCode, 403, 'presses gated while output-paused');
+  // output returns → promoted slot resumes
+  rt.rigHooks.connected(ROOM(gapItem), 'only', { close(){} });   // (key still valid — not revoked)
+  g = (await call(app, 'GET', '/api/items/:code', { params: { code: gapItem } })).body;
+  assert.strictEqual(g.active.outputPaused, false, 'output back → promoted slot resumes');
+  ok('dead-air guard: buyer promoted during an output gap is frozen, not billed');
+
+  // 41. Reconnect-before-close dedupe: a superseding socket closes the orphan,
+  //     so a later revoke fully cuts the rig off.
+  const dupItem = (await call(app, 'POST', '/api/items', { headers: ADMIN,
+    body: { name: 'Dup', mode: 'buynow', priceCents: 100 } })).body.item;
+  const dk = (await call(app, 'POST', '/api/items/:code/outputs', { params: { code: dupItem },
+    headers: ADMIN, body: { kind: 'rig', name: 'r', priority: 1 } })).body.rigKey;
+  const sockA = { closed: false, close(){ this.closed = true; } };
+  const sockB = { closed: false, close(){ this.closed = true; } };
+  rt.rigHooks.connected(ROOM(dupItem), 'r', sockA);
+  rt.rigHooks.connected(ROOM(dupItem), 'r', sockB);         // reconnect before A's close
+  assert.strictEqual(sockA.closed, true, 'orphan socket A closed on supersede');
+  assert.strictEqual(rt.rigsOnline.get(dupItem).get('r').ws, sockB, 'only the newest socket tracked');
+  ok('rig dedupe: a superseding connection closes the orphan (revoke stays complete)');
+
   cleanup();
   console.log(`\nALL CLEAR — ${passed} item-control checks passed`);
   process.exit(0);
