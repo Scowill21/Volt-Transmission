@@ -530,12 +530,13 @@ the item's bus URL. Additions to the address table:
 
 ### Running it (operator)
 
-1. `/control` → **⚙ gear** → your admin key → **Create item** (name, mode,
+1. **`/control-ops`** → your admin key → **Create item** (name, mode,
    price, slot seconds, and a **controls guide** — a short player-facing
    note on what the d-pad and A/B/C actually do to your rig; it shows on
    the item page and behind the controller's **ⓘ** button). The code + QR
    appear — **Print** makes a poster-ready sheet (big QR, name, code as
-   text fallback).
+   text fallback). *(Admin is its own page now; the public `/control` is
+   the walk-up product visitors scan into — no admin controls there.)*
 2. Wire TD to `item:<CODE>` (above) and test without a phone:
    ```bash
    curl -X POST https://<site>/api/channels/item:<CODE>/actions \
@@ -545,7 +546,7 @@ the item's bus URL. Additions to the address table:
    (The gate applies to injection too — X-Admin-Key acts as the privileged
    sender; without it a non-holder inject is denied, which is the product
    working.)
-3. Event day: the same gear view does **Skip / Pause / Off / Edit** per item,
+3. Event day: `/control-ops` does **Skip / Pause / Off / Edit** per item,
    one-handed on a phone. Pause freezes the holder's remaining time; Off
    stops sales and kills the controller (pause first if someone's mid-slot).
 4. Local dev testing uses the same escape hatch as the paid queues: run
@@ -560,8 +561,8 @@ authorize-on-bid / capture-winner / release-losers.
 ### Output chains + failover (never sell dead air)
 
 An item can carry an **ordered output chain** — the server drives whichever is
-online, in priority order, and fails over automatically. Manage it in the ⚙
-ops view → each item's **Outputs** section.
+online, in priority order, and fails over automatically. Manage it on
+**`/control-ops`** → each item's **Outputs** section.
 
 - **Rig outputs** (`kind: rig`) — TouchDesigner, a Raspberry Pi
   (`tools/bus-to-pi.mjs` + **HARDWARE.md**), or a `stage.html` projector.

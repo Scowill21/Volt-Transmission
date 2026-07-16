@@ -33,7 +33,7 @@ paid features (test tier), and a shop — served by a small Express API
 | `ROADMAP.md` | Tier plan; what's shipped vs open |
 | `PAYMENTS-SETUP.md` | The full Supabase + Stripe (2b) go-live playbook |
 | `HARDWARE.md` | Raspberry Pi rig guide (`tools/bus-to-pi.mjs`): wiring, pins.json, systemd, failover |
-| `PROMPT-CONTROL-SPLIT.md` | A queued mission: split Volt Control user vs admin into an independent site (NOT yet shipped) |
+| `PROMPT-CONTROL-SPLIT.md` | The user/admin split build spec — SHIPPED this session (control-ops.html) |
 | `PROMPT-OUTPUTS-REDUNDANCY.md` | The output-layer build spec — Phase 1 SHIPPED this session; §9 Phase-2 menu open |
 | `PROMPT-ITEM-CONTROL.md` | The original Volt Control build spec (owner decisions, executed) |
 | `ARCHITECTURE.md` | One-pager: Render vs Supabase vs backend |
@@ -97,10 +97,8 @@ Everything below is **deployed and working in production** unless marked.
   runtime resets on deploy. Items also carry an admin-written
   **controls guide** (`instructions`, ≤500 chars — commit `c3058a6`): shown
   as a card on the item page and behind the controller's (i) button.
-  **NEXT MISSION (William's ask): split control.html's user vs admin
-  experiences into an independent site — the full build prompt is
-  `PROMPT-CONTROL-SPLIT.md` (architecture decision, line-mapped inventory,
-  test plan).**
+  (The admin/user SPLIT shipped since — admin now lives on `control-ops.html`,
+  see the dedicated bullet below.)
 - **VOLT CONTROL v2 — OUTPUT LAYER / redundancy (test tier)** — items now
   carry an ordered **output chain** (`store.js`: `outputs` + `limits`, JSONB
   migration, empty = legacy behavior). `bus.js` gained **rig identity** (a
@@ -131,6 +129,16 @@ Everything below is **deployed and working in production** unless marked.
   ~60s); stage self-mute requires a key; canvas resizes only on change (Orb
   trail works); roster re-broadcasts on spare toggles; specFlash guarded.
   Regression tests items #39–41 lock these in.
+- **VOLT CONTROL — USER/ADMIN SITE SPLIT (this session)** — `control.html` is
+  now the PUBLIC user product only (`/control`; code entry → item → controller);
+  the admin dashboard moved to a new self-contained **`control-ops.html`**
+  (`/control-ops`). Option A (same Node service, `express.static` serves it
+  extensionless — zero server changes). NO admin code/key/QR-encoder ships to
+  walk-up phones now (the user smoke asserts it). `/control?item=` autofill
+  preserved (printed QR posters). admin.html cross-links `/control-ops`. Suites
+  split: `.smoke-control.cjs` → USER (20) + the no-admin invariant; NEW
+  `.smoke-ops.cjs` → dashboard (9, gate/create/QR/actions/edit/chain/refresh
+  guard). The `PROMPT-CONTROL-SPLIT.md` mission is now DONE.
 - **⚠️ CABINET DEMO LOOK IS ON** — `CABINET_DEMO = true` in `index.html`
   renders a furnished, NON-functional cabinet preview (3 fake records + 12
   prints; clicks explain). **When William says "remove demo": flip that one
@@ -153,8 +161,9 @@ Everything below is **deployed and working in production** unless marked.
 node .smoke-test.cjs        # client: whole console in jsdom (~20 steps)
 node .smoke-server.cjs      # server: paid gate + shop gates (15 checks, hermetic)
 node .smoke-failclosed.cjs  # boots real server w/ Supabase env set + DB down → 401s (incl. item buy/bid)
-node .smoke-items.cjs       # server: Volt Control items + OUTPUT LAYER (38 checks, hermetic)
-node .smoke-control.cjs     # client: control.html in jsdom (23 checks)
+node .smoke-items.cjs       # server: Volt Control items + OUTPUT LAYER (41 checks, hermetic)
+node .smoke-control.cjs     # client: control.html USER page in jsdom (20 checks)
+node .smoke-ops.cjs         # client: control-ops.html admin dashboard (9 checks)
 node .smoke-stage.cjs       # client: stage.html browser output plane (7 checks)
 ```
 

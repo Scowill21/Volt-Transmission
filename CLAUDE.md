@@ -75,7 +75,8 @@ node .smoke-test.cjs     # client: headless run of every console path (jsdom)
 node .smoke-server.cjs   # server: the paid control gate (in-process, auth-unconfigured)
 node .smoke-failclosed.cjs  # server: fail-closed on DB outage (boots a child w/ Supabase env set + DB down)
 node .smoke-items.cjs    # server: Volt Control items + output layer (queue, auction, gate, election, failover)
-node .smoke-control.cjs  # client: control.html in jsdom (views, controller, throttle, QR, chain UI)
+node .smoke-control.cjs  # client: control.html USER page (entry, item, controller, throttle, redundancy UI)
+node .smoke-ops.cjs      # client: control-ops.html admin dashboard (gate, create/edit/actions, chain, QR)
 node .smoke-stage.cjs    # client: stage.html browser output plane (scenes, election, attract)
 ```
 
@@ -91,12 +92,14 @@ expiry/skip/pause/off → auction arm/soft-close/win → gate verdicts → the
 paid-vs-items territory split) PLUS the output layer (chain CRUD, rig auth,
 election, failover grace, preemption, output-gap clock pause, the admin×output
 pause matrix, duty limits, forged-type drops). `.smoke-control.cjs` drives
-control.html headlessly (code entry, both item modes, slot-grant → controller,
-stamped presses, the ≤8 Hz throttle, admin unlock, QR structure, the
-output-offline banner / spectator strip / chain manager). `.smoke-stage.cjs`
-drives stage.html (scenes render + react, output election self-mute, attract
-mode, resync staleness guard). Keep all six green and extend them when adding
-features.
+control.html — now the USER page only (code entry, both item modes, slot-grant
+→ controller, the ≤8 Hz throttle, the output-offline banner / spectator strip),
+plus a hard assertion that NO admin code/key/QR-encoder ships to visitors.
+`.smoke-ops.cjs` drives the split-out admin dashboard control-ops.html (key
+gate, create + QR poster, skip/pause/off, edit PATCH, the chain manager, the
+edit-open refresh guard). `.smoke-stage.cjs` drives stage.html (scenes render +
+react, output election self-mute, attract mode, resync staleness guard). Keep
+all seven green and extend them when adding features.
 
 ## Deploy
 

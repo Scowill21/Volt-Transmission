@@ -40,10 +40,6 @@ a{ color:var(--accent-ink); }
   margin-left:auto; font-size:.8rem; color:var(--sub); text-decoration:none;
   border:1px solid var(--edge); border-radius:999px; padding:.35rem .8rem; background:var(--card);
 }
-.top .gear{
-  border:1px solid var(--edge); background:var(--card); color:var(--sub);
-  border-radius:999px; width:2.3rem; height:2.3rem; font-size:1rem; line-height:1;
-}
 
 h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; }
 .sub{ color:var(--sub); margin:0 0 1.6rem; }
@@ -177,25 +173,6 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
 .sp-u{ grid-column:1; } .sp-l{ grid-column:2; } .sp-r{ grid-column:3; } .sp-d{ grid-column:4; }
 .sp-a, .sp-b, .sp-c{ margin-top:.1rem; }
 
-/* admin: output chain manager */
-.chain{ list-style:none; margin:.5rem 0 0; padding:0; }
-.chain li{
-  display:flex; align-items:center; gap:.55rem; padding:.5rem .3rem; border-top:1px solid var(--edge); font-size:.9rem;
-}
-.chain .dot{ width:.6rem; height:.6rem; border-radius:50%; background:var(--edge); flex:none; }
-.chain .dot.on{ background:var(--ok); box-shadow:0 0 0 3px var(--ok-soft); }
-.chain .dot.prog{ background:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
-.chain .oname{ font-weight:600; }
-.chain .okind{ color:var(--sub); font-size:.78rem; }
-.chain .oprog{ margin-left:auto; font-size:.7rem; font-weight:700; letter-spacing:.06em; color:var(--accent-ink); }
-.chain .ox{ background:none; border:none; color:var(--warn); font-size:1.1rem; padding:.2rem .4rem; }
-.keyReveal{
-  margin-top:.6rem; padding:.7rem .8rem; border-radius:12px; background:var(--ok-soft);
-  border:1px solid var(--ok); font-size:.82rem; word-break:break-all;
-}
-.keyReveal code{ font-weight:700; }
-.pill-ok{ color:var(--ok); font-weight:700; font-size:.72rem; letter-spacing:.04em; }
-.pill-warn{ color:var(--warn); font-weight:700; font-size:.72rem; letter-spacing:.04em; }
 .ctl-exit{
   align-self:center; margin-top:.3rem; background:none; border:none;
   color:var(--sub); font-size:.8rem; text-decoration:underline; padding:.5rem .8rem;
@@ -221,54 +198,10 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
   background:rgba(25,21,18,.88); color:#fff; font-size:1.8rem; font-weight:700; text-align:center; padding:2rem;
 }
 
-/* ── admin ── */
-.admin-head{ display:flex; align-items:center; gap:.7rem; margin-bottom:1rem; }
-.admin-head h2{ margin:0; font-size:1.3rem; flex:1; }
-#adminKeyIn{ width:100%; font-size:1rem; padding:.75rem .8rem; border:1.5px solid var(--edge); border-radius:12px; margin-bottom:.7rem; font-family:var(--disp); background:var(--card); color:var(--ink); }
-.icard .code{
-  font-family:ui-monospace, Menlo, monospace; font-weight:700; letter-spacing:.18em;
-  background:var(--accent-soft); color:var(--accent-ink); border:none;
-  border-radius:9px; padding:.3rem .55rem; font-size:.95rem;
-}
-.icard .meta{ color:var(--sub); font-size:.83rem; margin:.3rem 0 .6rem; }
-.icard .live-line{ font-size:.9rem; margin-bottom:.6rem; }
-.acts{ display:flex; flex-wrap:wrap; gap:.45rem; }
-.acts button{
-  border:1.5px solid var(--edge); background:var(--card); border-radius:10px;
-  padding:.55rem .75rem; font-size:.85rem; font-weight:600; min-height:44px; color:var(--ink);
-}
-.acts button.warn{ color:var(--warn); border-color:var(--warn-soft); }
-.edit-form{ display:grid; grid-template-columns:1fr 1fr; gap:.55rem; margin-top:.7rem; }
-.edit-form label{ font-size:.75rem; color:var(--sub); display:flex; flex-direction:column; gap:.25rem; }
-.edit-form input, .edit-form select, .edit-form textarea{
-  font-size:.95rem; padding:.55rem .6rem; border:1.5px solid var(--edge); border-radius:10px;
-  font-family:var(--disp); background:var(--card); color:var(--ink); width:100%; resize:vertical;
-}
-.edit-form .span2{ grid-column:span 2; }
+/* status line — shared by buy/bid messages */
 .status-line{ min-height:1.2em; font-size:.85rem; color:var(--sub); margin:.4rem 0; }
 .status-line.err{ color:var(--warn); }
 .status-line.ok{ color:var(--ok); }
-
-/* ── QR modal + print ── */
-#qrModal{
-  position:fixed; inset:0; z-index:70; background:rgba(25,21,18,.55);
-  display:flex; align-items:center; justify-content:center; padding:1.2rem;
-}
-#qrModal .sheet{
-  background:#fff; border-radius:20px; padding:1.6rem; text-align:center; max-width:420px; width:100%;
-}
-#qrModal canvas{ width:min(70vw, 300px); height:auto; image-rendering:pixelated; }
-#qrModal h3{ margin:.8rem 0 .1rem; font-size:1.3rem; }
-#qrModal .codeTxt{ font-family:ui-monospace, Menlo, monospace; letter-spacing:.3em; font-size:1.25rem; font-weight:700; color:var(--accent-ink); margin:.2rem 0 1rem; }
-@media print{
-  /* Poster mode ONLY while the QR modal is open — a plain Cmd+P on any other
-     view must print the page normally, not a blank sheet. */
-  body:has(#qrModal:not([hidden])) > *{ display:none !important; }
-  body:has(#qrModal:not([hidden])) #qrModal{ display:flex !important; position:static; background:none; padding:0; }
-  #qrModal .sheet{ box-shadow:none; max-width:none; }
-  #qrModal canvas{ width:12cm; }
-  #qrModal .no-print{ display:none !important; }
-}
 
 /* toast */
 #toast{
@@ -284,7 +217,6 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
   <header class="top">
     <span class="wordmark"><span class="bolt">⚡</span> Volt Control</span>
     <a class="acct" id="acctChip" href="/account.html">sign in</a>
-    <button class="gear" id="gearBtn" aria-label="Admin">⚙</button>
   </header>
 
   <!-- ── 1 · code entry ── -->
@@ -413,65 +345,20 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
     </div>
   </section>
 
-  <!-- ── 4 · admin (gear icon) ── -->
-  <section id="viewAdmin" hidden>
-    <div class="admin-head">
-      <h2>Items · ops</h2>
-      <button class="back" id="adminBack">← done</button>
-    </div>
-
-    <div id="adminGate">
-      <div class="card">
-        <p class="note" style="margin-top:0">Admin key — same <code>X-Admin-Key</code> as <a href="/admin.html">the ops room</a>. Held in memory only.</p>
-        <input id="adminKeyIn" type="password" placeholder="admin key" autocomplete="off" />
-        <button class="btn slim" id="adminUnlock">Unlock</button>
-        <div class="status-line" id="adminGateMsg"></div>
-      </div>
-    </div>
-
-    <div id="adminDash" hidden>
-      <div class="card">
-        <b>New item</b>
-        <div class="edit-form" style="margin-top:.6rem">
-          <label class="span2">name<input id="nItemName" placeholder="e.g. Lobby Lamp" /></label>
-          <label class="span2">controls guide — what the d-pad and A/B/C do (shown to players)
-            <textarea id="nItemInstr" rows="3" placeholder="▲▼ tilt the lamp · ◀▶ swing it · A strobe · B color · C chaos"></textarea></label>
-          <label>mode<select id="nItemMode"><option value="buynow">buy now</option><option value="auction">auction</option></select></label>
-          <label>price / start ($)<input id="nItemPrice" type="number" step="0.50" value="5.00" inputmode="decimal" /></label>
-          <label>slot (seconds)<input id="nItemSlot" type="number" value="120" inputmode="numeric" /></label>
-          <label id="nAuctionWrap" hidden>auction clock (s)<input id="nItemAuction" type="number" value="60" inputmode="numeric" /></label>
-        </div>
-        <button class="btn slim" id="createBtn" style="margin-top:.7rem">Create item</button>
-        <div class="status-line" id="createMsg"></div>
-      </div>
-      <div id="adminList"></div>
-    </div>
-  </section>
+  <!-- admin/ops lives on its own page: /control-ops (see control-ops.html) -->
 </div>
 
 <div id="timesUp" hidden><div>⏱ Time's up<div class="mini" style="font-size:1rem; font-weight:400; margin-top:.6rem">back to the item — grab another slot</div></div></div>
-
-<div id="qrModal" hidden>
-  <div class="sheet">
-    <canvas id="qrCanvas" width="0" height="0"></canvas>
-    <h3 id="qrName"></h3>
-    <div class="codeTxt" id="qrCode"></div>
-    <p class="note no-print" style="margin:.2rem 0 1rem">Scan to open this item, or type the code at <b id="qrHost"></b>/control</p>
-    <div class="row no-print">
-      <button class="btn ghost slim" id="qrClose">Close</button>
-      <button class="btn slim" id="qrPrint">Print</button>
-    </div>
-  </div>
-</div>
 
 <div id="toast" role="status"></div>
 
 <script>
 /* ═══ Volt Control client ═══
-   Structure: identity → QR encoder → net/live-link → views (entry, item,
-   controller, admin). Testability contract (like index.html): everything a
-   test needs is exposed as window.__* shims at the bottom — page-scope
-   const/let are NOT reachable from separate jsdom evals. */
+   Structure: identity → net/live-link → views (entry, item, controller).
+   Admin/ops is a SEPARATE page (control-ops.html → /control-ops) — no admin
+   code ships here. Testability contract (like index.html): everything a test
+   needs is exposed as window.__* shims at the bottom — page-scope const/let
+   are NOT reachable from separate jsdom evals. */
 'use strict';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -515,253 +402,12 @@ function hydrateIdentity(){
     .catch(() => {});
 }
 
-/* ═══ QR encoder — byte mode, EC level M, versions 1–10 ═══
-   Dependency-free (golden rule: no external JS). Standard ISO/IEC 18004
-   pipeline: bits → Reed–Solomon blocks → interleave → matrix with the
-   best-scoring mask. Round-trip verified against an independent decoder
-   in the repo's smoke tooling. Returns a size×size array of 0/1. */
-const QR = (() => {
-  // per-version tables, EC level M
-  const CAP    = [0, 14, 26, 42, 62, 84, 106, 122, 152, 180, 213];    // byte capacity
-  const ECW    = [0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26];         // ec codewords per block
-  const BLOCKS = [null, [16], [28], [44], [32, 32], [43, 43], [27, 27, 27, 27],
-    [31, 31, 31, 31], [38, 38, 39, 39], [36, 36, 36, 37, 37], [43, 43, 43, 43, 44]];
-  const ALIGN  = [null, [], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34],
-    [6, 22, 38], [6, 24, 42], [6, 26, 46], [6, 28, 50]];
-
-  // GF(256), polynomial 0x11d
-  const EXP = new Uint8Array(512), LOG = new Uint8Array(256);
-  for (let i = 0, x = 1; i < 255; i++){ EXP[i] = x; LOG[x] = i; x <<= 1; if (x & 0x100) x ^= 0x11d; }
-  for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
-  const gmul = (a, b) => (a && b ? EXP[LOG[a] + LOG[b]] : 0);
-
-  function genPoly(n){                     // monic generator, degree n
-    let p = [1];
-    for (let i = 0; i < n; i++){
-      const q = new Array(p.length + 1).fill(0);
-      for (let j = 0; j < p.length; j++){
-        q[j] ^= p[j];
-        q[j + 1] ^= gmul(p[j], EXP[i]);
-      }
-      p = q;
-    }
-    return p;
-  }
-  function rsRemainder(data, n){
-    const gen = genPoly(n), rem = new Uint8Array(n);
-    for (const d of data){
-      const f = d ^ rem[0];
-      rem.copyWithin(0, 1); rem[n - 1] = 0;
-      if (f) for (let j = 0; j < n; j++) rem[j] ^= gmul(gen[j + 1], f);
-    }
-    return rem;
-  }
-  function utf8(str){
-    const out = [];
-    for (const ch of str){
-      const cp = ch.codePointAt(0);
-      if (cp < 0x80) out.push(cp);
-      else if (cp < 0x800) out.push(0xc0 | cp >> 6, 0x80 | (cp & 63));
-      else if (cp < 0x10000) out.push(0xe0 | cp >> 12, 0x80 | (cp >> 6 & 63), 0x80 | (cp & 63));
-      else out.push(0xf0 | cp >> 18, 0x80 | (cp >> 12 & 63), 0x80 | (cp >> 6 & 63), 0x80 | (cp & 63));
-    }
-    return out;
-  }
-  // BCH-protected format/version info (standard long division over GF(2))
-  const bitLen = (v) => 32 - Math.clz32(v);
-  const G15 = 0b10100110111, G15_MASK = 0b101010000010010, G18 = 0b1111100100101;
-  const formatBits = (mask) => {                // EC level M = 00
-    const data = (0 << 3) | mask;
-    let d = data << 10;
-    while (bitLen(d) >= bitLen(G15)) d ^= G15 << (bitLen(d) - bitLen(G15));
-    return ((data << 10) | d) ^ G15_MASK;
-  };
-  const versionBits = (v) => {
-    let d = v << 12;
-    while (bitLen(d) >= bitLen(G18)) d ^= G18 << (bitLen(d) - bitLen(G18));
-    return (v << 12) | d;
-  };
-
-  function encode(text){
-    const bytes = utf8(text);
-    let v = 1;
-    while (v <= 10 && CAP[v] < bytes.length) v++;
-    if (v > 10) throw new Error('too long for QR v10');
-
-    // bit stream: mode 0100 · count (8 bits v1-9, 16 bits v10) · data
-    const dataCW = BLOCKS[v].reduce((a, b) => a + b, 0);
-    const bits = [];
-    const push = (val, n) => { for (let i = n - 1; i >= 0; i--) bits.push((val >> i) & 1); };
-    push(0b0100, 4);
-    push(bytes.length, v >= 10 ? 16 : 8);
-    for (const b of bytes) push(b, 8);
-    const capBits = dataCW * 8;
-    push(0, Math.min(4, capBits - bits.length));            // terminator
-    while (bits.length % 8) bits.push(0);
-    const cw = [];
-    for (let i = 0; i < bits.length; i += 8){
-      let b = 0; for (let j = 0; j < 8; j++) b = (b << 1) | bits[i + j];
-      cw.push(b);
-    }
-    for (let pad = 0xEC; cw.length < dataCW; pad ^= 0xEC ^ 0x11) cw.push(pad);
-
-    // split into blocks, compute EC, interleave
-    const blocks = [], ecs = [];
-    let off = 0;
-    for (const len of BLOCKS[v]){
-      const block = cw.slice(off, off + len); off += len;
-      blocks.push(block);
-      ecs.push(rsRemainder(block, ECW[v]));
-    }
-    const seq = [];
-    const maxLen = Math.max(...BLOCKS[v]);
-    for (let i = 0; i < maxLen; i++) for (const b of blocks) if (i < b.length) seq.push(b[i]);
-    for (let i = 0; i < ECW[v]; i++) for (const e of ecs) seq.push(e[i]);
-
-    // try all 8 masks, keep the best-scoring matrix
-    let best = null, bestScore = Infinity;
-    for (let mask = 0; mask < 8; mask++){
-      const m = buildMatrix(v, seq, mask);
-      const score = penalty(m);
-      if (score < bestScore){ bestScore = score; best = m; }
-    }
-    return best;
-  }
-
-  function buildMatrix(v, data, mask){
-    const size = 17 + 4 * v;
-    const M = Array.from({ length: size }, () => new Array(size).fill(null));
-
-    const finder = (r0, c0) => {
-      for (let r = -1; r <= 7; r++) for (let c = -1; c <= 7; c++){
-        const rr = r0 + r, cc = c0 + c;
-        if (rr < 0 || rr >= size || cc < 0 || cc >= size) continue;
-        M[rr][cc] = ((r >= 0 && r <= 6 && (c === 0 || c === 6)) ||
-                     (c >= 0 && c <= 6 && (r === 0 || r === 6)) ||
-                     (r >= 2 && r <= 4 && c >= 2 && c <= 4)) ? 1 : 0;
-      }
-    };
-    finder(0, 0); finder(0, size - 7); finder(size - 7, 0);
-
-    for (const r of ALIGN[v]) for (const c of ALIGN[v]){         // alignment
-      if (M[r][c] !== null) continue;                            // overlaps a finder
-      for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++)
-        M[r + dr][c + dc] = (Math.max(Math.abs(dr), Math.abs(dc)) !== 1) ? 1 : 0;
-    }
-    for (let i = 8; i < size - 8; i++){                          // timing
-      if (M[6][i] === null) M[6][i] = i % 2 ? 0 : 1;
-      if (M[i][6] === null) M[i][6] = i % 2 ? 0 : 1;
-    }
-
-    const fmt = formatBits(mask);                                // format info (two copies)
-    for (let i = 0; i < 15; i++){
-      const bit = (fmt >> i) & 1;
-      if (i < 6) M[i][8] = bit;
-      else if (i < 8) M[i + 1][8] = bit;
-      else M[size - 15 + i][8] = bit;
-      if (i < 8) M[8][size - i - 1] = bit;
-      else if (i < 9) M[8][15 - i] = bit;
-      else M[8][15 - i - 1] = bit;
-    }
-    M[size - 8][8] = 1;                                          // dark module
-
-    if (v >= 7){                                                 // version info
-      const vb = versionBits(v);
-      for (let i = 0; i < 18; i++){
-        const bit = (vb >> i) & 1;
-        M[Math.floor(i / 3)][i % 3 + size - 11] = bit;
-        M[i % 3 + size - 11][Math.floor(i / 3)] = bit;
-      }
-    }
-
-    const maskAt = (r, c) => {                                   // ISO mask conditions
-      switch (mask){
-        case 0: return (r + c) % 2 === 0;
-        case 1: return r % 2 === 0;
-        case 2: return c % 3 === 0;
-        case 3: return (r + c) % 3 === 0;
-        case 4: return (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0;
-        case 5: return (r * c) % 2 + (r * c) % 3 === 0;
-        case 6: return ((r * c) % 2 + (r * c) % 3) % 2 === 0;
-        default: return ((r * c) % 3 + (r + c) % 2) % 2 === 0;
-      }
-    };
-    let inc = -1, row = size - 1, bitIdx = 7, byteIdx = 0;       // zigzag data placement
-    for (let col = size - 1; col > 0; col -= 2){
-      if (col === 6) col--;
-      for (;;){
-        for (let c = 0; c < 2; c++){
-          if (M[row][col - c] !== null) continue;
-          let dark = 0;
-          if (byteIdx < data.length) dark = (data[byteIdx] >>> bitIdx) & 1;
-          if (maskAt(row, col - c)) dark ^= 1;
-          M[row][col - c] = dark;
-          if (--bitIdx === -1){ byteIdx++; bitIdx = 7; }
-        }
-        row += inc;
-        if (row < 0 || row >= size){ row -= inc; inc = -inc; break; }
-      }
-    }
-    return M;
-  }
-
-  function penalty(M){                                           // the 4 ISO scoring rules
-    const size = M.length;
-    let score = 0;
-    for (let axis = 0; axis < 2; axis++){                        // rule 1: runs ≥5
-      for (let i = 0; i < size; i++){
-        let run = 1;
-        for (let j = 1; j <= size; j++){
-          const cur = j < size ? (axis ? M[j][i] : M[i][j]) : -1;
-          const prev = axis ? M[j - 1][i] : M[i][j - 1];
-          if (cur === prev) run++;
-          else { if (run >= 5) score += run - 2; run = 1; }
-        }
-      }
-    }
-    for (let r = 0; r < size - 1; r++) for (let c = 0; c < size - 1; c++){   // rule 2: 2×2
-      const x = M[r][c];
-      if (x === M[r][c + 1] && x === M[r + 1][c] && x === M[r + 1][c + 1]) score += 3;
-    }
-    const P1 = [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0], P2 = [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1];
-    for (let axis = 0; axis < 2; axis++){                        // rule 3: finder-alikes
-      for (let i = 0; i < size; i++) for (let j = 0; j <= size - 11; j++){
-        let m1 = true, m2 = true;
-        for (let k = 0; k < 11; k++){
-          const cell = axis ? M[j + k][i] : M[i][j + k];
-          if (cell !== P1[k]) m1 = false;
-          if (cell !== P2[k]) m2 = false;
-        }
-        if (m1 || m2) score += 40;
-      }
-    }
-    let dark = 0;                                                // rule 4: balance
-    for (const row of M) for (const cell of row) dark += cell;
-    score += Math.floor(Math.abs((dark * 100) / (size * size) - 50) / 5) * 10;
-    return score;
-  }
-
-  return { encode };
-})();
-
-function drawQR(canvas, text){
-  const m = QR.encode(text);
-  const quiet = 4, scale = 8, size = (m.length + quiet * 2) * scale;
-  canvas.width = size; canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, size, size);
-  ctx.fillStyle = '#111';
-  for (let r = 0; r < m.length; r++) for (let c = 0; c < m.length; c++)
-    if (m[r][c]) ctx.fillRect((c + quiet) * scale, (r + quiet) * scale, scale, scale);
-}
-
 /* ═══ state + networking ═══ */
 const S = {
   view: 'entry',
   code: null, item: null,          // current item's public payload
   holding: false,                  // am I the active holder?
   ws: null, wsDelay: 1000,
-  adminKey: null, adminItems: [],  // admin key lives in MEMORY only
   bidChoice: 0,                    // selected extra cents over the min next bid
 };
 
@@ -841,7 +487,7 @@ setInterval(() => {                                    // poll fallback
       S.code = null; S.item = null; S.holding = false;
       liveSync();
       toast('this item is gone — ask the host');
-      if (S.view !== 'admin') show('entry');
+      show('entry');
     });
 }, 4000);
 
@@ -868,9 +514,8 @@ function toast(msg){
 /* ═══ views ═══ */
 function show(view){
   S.view = view;
-  for (const [v, id] of Object.entries({ entry: 'viewEntry', item: 'viewItem', controller: 'viewController', admin: 'viewAdmin' }))
+  for (const [v, id] of Object.entries({ entry: 'viewEntry', item: 'viewItem', controller: 'viewController' }))
     $(id).hidden = v !== view;
-  $('gearBtn').hidden = view === 'controller';
   if (view === 'controller') $('ctlInstr').hidden = true;   // fresh slot, fresh start — (i) reopens it
 }
 
@@ -913,10 +558,8 @@ function applyItem(p){
   const wasHolding = S.holding;
   S.item = p;
   S.holding = !!(p.active && p.active.userId === IDENTITY.id);
-  if (S.view !== 'admin'){
-    if (S.holding && p.status === 'on' && S.view !== 'controller') show('controller');
-    else if (wasHolding && !S.holding && S.view === 'controller') timesUp();
-  }
+  if (S.holding && p.status === 'on' && S.view !== 'controller') show('controller');
+  else if (wasHolding && !S.holding && S.view === 'controller') timesUp();
   renderItem();
   renderController();
 }
@@ -1185,264 +828,6 @@ function renderController(){
   } else freeze.hidden = true;
 }
 
-/* ── admin ── */
-$('gearBtn').addEventListener('click', () => {
-  show('admin');
-  ($('adminDash').hidden ? $('adminKeyIn') : $('adminList')).focus?.();
-});
-$('adminBack').addEventListener('click', () => { revealed = null; show(S.code ? 'item' : 'entry'); });
-
-async function unlockAdmin(key){
-  const msg = $('adminGateMsg');
-  msg.className = 'status-line'; msg.textContent = '…';
-  try {
-    const items = await api('GET', '/api/items', null, { 'X-Admin-Key': key });
-    S.adminKey = key;
-    S.adminItems = items;
-    $('adminGate').hidden = true;
-    $('adminDash').hidden = false;
-    renderAdmin();
-    return true;
-  } catch (e){
-    msg.className = 'status-line err';
-    msg.textContent = e.status === 401 ? 'wrong key' : String(e.message);
-    return false;
-  }
-}
-$('adminUnlock').addEventListener('click', () => unlockAdmin($('adminKeyIn').value));
-$('adminKeyIn').addEventListener('keydown', (e) => { if (e.key === 'Enter') unlockAdmin($('adminKeyIn').value); });
-
-const adminApi = (method, path, body) => api(method, path, body, { 'X-Admin-Key': S.adminKey });
-async function refreshAdmin(){
-  if (!S.adminKey || S.view !== 'admin') return;
-  // Never clobber work in progress: an open edit form (or focus anywhere in
-  // the list) would lose typed values + focus to the innerHTML rebuild.
-  if (document.querySelector('#adminList form[data-edit]:not([hidden])')
-      || $('adminList').contains(document.activeElement)) return;
-  try { S.adminItems = await adminApi('GET', '/api/items'); renderAdmin(); } catch {}
-}
-setInterval(refreshAdmin, 4000);
-
-$('nItemMode').addEventListener('change', () => { $('nAuctionWrap').hidden = $('nItemMode').value !== 'auction'; });
-
-async function createItem(){
-  const msg = $('createMsg');
-  msg.className = 'status-line'; msg.textContent = '…';
-  try {
-    const item = await adminApi('POST', '/api/items', {
-      name: $('nItemName').value,
-      instructions: $('nItemInstr').value,
-      mode: $('nItemMode').value,
-      priceCents: Math.round(parseFloat($('nItemPrice').value || '0') * 100),
-      slotSeconds: parseInt($('nItemSlot').value, 10) || 120,
-      auctionSeconds: parseInt($('nItemAuction').value, 10) || 60,
-    });
-    $('nItemName').value = ''; $('nItemInstr').value = '';
-    msg.className = 'status-line ok';
-    msg.textContent = `created — code ${item.item}`;
-    await refreshAdmin();
-    openQR(item.item, item.name);                   // the code IS the product — show it big
-  } catch (e){
-    msg.className = 'status-line err'; msg.textContent = String(e.message);
-  }
-}
-$('createBtn').addEventListener('click', createItem);
-
-function adminCard(p){
-  const a = p.active;
-  const live = p.status !== 'on' ? '○ off'
-    : a ? `◉ ${esc(a.name)}${a.paused ? ' · ⏸ paused' : ''} · ${fmtClock(remainingMs(a))} left`
-    : p.auction ? `🔨 ${fmt$(p.auction.topCents)} (${esc(p.auction.topName)}) · ${fmtClock(Math.max(0, p.auction.endsAt - Date.now()))}`
-    : '· idle';
-  const depth = p.mode === 'buynow' ? `${p.queue.length} in line` : (p.auction ? `${p.auction.bidCount} bids` : 'no round');
-  return `
-  <div class="card icard" data-code="${p.item}">
-    <div style="display:flex; align-items:center; gap:.6rem">
-      <b style="flex:1">${esc(p.name)}</b>
-      <button class="code" data-act="copy" title="copy code">${p.item}</button>
-    </div>
-    <div class="meta">${p.mode === 'buynow' ? 'buy now' : 'auction'} · ${fmt$(p.priceCents)} · ${p.slotSeconds}s slot · ${depth}</div>
-    <div class="live-line">${live}${outputSummary(p)}</div>
-    ${chainBlock(p)}
-    <div class="acts">
-      <button data-act="qr">QR</button>
-      <button data-act="skip">Skip</button>
-      <button data-act="pauseresume">${a && a.paused ? 'Resume' : 'Pause'}</button>
-      <button data-act="onoff">${p.status === 'on' ? 'Off' : 'On'}</button>
-      <button data-act="edit">Edit</button>
-      <button data-act="del" class="warn">Delete</button>
-    </div>
-    <form class="edit-form" data-edit hidden>
-      <label class="span2">name<input name="name" value="${esc(p.name)}" /></label>
-      <label class="span2">controls guide<textarea name="instructions" rows="3">${esc(p.instructions || '')}</textarea></label>
-      <label>mode<select name="mode">
-        <option value="buynow"${p.mode === 'buynow' ? ' selected' : ''}>buy now</option>
-        <option value="auction"${p.mode === 'auction' ? ' selected' : ''}>auction</option></select></label>
-      <label>price ($)<input name="price" type="number" step="0.50" value="${(p.priceCents / 100).toFixed(2)}" /></label>
-      <label>slot (s)<input name="slot" type="number" value="${p.slotSeconds}" /></label>
-      <label>auction clock (s)<input name="auction" type="number" value="${p.auctionSeconds}" /></label>
-      <label class="span2">min bid step ($)<input name="step" type="number" step="0.25" value="${(p.minIncrementCents / 100).toFixed(2)}" /></label>
-      <button class="btn slim span2" type="submit">Save</button>
-    </form>
-    <div class="status-line" data-cardmsg></div>
-  </div>`;
-}
-// One-glance output summary on the live line: none / N online / OFFLINE.
-function outputSummary(p){
-  const outs = p.outputs || [];
-  if (!outs.length) return '';
-  const online = (p.outputsOnline || []).length + outs.filter(o => o.kind === 'scene').length;
-  const cls = p.sellable === false ? 'warn' : online ? 'ok' : 'warn';
-  const txt = p.sellable === false ? 'OUTPUT OFFLINE' : `${online}/${outs.length} online`;
-  return ` · <span class="pill-${cls}">${txt}</span>`;
-}
-// The chain manager: dots for presence (grey/green/amber=program), remove,
-// and the add-rig / add-scene controls (rig create reveals its key ONCE).
-function chainBlock(p){
-  const outs = p.outputs || [];
-  const prog = p.program;
-  const online = new Set(p.outputsOnline || []);
-  const rows = outs.map(o => {
-    const isProg = prog && prog.name === o.name;
-    const up = o.kind === 'scene' || online.has(o.name);
-    const dot = isProg ? 'dot on prog' : up ? 'dot on' : 'dot';
-    return `<li>
-      <span class="${dot}"></span>
-      <span class="oname">${esc(o.name)}</span>
-      <span class="okind">${o.kind === 'scene' ? 'scene · ' + esc(o.scene) : 'rig · #' + o.priority}</span>
-      ${isProg ? '<span class="oprog">● PROGRAM</span>' : ''}
-      <button class="ox" data-out="del" data-name="${esc(o.name)}" title="remove">✕</button>
-    </li>`;
-  }).join('');
-  return `
-  <details class="chain-wrap">
-    <summary style="cursor:pointer; font-size:.82rem; color:var(--sub); padding:.4rem 0">
-      Outputs — failover chain${outs.length ? ` (${outs.length})` : ' · none (always sellable)'}</summary>
-    <ul class="chain">${rows || '<li class="okind" style="border:none">no outputs — this item is always sellable (legacy behavior)</li>'}</ul>
-    <div class="edit-form" style="margin-top:.5rem">
-      <label>add rig — name<input data-out="rigname" placeholder="td-main" /></label>
-      <button class="btn ghost slim" data-out="addrig">Add rig + get key</button>
-      <label>add scene<select data-out="scene">${STAGE_SCENE_OPTS}</select></label>
-      <button class="btn ghost slim" data-out="addscene">Add scene output</button>
-    </div>
-    ${revealed && revealed.code === p.item ? `<div class="keyReveal">${revealed.html}</div>` : ''}
-  </details>`;
-}
-// The just-created rig key, held so it survives list re-renders (shown ONCE
-// per the security model — cleared when the admin leaves the dashboard).
-let revealed = null;
-const STAGE_SCENE_OPTS = ['orb', 'grid'].map(s => `<option value="${s}">${s}</option>`).join('');
-
-function renderAdmin(){
-  $('adminList').innerHTML = S.adminItems.map(adminCard).join('')
-    || '<div class="card note">no items yet — create one above, print its QR, tape it to the thing.</div>';
-}
-
-$('adminList').addEventListener('click', async (e) => {
-  const btn = e.target.closest('button[data-act]'); if (!btn) return;
-  const card = e.target.closest('[data-code]');
-  const code = card.dataset.code;
-  const p = S.adminItems.find(i => i.item === code);
-  const msg = card.querySelector('[data-cardmsg]');
-  const say = (t, cls) => { msg.className = 'status-line ' + (cls || ''); msg.textContent = t; };
-  try {
-    switch (btn.dataset.act){
-      case 'copy':
-        if (navigator.clipboard) await navigator.clipboard.writeText(code);
-        say('code copied', 'ok'); break;
-      case 'qr': openQR(code, p.name); break;
-      case 'skip': await adminApi('POST', `/api/items/${code}/skip`, {}); say('slot ended', 'ok'); break;
-      case 'pauseresume': {
-        const action = p.active && p.active.paused ? 'resume' : 'pause';
-        await adminApi('POST', `/api/items/${code}/state`, { action });
-        say(action + 'd', 'ok'); break;
-      }
-      case 'onoff': {
-        const action = p.status === 'on' ? 'off' : 'on';
-        await adminApi('POST', `/api/items/${code}/state`, { action });
-        say('turned ' + action, 'ok'); break;
-      }
-      case 'edit': card.querySelector('[data-edit]').hidden = !card.querySelector('[data-edit]').hidden; return;
-      case 'del':
-        if (!confirm(`Delete "${p.name}" (${code})? Its QR codes stop working.`)) return;
-        await adminApi('DELETE', `/api/items/${code}`);
-        say('deleted', 'ok'); break;
-    }
-    await refreshAdmin();
-  } catch (err){ say(String(err.message), 'err'); }
-});
-// Output-chain controls (separate data-out namespace from the data-act row).
-// These re-render the list directly (not via the focus-guarded refreshAdmin)
-// so the update lands even though the clicked button is inside #adminList.
-function mergeItem(updated){
-  const i = S.adminItems.findIndex(x => x.item === updated.item);
-  if (i >= 0) S.adminItems[i] = updated; else S.adminItems.push(updated);
-  renderAdmin();
-}
-$('adminList').addEventListener('click', async (e) => {
-  const btn = e.target.closest('button[data-out]'); if (!btn) return;
-  const card = e.target.closest('[data-code]');
-  const code = card.dataset.code;
-  const msg = card.querySelector('[data-cardmsg]');
-  const say = (t, cls) => { msg.className = 'status-line ' + (cls || ''); msg.textContent = t; };
-  try {
-    if (btn.dataset.out === 'addrig'){
-      const name = (card.querySelector('[data-out="rigname"]').value || '').trim();
-      if (!name) return say('name the rig first', 'err');
-      const res = await adminApi('POST', `/api/items/${code}/outputs`, { kind: 'rig', name });
-      revealed = { code, html:
-        `Rig key for <b>${esc(name)}</b> — shown once, save it now:<br>` +
-        `<code>${esc(res.rigKey)}</code><br>` +
-        `<span class="note">connect: <code>node tools/bus-to-pi.mjs --item ${code} --rig ${esc(name)} --key …</code></span>` };
-      mergeItem(res.item);
-      say('rig added — copy the key now (shown once)', 'ok');
-    } else if (btn.dataset.out === 'addscene'){
-      const scene = card.querySelector('[data-out="scene"]').value;
-      const res = await adminApi('POST', `/api/items/${code}/outputs`, { kind: 'scene', name: 'stage-' + scene, scene });
-      mergeItem(res.item);
-      say('scene output added — always online', 'ok');
-    } else if (btn.dataset.out === 'del'){
-      const name = btn.dataset.name;
-      if (!confirm(`Remove output "${name}"? A rig key is revoked and its connection drops.`)) return;
-      const updated = await adminApi('DELETE', `/api/items/${code}/outputs/${encodeURIComponent(name)}`);
-      mergeItem(updated);
-      say('output removed', 'ok');
-    }
-  } catch (err){ say(String(err.message), 'err'); }
-});
-
-$('adminList').addEventListener('submit', async (e) => {
-  const form = e.target.closest('form[data-edit]'); if (!form) return;
-  e.preventDefault();
-  const card = e.target.closest('[data-code]');
-  const msg = card.querySelector('[data-cardmsg]');
-  const f = new FormData(form);
-  try {
-    await adminApi('PATCH', '/api/items/' + card.dataset.code, {
-      name: f.get('name'),
-      instructions: f.get('instructions'),
-      mode: f.get('mode'),
-      priceCents: Math.round(parseFloat(f.get('price') || '0') * 100),
-      slotSeconds: parseInt(f.get('slot'), 10),
-      auctionSeconds: parseInt(f.get('auction'), 10),
-      minIncrementCents: Math.round(parseFloat(f.get('step') || '0.5') * 100),
-    });
-    msg.className = 'status-line ok'; msg.textContent = 'saved';
-    await refreshAdmin();
-  } catch (err){ msg.className = 'status-line err'; msg.textContent = String(err.message); }
-});
-
-/* QR modal (+ print) */
-function openQR(code, name){
-  drawQR($('qrCanvas'), `${location.origin}/control?item=${code}`);
-  $('qrName').textContent = name || '';
-  $('qrCode').textContent = code;
-  $('qrHost').textContent = location.host;
-  $('qrModal').hidden = false;
-}
-$('qrClose').addEventListener('click', () => { $('qrModal').hidden = true; });
-$('qrPrint').addEventListener('click', () => window.print());
-$('qrModal').addEventListener('click', (e) => { if (e.target === $('qrModal')) $('qrModal').hidden = true; });
 
 /* ── boot ── */
 function boot(){
@@ -1466,10 +851,6 @@ window.__applyItem = applyItem;
 window.__renderTimers = renderTimers;
 window.__fire = fire;
 window.__bucket = BUCKET;
-window.__qrEncode = QR.encode;
-window.__unlockAdmin = unlockAdmin;
-window.__refreshAdmin = refreshAdmin;
-window.__createItem = createItem;
 window.__doBuy = doBuy;
 window.__doBid = doBid;
 window.__chosenBidCents = chosenBidCents;

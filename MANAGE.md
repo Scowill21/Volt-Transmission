@@ -82,7 +82,11 @@ Follow `PAYMENTS-SETUP.md` §2–§3. In order:
   **End control slot** to cut a takeover short. *(After Tier 2b, Refund/End also
   issue the Stripe refund.)*
 
-### Volt Control items — `/control` → ⚙ gear (same admin key)
+### Volt Control items — `/control-ops` (same admin key)
+Admin/ops lives on its own page now: **`/control-ops`** (bookmark it; unlock
+with the `ADMIN_KEY`). The public **`/control`** is the walk-up product QR
+codes point at — it carries no admin controls. (Split shipped this session;
+the old `/control` gear is gone.)
 - **Create an item:** name, buy-now or auction, price, slot seconds, and a
   **controls guide** (what ▲▼◀▶/A/B/C do — players see it on the item page
   and under the controller's ⓘ) → the 6-char code appears with its QR.
@@ -103,7 +107,8 @@ node .smoke-test.cjs        # client: every console path (jsdom)
 node .smoke-server.cjs      # server: the paid permission gate
 node .smoke-failclosed.cjs  # server: fail-closed on a DB outage
 node .smoke-items.cjs       # server: Volt Control items product
-node .smoke-control.cjs     # client: the /control page (jsdom)
+node .smoke-control.cjs     # client: the /control USER page (jsdom)
+node .smoke-ops.cjs         # client: the /control-ops admin page (jsdom)
 ```
 All five must print `ALL CLEAR`. Extend them when you add features (it's a rule
 in `CLAUDE.md`).

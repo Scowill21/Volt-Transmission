@@ -254,39 +254,7 @@ const ok = (label) => { console.log('OK  ', passed + 1, label); passed++; };
   w.__IDENTITY.dev = true;
   ok('anonymous pay attempt → inline sign-in prompt with return link');
 
-  // admin: wrong key rejected, right key renders the dashboard
-  w.__show('admin');
-  assert.strictEqual(await w.__unlockAdmin('wrong'), false);
-  assert.match(w.document.getElementById('adminGateMsg').textContent, /wrong key/);
-  assert.strictEqual(await w.__unlockAdmin('dev'), true);
-  const cards = w.document.querySelectorAll('#adminList .icard');
-  assert.strictEqual(cards.length, 2, 'both items on the dashboard');
-  ok('admin gate: wrong key rejected · dev key → dashboard (2 items)');
-
-  // QR modal from a card renders the code + a real matrix on the canvas
-  cards[0].querySelector('[data-act="qr"]').click(); await tick();
-  assert.ok(!w.document.getElementById('qrModal').hidden, 'QR modal open');
-  assert.match(w.document.getElementById('qrCode').textContent, /^[A-Z0-9]{6}$/);
-  ok('item card → QR modal with the printable code');
-
-  // QR encoder structure (full decode is proven by the jsqr round-trip tooling)
-  const m1 = w.__qrEncode('HELLO');
-  assert.strictEqual(m1.length, 21, '5 bytes → version 1 (21×21)');
-  const m4 = w.__qrEncode('https://td-stream-control.onrender.com/control?item=PSDV7H');
-  assert.strictEqual(m4.length, 33, 'product URL → version 4 (33×33)');
-  for (const m of [m1, m4]){
-    const s = m.length;
-    for (const [r, c] of [[0, 0], [0, s - 7], [s - 7, 0]]){
-      assert.strictEqual(m[r][c], 1, 'finder corner dark');
-      assert.strictEqual(m[r + 3][c + 3], 1, 'finder center dark');
-      assert.strictEqual(m[r + 1][c + 1], 0, 'finder ring light');
-    }
-    assert.ok(m.every(row => row.length === s && row.every(v => v === 0 || v === 1)), 'square 0/1 matrix');
-  }
-  ok('QR matrices: correct versions + finder patterns (decode: qr tooling)');
-
-  /* ── redundancy UI: offline banner, spectator strip, chain manager ── */
-  // reset to the item view for a clean canvas
+  /* ── redundancy UI on the USER item view (offline banner, spectator, gap) ── */
   await w.__submitCode('psdv7h'); await tick();
 
   // configured chain + nothing online → OFFLINE banner + buy disabled
@@ -321,19 +289,15 @@ const ok = (label) => { console.log('OK  ', passed + 1, label); passed++; };
   assert.match(w.document.getElementById('itemChip').textContent, /OUTPUT GAP/);
   ok('output gap mid-slot surfaces on the item chip');
 
-  // chain manager in the admin dashboard: add a rig → key revealed ONCE
-  await w.__unlockAdmin('dev'); await tick();
-  const card0 = w.document.querySelector('#adminList .icard');
-  const code0 = card0.dataset.code;
-  card0.querySelector('[data-out="rigname"]').value = 'pi-lamp';
-  card0.querySelector('[data-out="addrig"]').click(); await tick();
-  const reveal = w.document.querySelector(`.icard[data-code="${code0}"] .keyReveal`);
-  assert.ok(reveal, 'rig key revealed after add');
-  assert.match(reveal.textContent, /shown once/i);
-  assert.match(reveal.querySelector('code').textContent, /.{20,}/, 'plaintext key present once');
-  ok('chain manager: add rig → key shown once, chain re-renders in place');
+  // THE SPLIT INVARIANT: no admin code/markup ships to walk-up phones.
+  assert.strictEqual(typeof w.__unlockAdmin, 'undefined', 'no admin shim on the user page');
+  assert.strictEqual(typeof w.__qrEncode, 'undefined', 'no QR encoder shim on the user page');
+  assert.ok(!/X-Admin-Key/.test(html), 'user page ships no X-Admin-Key string');
+  assert.ok(!/unlockAdmin|adminApi|const QR = /.test(html), 'user page ships no admin JS / QR encoder');
+  assert.ok(!/id="viewAdmin"|id="gearBtn"|id="qrModal"/.test(html), 'user page has no admin markup');
+  ok('split invariant: user page carries NO admin code, key, or QR encoder');
 
-  console.log(`\nALL CLEAR — ${passed} control-page checks passed`);
+  console.log(`\nALL CLEAR — ${passed} control-page (user) checks passed`);
   w.close();
   process.exit(0);
 })().catch((e) => { console.error('\nFAIL:', e.message); console.error(e.stack); process.exit(1); });
