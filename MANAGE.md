@@ -139,6 +139,21 @@ in `CLAUDE.md`).
   `ALLOWED_ORIGINS` (comma-separated) — cross-origin WebSockets are otherwise
   refused.
 
+### 🔑 Private vault (your reference, for your eyes only)
+The **🔑 icon** on `/control-ops` opens the **Volt Recipe Book** (`.vault/recipe-book.html`)
+behind a passcode — reference material only you see.
+- **To enable it, set `VAULT_CODE`** in your env: locally it's already in your
+  gitignored `.env` (`VAULT_CODE=williamwood`); **on Render, add a `VAULT_CODE`
+  environment variable** or the 🔑 shows "vault not set up" (it fails **closed**).
+- How it's private: the content is **served only after the code checks out**
+  (`GET /api/vault`), never shipped in any page source; the file is blocked from
+  static serving; the check is constant-time and rate-limited (20 tries / 5 min).
+- ⚠️ **Honest limit:** `williamwood` is a short, guessable passcode — fine for
+  keeping notes out of a co-operator's casual view, **not** for genuinely
+  sensitive material. For that, set a long random `VAULT_CODE`. The passcode
+  lives only in env (never in git/GitHub), so change it any time by updating the
+  env var.
+
 ### Monitoring & health
 - **Production health:** `curl …/healthz`. Bidding 401s in prod = the DB is
   unreachable and the app is failing closed (check `DATABASE_URL`/Render), not a

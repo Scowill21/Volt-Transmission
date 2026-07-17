@@ -222,7 +222,23 @@ Everything below is **deployed and working in production** unless marked.
   **De-coupled the two products:** removed `admin.html`'s Volt Control section
   (channels admin is now purely audio-reactive) and `control-ops`'s link to it —
   Volt Control stands alone (discoverability via docs, not cross-links). Suites:
-  items 42, control 30, ops 18; all nine green. Adversarially reviewed.
+  items 42, control 30, ops 18; all nine green. Adversarially reviewed (monitor
+  socket-leak + admin XSS clean; two continuous-input fixes applied: maxPerMin
+  now bounds joystick/fader, flushCont retries a drag's final value, joystick
+  FIRE is a tap not hold-repeat).
+- **PRIVATE OPERATOR VAULT — 🔑 on `/control-ops` (this session)** — a discrete
+  key icon opens the **Volt Recipe Book** (operator build guides), owner's eyes
+  only. **Server-gated for real privacy:** content lives in
+  `.vault/recipe-book.html` (dot-dir → `dotfiles:'ignore'` keeps static from
+  serving it; committed so it deploys) and is returned only by `GET /api/vault`
+  when `X-Vault-Code` matches **`VAULT_CODE`** — constant-time (`safeEqual`),
+  rate-limited (20/5min), **fails CLOSED (503)** if `VAULT_CODE` unset. Never in
+  any page source. Passcode is `williamwood` in the gitignored local `.env`;
+  **prod needs a `VAULT_CODE` env var on Render** (else the 🔑 reads "not set
+  up"). UI renders it in a style-isolated **blob iframe** (CSP gained
+  `frame-src 'self' blob:`; code held in memory only). `.smoke-security.cjs` → 17.
+  NB: the pre-existing uncommitted `VOLT-PI-PLAYBOOK.md` edit still points at a
+  public `VOLT-RECIPE-BOOK.html` — stale now the book is private; left untouched.
 - **⚠️ CABINET DEMO LOOK IS ON** — `CABINET_DEMO = true` in `index.html`
   renders a furnished, NON-functional cabinet preview (3 fake records + 12
   prints; clicks explain). **When William says "remove demo": flip that one

@@ -28,7 +28,10 @@ export function securityHeaders(req, res, next){
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
-  res.setHeader('Content-Security-Policy', "frame-ancestors 'none'; base-uri 'self'; object-src 'none'");
+  // frame-ancestors 'none' stops OTHERS embedding our pages (clickjacking);
+  // frame-src 'self' blob: lets a page embed its OWN blob content (the private
+  // vault renders the recipe book in a style-isolated blob iframe).
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'none'; frame-src 'self' blob:; base-uri 'self'; object-src 'none'");
   if ((req.get('x-forwarded-proto') || req.protocol) === 'https')
     res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
   next();

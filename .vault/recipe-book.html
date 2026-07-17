@@ -1,0 +1,1096 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Volt Recipe Book — build guides for pay-to-control items</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12151a; --panel2:#171b21; --line:#232830;
+    --text:#e8ebef; --dim:#9aa3ad; --volt:#e8ff47; --cyan:#5ee6ff;
+    --ok:#57d97a; --warn:#ff9c47; --danger:#ff6161;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:920px;margin:0 auto;padding:44px 22px 90px}
+  .kicker{font:600 12px/1 var(--mono);letter-spacing:.2em;color:var(--volt);text-transform:uppercase}
+  h1{margin:.3em 0 .2em;font-size:2rem;letter-spacing:-.01em}
+  .sub{color:var(--dim);max-width:64ch}
+  h2{font-size:1.3rem;margin:2.4em 0 .6em;padding-top:1.1em;border-top:1px solid var(--line)}
+  h2 .n{color:var(--volt);font:600 .75em var(--mono);margin-right:.5em}
+  h3{font-size:1.05rem;margin:1.8em 0 .4em}
+  p{margin:.55em 0}
+  a{color:var(--cyan);text-decoration:none}
+  code{font:.86em var(--mono);background:#1a1e25;border:1px solid var(--line);border-radius:5px;padding:.08em .35em}
+  pre{background:#0e1116;border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto;font:.82em/1.5 var(--mono)}
+  table{width:100%;border-collapse:collapse;margin:.7em 0;font-size:.92em}
+  th,td{text-align:left;padding:.45em .6em;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:600;font-size:.82em;text-transform:uppercase;letter-spacing:.05em}
+  ol{margin:.5em 0 .5em 1.2em;padding:0}
+  ol li{margin:.5em 0}
+  ul{margin:.5em 0 .5em 1.2em;padding:0}
+  ul li{margin:.35em 0}
+  .toc{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin:1em 0}
+  .toc a{display:block;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    padding:.5em .8em;color:var(--text);font-size:.9em}
+  .toc a:hover{border-color:var(--volt)}
+  .toc .lv{color:var(--dim);font:.78em var(--mono)}
+  .recipe{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin:1.4em 0}
+  .recipe h3{margin:.1em 0 .3em;font-size:1.15rem}
+  .recipe h3 .rn{color:var(--volt);font:700 .8em var(--mono);margin-right:.55em}
+  .badges{display:flex;flex-wrap:wrap;gap:6px;margin:.4em 0 .8em}
+  .b{font:600 11px/1 var(--mono);letter-spacing:.05em;padding:.45em .7em;border-radius:999px;border:1px solid var(--line);color:var(--dim)}
+  .b.easy{color:var(--ok);border-color:var(--ok)}
+  .b.med{color:var(--cyan);border-color:var(--cyan)}
+  .b.adv{color:var(--warn);border-color:var(--warn)}
+  .b.cost{color:var(--text)}
+  .b.today{color:var(--volt);border-color:var(--volt)}
+  .crowd{color:var(--dim);font-style:italic;margin:.2em 0 .8em}
+  .what{background:var(--panel2);border-radius:8px;padding:.55em .9em;font-size:.9em;margin:.6em 0;color:var(--dim)}
+  .what b{color:var(--text)}
+  .settings{background:var(--panel2);border:1px dashed var(--line);border-radius:8px;padding:.6em .9em;font-size:.9em;margin:.8em 0}
+  .settings b{color:var(--volt)}
+  .safe{border-left:3px solid var(--danger);background:#1a1114;border-radius:0 8px 8px 0;padding:.6em .9em;font-size:.9em;margin:.8em 0}
+  .safe b{color:var(--danger)}
+  .tip{border-left:3px solid var(--cyan);background:#0f171b;border-radius:0 8px 8px 0;padding:.6em .9em;font-size:.9em;margin:.8em 0}
+  .check{color:var(--ok);font-weight:600}
+  .stuck{color:var(--dim);font-size:.88em;margin:.6em 0 0}
+  .stuck b{color:var(--warn)}
+  .note{color:var(--dim);font-size:.88em}
+  .movegrid,.gloss{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:1em 0}
+  .move,.g{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .move b,.g b{color:var(--volt)}
+  .move .use,.g .d{color:var(--dim);font-size:.88em;margin-top:.3em}
+  footer{margin-top:60px;color:var(--dim);font-size:.85em;border-top:1px solid var(--line);padding-top:1.2em}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">Volt Control · Recipe Book · July 2026</div>
+  <h1>26 things people will pay to control — and exactly how to build them</h1>
+  <p class="sub">Written for a true beginner: what a Raspberry Pi actually is, how to talk
+  to it, then 26 builds — each with a priced shopping list, step-by-step instructions with
+  checkpoints, the item settings that make it earn, and the safety rules. Companion to
+  <code>VOLT-PI-PLAYBOOK.md</code> (venue/business playbook lives there).</p>
+</header>
+
+<h2><span class="n">A</span>What is a Raspberry Pi, actually?</h2>
+<p>A Raspberry Pi is a <b>complete computer the size of a deck of cards</b>, sold bare for
+$15–55. It runs Linux (a free operating system), connects to WiFi, and can run programs —
+same as a laptop with three differences that make it perfect for this project:</p>
+<ul>
+  <li><b>Its "hard drive" is a microSD card.</b> You prepare the card on your Mac by copying
+  a ready-made operating system onto it ("flashing an image"). Card goes in Pi, Pi boots.
+  If you ever wreck the software, re-flash the card — the Pi itself is nearly unbrickable.</li>
+  <li><b>It has no screen and doesn't need one.</b> You type commands to it from your Mac
+  over WiFi using SSH ("secure shell" — think: your Terminal window becomes the Pi's
+  keyboard and screen). Running screenless is called <em>headless</em>, and it's normal.</li>
+  <li><b>It has GPIO pins — the superpower.</b> The double row of 40 metal pins along its
+  edge are switches your programs control. A line of code turns pin 17 on: electricity
+  flows. Off: it stops. Read a pin: was a button pressed? Every recipe in this book is
+  ultimately "a phone press on your website flips a GPIO pin (or sends a network command),
+  and the pin drives a light, motor, pump, or relay."</li>
+</ul>
+<p><b>The mental model:</b> the Pi is a computer whose fingers you can program. Your Volt
+server is the brain deciding who's allowed to press; the Pi is the hand in the room doing
+the pressing.</p>
+
+<h3>The terminal, in ten commands</h3>
+<p>The terminal is just a way of operating a computer by typing instead of clicking. When
+you SSH into the Pi, you'll see a <em>prompt</em> like <code>will@volt-pi-1:~ $</code> —
+it's waiting for you to type a command and press Enter. These ten cover this entire book:</p>
+<table>
+  <tr><th>Type this</th><th>What it does, in plain words</th></tr>
+  <tr><td><code>ls</code></td><td>list the files in the folder you're standing in</td></tr>
+  <tr><td><code>cd volt</code></td><td>step into the folder called <code>volt</code> (<code>cd ..</code> steps back out)</td></tr>
+  <tr><td><code>mkdir volt</code></td><td>make a new folder</td></tr>
+  <tr><td><code>nano file.mjs</code></td><td>open a simple text editor. Type/paste, then <b>Ctrl-O, Enter</b> to save, <b>Ctrl-X</b> to exit</td></tr>
+  <tr><td><code>sudo …</code></td><td>"do this as administrator" — needed for installing software and system changes</td></tr>
+  <tr><td><code>sudo apt install -y mpd</code></td><td>install a program from Linux's built-in free app store (apt)</td></tr>
+  <tr><td><code>node listen.mjs</code></td><td>run a JavaScript program. <b>Ctrl-C</b> stops a running program</td></tr>
+  <tr><td><code>scp song.mp3 will@volt-pi-1.local:~/volt/</code></td><td>copy a file FROM your Mac TO the Pi (run this one on the Mac)</td></tr>
+  <tr><td><code>sudo systemctl restart volt-rig</code></td><td>restart your auto-start service (see §C step 8)</td></tr>
+  <tr><td><code>journalctl -u volt-rig -f</code></td><td>watch your service's live logs — your window into what the Pi is doing</td></tr>
+</table>
+<p class="tip"><b>Two habits that make everything easier:</b> press <b>Tab</b> while typing
+a file/folder name and the terminal finishes it for you; press the <b>up arrow</b> to get
+your previous command back instead of retyping it.</p>
+
+<h3>Words you'll meet (one-line glossary)</h3>
+<div class="gloss">
+  <div class="g"><b>GPIO</b><div class="d">the Pi's 40 programmable pins. Numbered by "BCM" name (GPIO17), not by physical position — search "pi pinout" for the map.</div></div>
+  <div class="g"><b>Relay</b><div class="d">an electrically-operated switch. Small signal from the Pi clicks a big switch for a separate circuit. How we "press buttons" on other machines.</div></div>
+  <div class="g"><b>Servo</b><div class="d">a small motor that rotates to the exact angle you ask (0–180°) and holds it. Aiming, joints, levers.</div></div>
+  <div class="g"><b>Continuous servo / DC motor</b><div class="d">spins like a wheel instead of holding an angle. Wheels, augers, spools.</div></div>
+  <div class="g"><b>Stepper</b><div class="d">a motor that moves in exact tiny clicks — repeatable positioning for plotters and gantries.</div></div>
+  <div class="g"><b>Solenoid</b><div class="d">an electromagnet that punches a rod out ~1 cm. Strikes and pokes.</div></div>
+  <div class="g"><b>MOSFET board</b><div class="d">an electronic valve letting a tiny GPIO signal switch a big current (pumps, solenoids, motors). Like a relay but silent and fast.</div></div>
+  <div class="g"><b>PWM</b><div class="d">switching a pin on/off very fast to express "how much" — how servos hear angles and motors hear speed.</div></div>
+  <div class="g"><b>PCA9685</b><div class="d">a $12 helper board that drives up to 16 servos properly so the Pi doesn't have to. Used in every servo recipe.</div></div>
+  <div class="g"><b>I2C</b><div class="d">a two-wire language the Pi uses to talk to helper boards like the PCA9685. Enable once in settings.</div></div>
+  <div class="g"><b>Common ground</b><div class="d">every power supply's minus wire connected together. Electricity flows in loops; grounds join the loops. Rule #1 of wiring.</div></div>
+  <div class="g"><b>systemd service</b><div class="d">Linux's "run this program automatically at boot and restart it if it dies." How rigs survive power cuts.</div></div>
+</div>
+
+<h3>The five verbs — everything you will ever do with a Pi</h3>
+<ol>
+  <li><b>Flash it</b> — copy the operating system onto the microSD (once).</li>
+  <li><b>SSH in</b> — open its terminal from your Mac.</li>
+  <li><b>Install</b> — <code>sudo apt install …</code> / <code>npm i …</code> the tools a recipe needs.</li>
+  <li><b>Run</b> — <code>node yourscript.mjs</code> and watch it work.</li>
+  <li><b>Enshrine</b> — wrap it in a systemd service so it runs forever without you.</li>
+</ol>
+<p>Every recipe below is those five verbs plus wiring.</p>
+
+<h2><span class="n">B</span>One-time Pi setup, click by click (~30 min)</h2>
+<ol>
+  <li><b>Flash the card.</b> On your Mac, download Raspberry Pi Imager
+  (raspberrypi.com/software). Insert the microSD via a USB reader. In Imager:
+  <em>Choose Device</em> → your Pi model · <em>Choose OS</em> → Raspberry Pi OS (other) →
+  <b>Raspberry Pi OS Lite (64-bit)</b> ("Lite" = no desktop; you won't need one) ·
+  <em>Choose Storage</em> → the card.</li>
+  <li><b>The settings screen is the magic.</b> Click Next → <em>Edit Settings</em>: set
+  hostname <code>volt-pi-1</code>; a username + password (write them down!); your WiFi name
+  + password exactly (capitals matter) with country <code>US</code>; and under
+  <em>Services</em>: Enable SSH, "use password authentication." Save → Yes → wait → eject.
+  <br><span class="note">Why: this is how the Pi boots already on your WiFi with SSH open —
+  no monitor or keyboard ever needed.</span></li>
+  <li><b>First boot.</b> Card into the Pi, power in. Wait a full 2–3 minutes (first boot
+  resizes things). The green LED flickers = it's alive.</li>
+  <li><b>Connect.</b> Mac Terminal: <code>ssh will@volt-pi-1.local</code> (your username,
+  your hostname). Type <code>yes</code> to the first-time fingerprint question, then your
+  password (typing shows nothing — that's normal, it's hiding it).
+  <br><span class="check">✅ Checkpoint: your prompt now says <code>will@volt-pi-1:~ $</code> — you are typing ON the Pi.</span></li>
+  <li><b>Update + install Node.</b> One line at a time (a Zero takes a few minutes each):
+  <pre>sudo apt update && sudo apt full-upgrade -y
+sudo apt install -y nodejs npm git
+node -v</pre>
+  <span class="check">✅ Checkpoint: <code>node -v</code> prints v18 or higher.</span> If lower:
+  <code>curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs</code></li>
+  <li><b>Project folder.</b> <code>mkdir ~/volt && cd ~/volt && npm init -y && npm i ws</code>
+  (<code>ws</code> = the WebSocket library — the Pi's phone line to your server).</li>
+  <li><b>The listen test — proves everything with zero hardware.</b> Create an item in your
+  ops page and note its 6-char code. On the Pi: <code>nano listen.mjs</code>, paste the
+  listener from <code>VOLT-PI-PLAYBOOK.md</code> §3.6, save, and run
+  <code>node listen.mjs YOURCODE</code>. From your Mac, inject a fake press:
+  <pre>curl -X POST https://td-stream-control.onrender.com/api/channels/item:YOURCODE/actions \
+  -H 'content-type: application/json' -H 'X-Admin-Key: YOUR_KEY' \
+  -d '{"type":"key","action":"pad_up","user":{"name":"test"}}'</pre>
+  <span class="check">✅ Checkpoint: the Pi prints <code>PRESS pad_up by test</code>. Phone →
+  server → Pi is proven; every recipe now just decides what a press DOES.</span></li>
+  <li><b>Enshrine it.</b> Create the auto-start service (playbook §3.7 has the file):
+  <code>sudo systemctl enable --now volt-rig</code>. Pull the Pi's power, plug back in, and
+  watch it come back on its own: <code>journalctl -u volt-rig -f</code>.
+  <br><span class="note">After the outputs mission ships, your service runs the real
+  <code>bus-to-pi.mjs</code> with a rigKey — and the ops page shows a green presence dot.</span></li>
+</ol>
+<p class="stuck"><b>If stuck:</b> can't find the Pi → it's not on WiFi; on a Zero 2 W the #1
+cause is a 5 GHz-only network name (it speaks 2.4 GHz only) — or find its IP in your
+router's client list. Random crashes → cheap power supply. Password rejected → remember
+Imager's username, not "pi".</p>
+
+<h2><span class="n">C</span>Wiring for people who've never wired</h2>
+<ul>
+  <li><b>GPIO pins are weak on purpose.</b> They can light an LED (with a 330 Ω resistor);
+  anything hungrier — motor, pump, strip, solenoid — needs a <b>driver</b> in between
+  (relay, MOSFET, PCA9685, motor board). The recipes always name the driver.</li>
+  <li><b>Common ground, always.</b> Any extra power supply's minus wire must also connect
+  to a Pi ground pin. Symptoms of forgetting: servos twitch, nothing works reliably.</li>
+  <li><b>Never power motors/servos from the Pi's 5 V pin.</b> Separate supply (+ common
+  ground) or the Pi browns out and corrupts its SD card.</li>
+  <li><b>Never touch mains (wall power).</b> Wall-powered things get switched by a
+  smart plug the Pi commands over WiFi, or a properly enclosed relay HAT. Full stop.</li>
+  <li><b>First circuit ritual:</b> LED + resistor from GPIO17 to GND, blink it from a
+  phone press. Do it once — everything else is this with bigger drivers.</li>
+</ul>
+<div class="tip"><b>The universal trick — a relay across a button.</b> Anything with a
+physical button (RC remote, claw machine panel, bubble gun, arcade board, pinball flipper
+button) can be Volt-controlled without understanding its electronics: open it, find the two
+contacts the button connects, wire a relay's output terminals across them, and the Pi
+"presses the button" by clicking the relay. Find the contacts with a $15 multimeter in
+continuity (beep) mode: touch the probes to pairs of points while pressing the button —
+beep only while pressed = you found them. This trick unlocks a third of this book.</div>
+
+<h2><span class="n">D</span>Master shopping list</h2>
+<table>
+  <tr><th>Kit</th><th>Contents</th><th>~Cost</th><th>Used by</th></tr>
+  <tr><td><b>A — Brain</b></td><td>Pi Zero 2 W (or Pi 4), 32 GB microSD, official PSU, breadboard + jumpers + LED/resistor kit, $15 multimeter</td><td>$60–90</td><td>everything</td></tr>
+  <tr><td><b>B — Motion</b></td><td>2× SG90 servos, PCA9685 16-ch board, 5 V 3 A supply</td><td>$25</td><td>R3 4 14 15 18 20 25</td></tr>
+  <tr><td><b>C — Switching</b></td><td>Tasmota/Kasa smart plug · 4-ch relay module · 2× MOSFET boards · 1N4007 diodes</td><td>$27</td><td>R1 5 7 8 9 11 17 22 23</td></tr>
+  <tr><td><b>D — Lights</b></td><td>WS2812B 5 V strip + ESP32 (WLED) + 5 V supply</td><td>$30</td><td>R2 + garnish everywhere</td></tr>
+  <tr><td><b>E — Flagship</b></td><td>Used countertop claw machine (Marketplace)</td><td>$150–400</td><td>R7</td></tr>
+</table>
+<p class="tip"><b>Starter cart ~$75:</b> Kit A (Zero 2 W) + Tasmota plug + USB audio adapter =
+Recipes 0 and 1 complete this weekend; every later kit stacks on top.</p>
+
+<h2><span class="n">E</span>The recipes</h2>
+<div class="toc">
+  <a href="#r0">0 · Soundboard <span class="lv">easy · $20</span></a>
+  <a href="#r1">1 · Beacon <span class="lv">easy · $12</span></a>
+  <a href="#r2">2 · Light Wall <span class="lv">easy · $30</span></a>
+  <a href="#r3">3 · Searchlight <span class="lv">medium · $40</span></a>
+  <a href="#r4">4 · Candy Drop <span class="lv">medium · $25</span></a>
+  <a href="#r5">5 · Drumbot <span class="lv">medium · $45</span></a>
+  <a href="#r6">6 · Plotter <span class="lv">weekend · $150</span></a>
+  <a href="#r7">7 · Claw Machine <span class="lv">flagship · $200+</span></a>
+  <a href="#r8">8 · Window Robot <span class="lv">medium · varies</span></a>
+  <a href="#r9">9 · RC Arena <span class="lv">medium · $45</span></a>
+  <a href="#r10">10 · Oracle Sign <span class="lv">medium · $50</span></a>
+  <a href="#r11">11 · Garden <span class="lv">easy · $30</span></a>
+  <a href="#r12">12 · Jukebox <span class="lv">software · $10</span></a>
+  <a href="#r13">13 · Multi-Rig <span class="lv">pattern · $0</span></a>
+  <a href="#r14">14 · Robot Arm <span class="lv">robotics · $70</span></a>
+  <a href="#r15">15 · Sharpshooter <span class="lv">robotics · $60</span></a>
+  <a href="#r16">16 · Rover <span class="lv">robotics · $80</span></a>
+  <a href="#r17">17 · Stage Rigging <span class="lv">robotics · $60</span></a>
+  <a href="#r18">18 · Puppet <span class="lv">robotics · $55</span></a>
+  <a href="#r19">19 · Fortune Teller <span class="lv">NEW · $35</span></a>
+  <a href="#r20">20 · Sand Table <span class="lv">NEW · $150</span></a>
+  <a href="#r21">21 · Barbot <span class="lv">NEW · $85</span></a>
+  <a href="#r22">22 · Pinball <span class="lv">NEW · varies</span></a>
+  <a href="#r23">23 · Smoke Rings <span class="lv">NEW · $65</span></a>
+  <a href="#r24">24 · Plant Synth <span class="lv">NEW · $30</span></a>
+  <a href="#r25">25 · Mechanical Mirror <span class="lv">NEW · $130</span></a>
+</div>
+
+<!-- ═══ R0 ═══ -->
+<div class="recipe" id="r0">
+  <h3><span class="rn">R0</span>The Soundboard</h3>
+  <div class="badges"><span class="b easy">EASY · ONE EVENING</span><span class="b cost">~$20 + speaker</span><span class="b today">WORKS TODAY</span></div>
+  <p class="crowd">Press A/B/C and airhorns, laughs, and beat-drops play through a speaker in the room.</p>
+  <div class="what"><b>What you're really building:</b> the listen test from §B, plus one line that plays a sound file instead of printing. The "hardware" is a speaker cable — that's why it's Recipe 0.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>Kit A</td><td>—</td><td>Pi Zero has no headphone jack…</td></tr>
+    <tr><td>USB audio adapter</td><td>$8</td><td>…this adds one (or use a Pi 3/4's jack, or HDMI audio)</td></tr>
+    <tr><td>Powered speaker</td><td>have one</td><td>anything with a 3.5 mm input</td></tr></table>
+  <ol>
+    <li>Finish §B through the listen test. Plug adapter into Pi, speaker into adapter, volume knob to ~half.</li>
+    <li>Install players: <code>sudo apt install -y mpg123 alsa-utils</code>.</li>
+    <li>On your Mac, gather 7 short MP3s (airhorn, drum, laugh…) and copy them over:
+    <code>scp *.mp3 will@volt-pi-1.local:~/volt/sounds/</code> (make the folder first on the
+    Pi: <code>mkdir ~/volt/sounds</code>).</li>
+    <li>Test by hand ON the Pi: <code>mpg123 ~/volt/sounds/horn.mp3</code>.
+    <br><span class="check">✅ Checkpoint: you hear it.</span> Silent? Run <code>alsamixer</code>,
+    press F6, choose the USB device, arrow keys to raise volume; also check the speaker's own knob.</li>
+    <li>Open your listener (<code>nano listen.mjs</code>) and add at the top:
+<pre>import { execFile } from 'node:child_process';
+const SOUND = { pad_up:'drum.mp3', pad_down:'bass.mp3', pad_left:'laugh.mp3',
+  pad_right:'record.mp3', btn_a:'horn.mp3', btn_b:'yeah.mp3', btn_c:'drop.mp3' };</pre>
+    …and inside the branch that prints <code>PRESS</code>, add:
+<pre>if (SOUND[m.action]) execFile('mpg123', ['-q', `${process.env.HOME}/volt/sounds/${SOUND[m.action]}`]);</pre></li>
+    <li>Run it, buy your own item slot from your phone, and mash buttons.
+    <span class="check">✅ Checkpoint: your thumbs are playing the room.</span></li>
+    <li>Point the systemd service at this script (§B.8). Done — first earning item.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $1 · 30 s · generous limits.</div>
+  <p class="stuck"><b>If stuck:</b> sounds overlap into chaos → add a 300 ms cooldown per action in your map; wrong output device after reboot → <code>sudo raspi-config</code> → System → Audio → pick the USB device.</p>
+</div>
+
+<!-- ═══ R1 ═══ -->
+<div class="recipe" id="r1">
+  <h3><span class="rn">R1</span>The Beacon</h3>
+  <div class="badges"><span class="b easy">EASY · ONE EVENING</span><span class="b cost">~$12</span><span class="b today">WORKS TODAY · ZERO WIRING</span></div>
+  <p class="crowd">A lamp, neon sign, or rope light obeys the crowd: on, off, flicker, party.</p>
+  <div class="what"><b>What you're really building:</b> the Pi sends tiny web requests to a
+  smart plug on the same WiFi. No wires at all — the plug IS the safety barrier between you
+  and wall power.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>Tasmota smart plug</td><td>$12</td><td>buy “Tasmota pre-flashed” — controlled locally by web requests, no cloud account</td></tr>
+    <tr><td>A light with character</td><td>have one</td><td>neon, lava lamp, marquee bulb…</td></tr></table>
+  <ol>
+    <li>Plug the smart plug in near your router first; join its setup WiFi per its leaflet
+    and give it your venue WiFi's name + password.</li>
+    <li>Find its IP address: your router's app/page lists connected devices — look for
+    “tasmota-…”. Reserve that IP (routers call it “DHCP reservation”) so it never changes.</li>
+    <li>Open a browser to <code>http://PLUG-IP</code> — Tasmota shows a toggle page. Click it.
+    <span class="check">✅ Checkpoint: the lamp clicks on/off from your browser.</span></li>
+    <li>Now from the Pi: <code>curl "http://PLUG-IP/cm?cmnd=Power%20TOGGLE"</code> —
+    same click, but a computer did it.</li>
+    <li>Map actions in your listener with the R0 pattern (execFile <code>curl</code>):
+    A = <code>Power%20On</code>, B = <code>Power%20Off</code>, C = a 5-toggle party burst
+    (loop with 400 ms sleeps), pad_up/down = slow/fast flicker loops that STOP when another
+    press arrives.</li>
+    <li>Add a 500 ms cooldown per action — relays physically click; don't machine-gun them.</li>
+    <li>Item + QR + systemd, as always.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $1 · 60 s · <code>cooldownMs</code> ≥ 500.</div>
+  <p class="stuck"><b>If stuck:</b> curl works from your Mac but not the Pi → they're on
+  different networks (guest WiFi isolation); put Pi and plug on the same one.</p>
+</div>
+
+<!-- ═══ R2 ═══ -->
+<div class="recipe" id="r2">
+  <h3><span class="rn">R2</span>The Light Wall</h3>
+  <div class="badges"><span class="b easy">EASY · ONE EVENING</span><span class="b cost">~$30</span><span class="b today">WORKS TODAY · BEST $/WOW</span></div>
+  <p class="crowd">A whole wall, window, or bar-back of LEDs changes pattern, color, and speed under their thumbs.</p>
+  <div class="what"><b>What you're really building:</b> a $8 ESP32 chip runs WLED (free
+  software that's basically a lighting console); the Pi just tells it which preset to play.
+  You solder nothing if you buy strips with connectors.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>WS2812B strip, 5 V, 5 m</td><td>$18</td><td>IP65 (coated) if near drinks; “with connectors”</td></tr>
+    <tr><td>ESP32 dev board</td><td>$8</td><td>runs WLED</td></tr>
+    <tr><td>5 V supply sized to strip</td><td>$10</td><td>~3 A per meter at full white; cap brightness and half it</td></tr>
+    <tr><td>Aluminum diffuser channel</td><td>$10</td><td>optional; turns LED dots into a pro glow</td></tr></table>
+  <ol>
+    <li>Flash WLED from your Mac's Chrome: go to <code>install.wled.me</code>, plug the ESP32
+    in by USB, click Install. (This is the same "flash an image" idea as the Pi, just simpler.)</li>
+    <li>Connect to the “WLED-AP” WiFi it creates → a setup page appears → give it the venue
+    WiFi. Find + reserve its IP like R1 step 2.</li>
+    <li>Wire three connections: strip 5V→supply+, strip GND→supply− <b>and</b> a wire from
+    supply− to an ESP32 GND pin (common ground!), strip DIN (data)→ESP32 pin GPIO2.</li>
+    <li>Open <code>http://WLED-IP</code>: set the LED count, set brightness limit ~60%
+    (looks identical, halves heat), play with effects.
+    <span class="check">✅ Checkpoint: the strip animates from your phone's browser.</span></li>
+    <li>Save 8 presets (calm / rainbow / chase / sparkle / strobe-lite / sunset / ocean / party)
+    as Presets 1–8 in WLED's UI.</li>
+    <li>From the Pi: <code>curl "http://WLED-IP/win&PL=3"</code> → preset 3 plays. Map:
+    A/B/C = presets, pad_up/down = brightness (<code>&A=64</code>…<code>&A=255</code>),
+    pad_left/right = effect speed (<code>&SX=…</code>).</li>
+    <li>Mount in the diffuser channel where the street can see it. Item + QR + systemd.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $1–2 · 60–90 s. Build this FIRST
+  for a venue pitch — visible from outside, zero moving parts, nothing to break.</div>
+  <p class="stuck"><b>If stuck:</b> first LED works, rest flicker → inject power at both ends
+  of the strip (5 V + GND at the far end too); colors wrong → set strip type to WS2812B GRB in WLED settings.</p>
+</div>
+
+<!-- ═══ R3 ═══ -->
+<div class="recipe" id="r3">
+  <h3><span class="rn">R3</span>The Searchlight</h3>
+  <div class="badges"><span class="b med">MEDIUM · ONE WEEKEND</span><span class="b cost">~$40</span></div>
+  <p class="crowd">A spotlight physically swings where they steer — across the ceiling, the dance floor, the mural.</p>
+  <div class="what"><b>What you're really building:</b> your first servo project. Two servos
+  (pan + tilt) hold a light; each phone press nudges an angle. The PCA9685 board does the
+  precise electrical timing so your code just says "go to 85°".</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>Kit B</td><td>$25</td><td>servos + PCA9685 + 5 V 3 A supply</td></tr>
+    <tr><td>SG90 pan/tilt bracket kit</td><td>$9</td><td>screws together in 10 minutes</td></tr>
+    <tr><td>Small 12 V LED spot + MOSFET board</td><td>$12</td><td>or keep the light always-on and sell only the aim</td></tr></table>
+  <ol>
+    <li>Enable the helper-board language: <code>sudo raspi-config</code> → Interface Options →
+    <b>I2C</b> → Yes. Reboot (<code>sudo reboot</code>, SSH back in after 60 s).</li>
+    <li>Wire the PCA9685 (4 wires to the Pi): VCC→3.3 V (pin 1), GND→GND (pin 6), SDA→GPIO2
+    (pin 3), SCL→GPIO3 (pin 5). Then servo power: the 5 V 3 A supply's + to the board's
+    <b>V+</b> screw terminal, its − to the board's GND <b>and</b> a Pi GND (common ground).</li>
+    <li>Prove the Pi sees the board: <code>sudo apt install -y i2c-tools && i2cdetect -y 1</code>.
+    <span class="check">✅ Checkpoint: a grid prints with <code>40</code> in it.</span></li>
+    <li>Plug servos into channels 0 (pan) and 1 (tilt) — orange wire = signal, toward the board's labels.</li>
+    <li><b>Center before assembling:</b> <code>npm i pca9685 i2c-bus</code>, write 6 lines to
+    send both channels to 90°, THEN screw the bracket together with servos at center.
+    (Skipping this is why brackets bind and servos strip.)</li>
+    <li>Write the driver: keep two variables <code>pan, tilt</code>; each d-pad press
+    (hold-repeat arrives ~8/s) nudges ±2°; <b>clamp hard</b> — e.g. pan 20–160°, tilt
+    30–90° — so it can never aim at eyes, windows, or the street. Move by easing 3°/frame
+    toward the target: smooth reads expensive, jumpy reads broken.</li>
+    <li>A = pulse the light (MOSFET on GPIO17: on 300 ms, off), B = recenter to 90/60.</li>
+    <li>Deliberately test the corners: hold each direction until it stops at the clamp.
+    <span class="check">✅ Checkpoint: it physically cannot point anywhere unsafe.</span></li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $2 · 60 s · <code>maxPerMin</code> so servos rest between slots.</div>
+  <div class="safe"><b>Never a laser</b> without real optics knowledge; never any beam clamped
+  where a face can be. The clamp is the safety device — test it like one.</div>
+</div>
+
+<!-- ═══ R4 ═══ -->
+<div class="recipe" id="r4">
+  <h3><span class="rn">R4</span>The Candy Drop</h3>
+  <div class="badges"><span class="b med">MEDIUM · ONE WEEKEND</span><span class="b cost">~$25</span></div>
+  <p class="crowd">Press A → a scoop of candy rattles into the tray. A vending machine that cost $40.</p>
+  <div class="what"><b>What you're really building:</b> a motorized auger (screw) at the
+  bottom of a candy hopper. One press = one metered turn = one fair scoop. The whole game is
+  calibrating "one turn".</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>Continuous-rotation servo (FS90R)</td><td>$8</td><td>spins like a motor, wires like a servo (PCA9685 ch0)</td></tr>
+    <tr><td>Kit B (PCA9685 etc.)</td><td>—</td><td>from R3</td></tr>
+    <tr><td>Hopper: 2 L bottle + funnel + auger</td><td>$8</td><td>3D-print an auger, or hot-glue a spiral of stiff tubing around a dowel on the servo horn</td></tr>
+    <tr><td>Wrapped candy</td><td>$10</td><td>wrapped = zero health-code drama</td></tr></table>
+  <ol>
+    <li>Same I2C setup as R3 (done already if you built it). CR servo → channel 0.</li>
+    <li>Learn its language: a CR servo treats "angle" as speed — 90° = stop, 130° = spin one
+    way, 50° = the other. Find the exact stop value for YOUR servo first (they drift a few
+    degrees) and write it down.</li>
+    <li>Build the tube: a cardboard/PVC tube angled 30° down to the tray; the auger sits
+    inside; the bottle feeds it from above through the funnel.</li>
+    <li>Calibrate the dose: spin in 0.25 s bursts, count candies out. Tune burst length until
+    one press ≈ 4–6 candies. <span class="check">✅ Checkpoint: ten presses in a row give
+    consistent doses.</span></li>
+    <li>Add an anti-jam tick: after each dose, reverse 0.1 s. Candy bridges collapse.</li>
+    <li>Map A = one dose; everything else can trigger R0 sounds (“ka-ching”).</li>
+    <li>Tape the QR ON the hopper — people buy what they're staring at.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · price = candy cost × 4 · 15 s slot
+  (a slot IS one vend) · huge <code>cooldownMs</code> so one purchase = one dose.</div>
+  <p class="stuck"><b>If stuck:</b> jams → auger too tight in the tube (loosen fit) or candy
+  too big (pick smaller candy; round beats flat).</p>
+</div>
+
+<!-- ═══ R5 ═══ -->
+<div class="recipe" id="r5">
+  <h3><span class="rn">R5</span>The Drumbot</h3>
+  <div class="badges"><span class="b med">MEDIUM · ONE WEEKEND</span><span class="b cost">~$45</span></div>
+  <p class="crowd">Solenoids strike a real snare, cowbell, and woodblock in time with their taps — the audience plays percussion on your radio stream.</p>
+  <div class="what"><b>What you're really building:</b> three electric drumsticks. A solenoid
+  is an electromagnet that punches a rod out ~1 cm when powered; a MOSFET board lets a weak
+  GPIO pin fire that strong punch. Short pulses = strikes.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>3× 12 V push solenoids</td><td>$18</td><td>“push type, 10 mm stroke”</td></tr>
+    <tr><td>MOSFET boards ×3 (or one 4-ch)</td><td>$8</td><td>the muscle</td></tr>
+    <tr><td>1N4007 flyback diodes</td><td>$2</td><td>across each coil — absorbs the coil's kickback; skip = fried boards</td></tr>
+    <tr><td>12 V 2 A supply</td><td>$10</td><td>common ground with the Pi</td></tr>
+    <tr><td>Clamps + scrap wood</td><td>$8</td><td>mounts</td></tr></table>
+  <ol>
+    <li>Wire ONE first: supply + → solenoid wire 1; solenoid wire 2 → MOSFET board's OUT+…
+    follow the board's labels (V+ / V− / OUT / signal); signal → GPIO17; ALL grounds together.
+    Diode across the solenoid wires, stripe (cathode) toward +12 V.</li>
+    <li>Fire it from code: pin high 60 ms, then low.
+    <span class="check">✅ Checkpoint: one clean “thunk,” not a buzz (buzz = pulse too long).</span></li>
+    <li>Clamp it ~5 mm from the drum head; tune the gap by ear — closer is tighter, farther is boomier.</li>
+    <li>Repeat ×3 (GPIO 17/27/22 → snare/cowbell/woodblock).</li>
+    <li>Map A/B/C = one strike each (40–80 ms), with 120 ms per-solenoid cooldown — coils
+    overheat if machine-gunned; the cooldown is also your rhythm quantizer, weirdly musical.</li>
+    <li>Mic it into the PA or your stream. The radio loop is the whole charm.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $2 · 45 s · cooldown 120 ms · <code>maxPerMin</code> ~200.</div>
+  <p class="stuck"><b>If stuck:</b> MOSFET board dies on the second strike → you skipped the diode; Pi
+  reboots when solenoid fires → grounds not common or supply too weak.</p>
+</div>
+
+<!-- ═══ R6 ═══ -->
+<div class="recipe" id="r6">
+  <h3><span class="rn">R6</span>The Plotter</h3>
+  <div class="badges"><span class="b adv">WEEKEND+ · KIT BUILD</span><span class="b cost">~$150</span></div>
+  <p class="crowd">A pen machine draws THEIR line onto a big shared sheet — the artwork grows all night, then you sell prints of it.</p>
+  <div class="what"><b>What you're really building:</b> a bought plotter kit (it handles the
+  precise motors) + a small script that translates d-pad presses into “move the pen 2 mm”
+  commands over its USB cable.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>Pen plotter kit (AxiDraw-clone / iDraw / EleksDraw)</td><td>$120–180</td><td>speaks “G-code” over USB serial</td></tr>
+    <tr><td>Butcher paper roll + clips</td><td>$15</td><td>the canvas</td></tr></table>
+  <ol>
+    <li>Assemble per the kit manual (an evening). Run the VENDOR's software once from your
+    laptop and draw anything. <span class="check">✅ Checkpoint: the kit works before Volt
+    enters the picture</span> — this separates “kit problems” from “your problems” forever.</li>
+    <li>Plug its USB into the Pi. Find the port: <code>ls /dev/ttyUSB* /dev/ttyACM*</code>
+    (one appears when plugged in).</li>
+    <li><code>npm i serialport</code>. G-code is just text: <code>G91</code> once (relative
+    mode), then each pad press sends <code>G0 X2</code> / <code>X-2</code> / <code>Y2</code> /
+    <code>Y-2</code>. A = pen up/down (kits use a servo command like <code>M3 S30</code>/<code>M5</code> —
+    the kit manual's “pen” section has the exact pair).</li>
+    <li>Keep a virtual position and CLAMP to the sheet bounds so the pen can't wander off-paper.</li>
+    <li>On slot start: pen up, small “your turn” wiggle. On <code>item</code> pause/off: pen up, stop.</li>
+    <li>Date each sheet (“drawn by 214 strangers — Fri Aug 7”), photograph, sell prints in the shop.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $3 · 120 s · the queue watches the drawing happen — prime spectator item.</div>
+</div>
+
+<!-- ═══ R7 ═══ -->
+<div class="recipe" id="r7">
+  <h3><span class="rn">R7</span>The Claw Machine <span class="b today" style="margin-left:.4em">FLAGSHIP</span></h3>
+  <div class="badges"><span class="b adv">ADVANCED · TWO WEEKENDS</span><span class="b cost">$200–450 all-in</span></div>
+  <p class="crowd">A real claw machine, played from their phone. The best coin-op economics ever invented — minus the coin box.</p>
+  <div class="what"><b>What you're really building:</b> the universal trick (§C) at scale.
+  The machine already knows how to be a claw — motors, limits, grab strength, prize return.
+  You wire five relays across its five buttons and the Pi becomes a very fast player pressing them.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>Used countertop claw machine</td><td>$150–400</td><td>Marketplace/OfferUp — “powers on, claw moves” is all it needs; ignore broken coin mechs</td></tr>
+    <tr><td>8-ch relay module</td><td>$9</td><td>your electric fingers (5 used)</td></tr>
+    <tr><td>Multimeter</td><td>—</td><td>Kit A</td></tr>
+    <tr><td>Prizes</td><td>$30</td><td>small plush, or shop-credit cards in capsules</td></tr></table>
+  <ol>
+    <li>Buy the machine. At pickup: power on, joystick moves the claw, drop button drops. That's a yes.</li>
+    <li>Find the settings panel (inside the door): photograph everything, then set FREE PLAY
+    via DIP switches (generic countertop manuals are findable by the board's model number).
+    <span class="check">✅ Checkpoint: it plays without coins, by hand.</span></li>
+    <li>UNPLUG IT. Open the control panel: the joystick is 4 microswitches around a stick +
+    a shared COMMON wire; the drop button is 2 contacts.</li>
+    <li>Multimeter in beep mode: probe pairs while pressing each direction — beep only-while-pressed
+    = that switch's two points. Label with tape: COM, UP, DOWN, LEFT, RIGHT, DROP.</li>
+    <li>Wire each relay's COM+NO terminals across one switch (relay closes = button pressed).
+    Route the relay wires OUT of the panel neatly; the machine's own mains wiring stays boxed and untouched.</li>
+    <li>Before the Pi: touch each relay's two output wires together by hand — the claw should
+    drive that direction. <span class="check">✅ Checkpoint: you can “play” it with wire touches.</span></li>
+    <li>Relay board signals → GPIOs (17/27/22/23 dirs, 24 drop). Map d-pad = hold-to-move
+    (relay held while the press repeats), A = drop. A slot = one play; machines auto-return
+    the claw and re-arm themselves.</li>
+    <li>QR vinyl on the glass + an R2 light strip on the shelf so it glows from across the room.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $2–3/play · 45 s slot ·
+  <span class="note">[after outputs mission, phase 2]</span> an IR beam in the prize chute reports wins as <code>score</code> → auto shop-credit.</div>
+  <div class="safe"><b>Relays touch ONLY the low-voltage button side.</b> If any button
+  contact measures mains voltage (rare on countertops), stop — different machine.</div>
+</div>
+
+<!-- ═══ R8 ═══ -->
+<div class="recipe" id="r8">
+  <h3><span class="rn">R8</span>The Window Robot</h3>
+  <div class="badges"><span class="b med">MEDIUM</span><span class="b cost">varies</span></div>
+  <p class="crowd">A closed store's window comes alive from the sidewalk: a waving mannequin, a toy train, blinds that reveal the display.</p>
+  <div class="what"><b>What you're really building:</b> any earlier recipe, installed behind
+  glass, sold to the sidewalk. The store's dead hours become the show — and the store pays
+  YOU for the foot traffic.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>The display piece</td><td>varies</td><td>train set, mannequin + servo elbow, motorized blinds</td></tr>
+    <tr><td>Relay module / Kit B</td><td>$9–25</td><td>button-hack (§C) works on most display toys</td></tr></table>
+  <ol>
+    <li>Choose motion that reads THROUGH GLASS at night: big, backlit, repeatable. Test from
+    across the street, not from inside.</li>
+    <li>Power everything via a smart plug on a schedule (dusk–2 am) so it sleeps with the block.</li>
+    <li>Button-hack or servo the display's best three tricks onto A/B/C; d-pad for anything
+    that steers. Add an R2 strip as the “it's alive” glow.</li>
+    <li>QR vinyl ON the glass at eye height: “$1 — you drive it.” Nothing else; mystery sells.</li>
+    <li>Business shape: store pays small monthly for the spectacle; sidewalk pays per control.
+    The only recipe where the LOCATION also pays.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $1 · 45 s · scheduled to off-hours.</div>
+</div>
+
+<!-- ═══ R9 ═══ -->
+<div class="recipe" id="r9">
+  <h3><span class="rn">R9</span>The RC Arena</h3>
+  <div class="badges"><span class="b med">MEDIUM · ONE WEEKEND</span><span class="b cost">~$45</span></div>
+  <p class="crowd">A little car in a walled tabletop arena — push the ball into the goal, knock the cones, beat the clock.</p>
+  <div class="what"><b>What you're really building:</b> the button-hack on the car's REMOTE.
+  The factory radio link keeps doing the hard part; the Pi just presses the remote's buttons
+  with optocouplers (gentler relays for tiny electronics).</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>Cheap RC car</td><td>$25</td><td>the $25 kind with a 4-button remote (fwd/back/left/right)</td></tr>
+    <tr><td>4× PC817 optocoupler (or 4-ch relay)</td><td>$4</td><td>solder across the remote's button pads</td></tr>
+    <tr><td>Lumber + plexi</td><td>$15</td><td>arena walls ~10 cm, one clear side</td></tr></table>
+  <ol>
+    <li>Open the remote (4 screws). Each rubber button sits on two exposed pads on the board.</li>
+    <li>Solder two thin wires to each button's pads (8 wires). Label them.</li>
+    <li>Each opto: remote pads → its output legs; GPIO + 220 Ω resistor → its input legs
+    (input side is an LED — the resistor protects it). Optos beat relays here: silent, and
+    happy at the remote's 3 V.</li>
+    <li>Power the remote from the Pi's 3.3 V pin instead of its AAs (most remotes run ~3 V)
+    so batteries never die mid-slot. Common ground.</li>
+    <li>Test: GPIO high = car drives. <span class="check">✅ Checkpoint: you're driving the car
+    from code with the remote's shell still doing the radio.</span></li>
+    <li>Map d-pad = hold-to-drive; C = horn via R0. Build the arena with slight inward wall
+    tilt (cars self-right off walls) and a charging corral where slots begin.</li>
+    <li>Buy the two-battery car version, or a second car — batteries are the weak point.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $2 · 90 s ·
+  <span class="note">[after outputs mission, phase 2] the camera relay makes this playable from anywhere.</span></div>
+</div>
+
+<!-- ═══ R10 ═══ -->
+<div class="recipe" id="r10">
+  <h3><span class="rn">R10</span>The Oracle Sign</h3>
+  <div class="badges"><span class="b med">MEDIUM</span><span class="b cost">~$50</span><span class="b today">WORKS TODAY</span></div>
+  <p class="crowd">An LED matrix shows the current controller's name in lights, cycling their chosen phrase. Names-in-lights is an unreasonably effective draw.</p>
+  <div class="what"><b>What you're really building:</b> a DISPLAY rig — it moves nothing.
+  Your listener reads the room's broadcasts (who holds the item, what they pressed) and
+  paints them on a mini jumbotron. Proof that rigs can consume state, not just presses.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>64×32 HUB75 LED matrix</td><td>$30</td><td>concert-jumbotron look, book-sized</td></tr>
+    <tr><td>Adafruit RGB Matrix Bonnet</td><td>$15</td><td>plugs the panel onto the Pi correctly</td></tr>
+    <tr><td>5 V 4 A supply</td><td>$10</td><td>matrices are hungry</td></tr></table>
+  <ol>
+    <li>Use a Pi 3/4 here (panel driving is timing-hungry; the Zero struggles).</li>
+    <li>Assemble bonnet + panel per Adafruit's guide; run their demo first.
+    <span class="check">✅ Checkpoint: rainbow demo on the panel.</span></li>
+    <li>In your listener, also handle <code>item_queues</code> messages (they carry the
+    holder's name and queue) — the playbook listener already logs them.</li>
+    <li>Render states: idle → “SCAN TO SHINE ↓”; active → holder name big + phrase below;
+    presses → sparkle effects per action.</li>
+    <li>A/B/C cycle a CURATED 20-phrase list you wrote. Never free text — you are the editor.</li>
+    <li>Dim by hour (full at 9 pm, half at 1 am). Mount beside any other item as its marquee.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $1 · 120 s of glory.</div>
+</div>
+
+<!-- ═══ R11 ═══ -->
+<div class="recipe" id="r11">
+  <h3><span class="rn">R11</span>The Garden</h3>
+  <div class="badges"><span class="b easy">EASY</span><span class="b cost">~$30</span></div>
+  <p class="crowd">“Water me” — a plant wall strangers keep alive: pump bursts, mister, grow light. Coffee-shop catnip.</p>
+  <div class="what"><b>What you're really building:</b> a pump on a MOSFET (like R5's
+  solenoid, but it runs for seconds instead of milliseconds) + R1's smart-plug trick for the light.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>12 V mini pump + silicone tubing</td><td>$12</td><td>aquarium style, self-priming</td></tr>
+    <tr><td>MOSFET board + 12 V supply</td><td>$12</td><td>pump driver</td></tr>
+    <tr><td>Grow light on a smart plug</td><td>$12</td><td>R1 pattern</td></tr></table>
+  <ol>
+    <li>Reservoir below, plants above; run tubing along the top with a pinhole over each pot.</li>
+    <li>Pump → MOSFET → GPIO17, 12 V supply, common ground (R5's wiring, gentler duty).</li>
+    <li>Calibrate: run 3 s, see how much water moves; adjust so A = one polite drink.
+    <span class="check">✅ Checkpoint: no pot overflows on a double press — because you also
+    set a hard 10-dose daily cap in your script.</span></li>
+    <li>B = mister (same pattern), C = grow light toggle via the plug.</li>
+    <li>Overflow tray under EVERYTHING. Chalkboard: “last watered by ___” (or pair with R10).</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $1 · 30 s · long cooldowns + daily caps; the point is charm.</div>
+</div>
+
+<!-- ═══ R12 ═══ -->
+<div class="recipe" id="r12">
+  <h3><span class="rn">R12</span>The Jukebox</h3>
+  <div class="badges"><span class="b med">SOFTWARE-HEAVY</span><span class="b cost">~$10 hardware</span><span class="b">NEEDS JUKEBOX MISSION</span></div>
+  <p class="crowd">The bar's music with a live NOW PLAYING / UP NEXT marquee — whoever holds the controller picks and skips, inside house rules (“skips only in the first 15 s, two per person per half hour”).</p>
+  <div class="what"><b>What you're really building:</b> almost nothing — the jukebox build
+  mission (<code>PROMPT-JUKEBOX.md</code>) does the heavy lifting server-side. Your hardware
+  job is a music player (MPD on the Pi, or the venue's own Spotify) and a screen.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>Kit A + USB audio adapter</td><td>$8</td><td>MPD path — own catalog, cleanest rights</td></tr>
+    <tr><td><em>or</em> nothing</td><td>$0</td><td>venue-Spotify path — server drives their account; a Pi running <code>raspotify</code> only if they lack a Connect speaker</td></tr>
+    <tr><td>Old tablet / TV stick</td><td>$0–30</td><td>the marquee: any browser on the marquee view</td></tr></table>
+  <ol>
+    <li>Run the missions in order (split → outputs → jukebox).</li>
+    <li>MPD path: <code>sudo apt install -y mpd mpc</code>; copy music to
+    <code>/var/lib/mpd/music</code> (scp); <code>mpc update</code>; test by hand:
+    <code>mpc add yoursong.mp3 && mpc play</code>. The mission's <code>volt-jukebox.mjs</code>
+    then drives it.</li>
+    <li>Spotify path: authorize the VENUE's Premium account from the ops page; music stays on
+    their speakers and their account.</li>
+    <li>Curate the catalog in ops — never open search (vibe control + rights control).</li>
+    <li>Mount the marquee screen behind the bar, QR in its corner.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> sell the CONTROLLER, not songs — $3 / 3-min
+  slot (auction on weekends) · skips: first-15 s only, 10 s min play, 2/user/30 min, 6/room/hour.</div>
+  <div class="safe"><b>Licensing:</b> venue music is public performance; the coin-op jukebox
+  license doesn't cover internet jukeboxes; consumer Spotify is personal-use by its terms;
+  licensed business services currently allow staff-only control. Controller-slot mode on the
+  venue's own account (disclosed) or your own label catalog are the defensible pilots. Not legal advice.</div>
+</div>
+
+<!-- ═══ R13 ═══ -->
+<div class="recipe" id="r13">
+  <h3><span class="rn">R13</span>The Multi-Rig</h3>
+  <div class="badges"><span class="b easy">PATTERN</span><span class="b cost">$0</span></div>
+  <p class="crowd">One $15 Pi runs the whole bar: soundboard + light wall + beacon as three separate items.</p>
+  <ol>
+    <li>One script per item code, each with its own systemd service file
+    (<code>volt-sound.service</code>, <code>volt-lights.service</code>, <code>volt-beacon.service</code>) —
+    copy the §B.8 file, change the <code>ExecStart</code> line and name.</li>
+    <li><code>sudo systemctl enable --now</code> each. <code>systemctl status volt-*</code> shows all three.</li>
+    <li>Label the Pi's case with the item codes + service names. Future-you, dark venue, gratitude.</li>
+    <li>This is the “venue package” in the playbook's pitch: 2–3 items, one plug, one WiFi password.</li>
+  </ol>
+</div>
+
+<h2><span class="n">F</span>Robotics — controlling real movement</h2>
+<p>Robotics here isn't humanoids — it's <b>giving strangers safe, bounded actuation</b>.
+Every motion needs a <b>driver</b> (what powers it), a <b>mapping</b> (what a thumb does to
+it), and an <b>envelope</b> (what it can never do). Get those three right and almost
+anything can be an item.</p>
+
+<h3>The movement vocabulary — what a d-pad + A/B/C can drive</h3>
+<div class="movegrid">
+  <div class="move"><b>Aim (rotation to an angle)</b> — hobby servos, 0–180°.
+    <div class="use">Pan/tilt heads, joints, dials, mirrors, eyes. Map: d-pad nudges ±2° with hold-repeat; clamp ranges hard. → R3, R14, R18, R25</div></div>
+  <div class="move"><b>Spin (continuous rotation)</b> — DC motors, CR servos.
+    <div class="use">Wheels, augers, spools, turntables. Map: hold-to-spin; timed bursts for metering. → R4, R16, R21</div></div>
+  <div class="move"><b>Step (precise increments)</b> — stepper motors.
+    <div class="use">Plotters, gantries, patterns that must repeat exactly. Map: jog per press; home at boot. → R6, R7, R20</div></div>
+  <div class="move"><b>Push/strike (linear, fast)</b> — solenoids.
+    <div class="use">Drums, pokes, latches, triggers. Map: one press = one timed pulse + cooldown. → R5, R15, R22</div></div>
+  <div class="move"><b>Reach (linear, slow &amp; strong)</b> — linear actuators, winches, lead screws.
+    <div class="use">Lift, reveal, open, tilt heavy things. Map: A = scripted travel between end-stops. → R17</div></div>
+  <div class="move"><b>Grip</b> — a servo squeezing a printed claw.
+    <div class="use">Pick-and-place, handing things over. Map: C toggles open/closed. → R14</div></div>
+  <div class="move"><b>Drive (locomotion)</b> — two motors, differential steering.
+    <div class="use">Rovers, floor bots, anything in a pen. Map: tank-mix the d-pad. → R16</div></div>
+  <div class="move"><b>Flow (fluid/air)</b> — pumps, valves, fans, foggers.
+    <div class="use">Water, mist, bubbles, fog rings, drinks. Map: timed bursts, hard caps. → R11, R21, R23</div></div>
+</div>
+
+<div class="safe"><b>The safety envelope (every robotics recipe):</b> software limits on
+every axis, tested at the corners · hardware end-stop switches in SERIES with motor power on
+anything linear or strong · server-side duty limits sized to the actuator · a physical kill
+switch on the supply · speed-ease everything · and the rule that settles arguments:
+<b>if it can pinch, poke an eye, or reach a face — change the design, not the warning sign.</b></div>
+
+<!-- ═══ R14 ═══ -->
+<div class="recipe" id="r14">
+  <h3><span class="rn">R14</span>The Robot Arm</h3>
+  <div class="badges"><span class="b adv">ROBOTICS · TWO WEEKENDS</span><span class="b cost">~$70</span></div>
+  <p class="crowd">A desktop arm picks up foam blocks and drops them in cups — “move the ball to the red cup” becomes a paid carnival game.</p>
+  <div class="what"><b>What you're really building:</b> R3 four times over — four servos
+  (base, shoulder, elbow, grip) on one PCA9685, each with its own clamped range, driven by
+  the same nudge-and-ease code.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>4-DOF servo arm kit (acrylic, MG90S)</td><td>$40–60</td><td>“4DOF robot arm kit” — skip $200 “smart” arms; you're the smarts</td></tr>
+    <tr><td>PCA9685 + 5 V 4 A supply</td><td>$25</td><td>four servos pull real current</td></tr>
+    <tr><td>Foam blocks / ping-pong balls + cups</td><td>$8</td><td>light objects = forgiving game</td></tr></table>
+  <ol>
+    <li>Assemble the kit, <b>centering every servo at 90° before attaching each horn</b> —
+    the one arm-building habit that prevents every other problem.</li>
+    <li>Servos → channels 0–3 (base / shoulder / elbow / grip). I2C setup = R3 steps 1–3.</li>
+    <li>Find TRUE limits: drive each joint SLOWLY (5°/s) to where the frame binds; note the
+    angle; clamp 10° inside it. Write the four ranges on tape on the arm's base.</li>
+    <li>Mapping for 7 inputs: <b>d-pad = base left/right + shoulder up/down · A/B = elbow
+    down/up · C = gripper toggle.</b> ±2° nudges, eased.</li>
+    <li>Home pose on slot start/end (arm parks safely between players).
+    <span class="check">✅ Checkpoint: mash all inputs for 60 s — nothing binds, nothing reaches beyond its zone.</span></li>
+    <li>Frame the GAME: three cups, a tray of blocks, 90 seconds. Near-misses sell retries —
+    claw machines proved it decades ago.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $2 · 90 s ·
+  <span class="note">cup sensor [after outputs mission, phase 2] → wins pay shop credit.</span></div>
+</div>
+
+<!-- ═══ R15 ═══ -->
+<div class="recipe" id="r15">
+  <h3><span class="rn">R15</span>The Sharpshooter</h3>
+  <div class="badges"><span class="b adv">ROBOTICS · TWO WEEKENDS</span><span class="b cost">~$60</span></div>
+  <p class="crowd">Aim a ping-pong-ball launcher at a cup pyramid against the netted wall. Carnival midway, phone-sized.</p>
+  <div class="what"><b>What you're really building:</b> two spinning wheels (the NERF
+  principle) that launch whatever's fed between them, on a pan servo, aimed only at a netted
+  gallery. Aim is software; “can't hit people” is mechanical.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>Pan servo + bracket (Kit B)</td><td>—</td><td>pan only; elevation FIXED by the mount</td></tr>
+    <tr><td>2× small DC motors + wheels</td><td>$12</td><td>the flywheels</td></tr>
+    <tr><td>2× MOSFET boards + feed servo</td><td>$15</td><td>spin-up + one-ball gate</td></tr>
+    <tr><td>Balls + cups + netting</td><td>$15</td><td>netting = the shooting gallery's walls</td></tr></table>
+  <ol>
+    <li>Build the launcher: two wheels 38 mm apart, motors on a plate; a gravity ramp holds
+    ~15 balls; a feed servo gates one ball at a time into the wheels.</li>
+    <li>Bench-test throw distance at fixed elevation; place the cup wall there; enclose the
+    whole flight zone in netting, gutter at the bottom returning balls to a bucket.</li>
+    <li>Mount on the pan servo; clamp pan to the gallery's measured width (e.g. 60°).</li>
+    <li>Map: pad_left/right = aim · A = spin-up (2 s, R0 sound cue) · B = fire one ball ·
+    feed cooldown 1.5 s. <span class="check">✅ Checkpoint: with the clamp, a ball physically
+    cannot leave the netting.</span></li>
+    <li>Staff re-racks cups hourly. Wins by honor system, or a cup sensor later.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $2 = 5 balls (a slot is a magazine) · prime spectator item.</div>
+  <div class="safe"><b>Soft balls, fixed elevation, netted zone, never aimable at people — all
+  four are MECHANICAL guarantees.</b> If a venue asks for “aim anywhere,” the answer is no.</div>
+</div>
+
+<!-- ═══ R16 ═══ -->
+<div class="recipe" id="r16">
+  <h3><span class="rn">R16</span>The Rover</h3>
+  <div class="badges"><span class="b adv">ROBOTICS · TWO WEEKENDS</span><span class="b cost">~$80</span></div>
+  <p class="crowd">A hand-sized tracked robot roams a floor pen — bump the ball, chase the toy, park in the glowing garage. The Pi rides ON the robot.</p>
+  <div class="what"><b>What you're really building:</b> your first self-contained robot: two
+  motors + a driver board + the Pi + batteries on one chassis, tethered only by WiFi. This is
+  “real robotics” — and the outbound-connection design is why it just works.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>Chassis kit, 2 motors (tracked looks best)</td><td>$25</td><td>“smart robot car chassis”</td></tr>
+    <tr><td>Motor driver (TB6612 or L298N)</td><td>$7</td><td>two channels = two motors</td></tr>
+    <tr><td>USB power bank (Pi) + 6×AA pack (motors)</td><td>$20</td><td>separate supplies, COMMON GROUND</td></tr>
+    <tr><td>HC-SR04 ultrasonic sensor</td><td>$4</td><td>the auto-stop bumper — include it</td></tr>
+    <tr><td>Pen: lumber + plexi corner</td><td>$20</td><td>~1.5 m square</td></tr></table>
+  <ol>
+    <li>Assemble the chassis; motors → driver's A/B outputs; driver inputs → GPIOs (17/27
+    left, 22/23 right); driver logic pin → Pi 3.3 V; motor power → AA pack; ALL grounds common.</li>
+    <li>Bench-test wheels-up first: code each side forward/back.
+    <span class="check">✅ Checkpoint: both sides obey; if one runs backward, swap that motor's two wires.</span></li>
+    <li>Velcro the Zero 2 W + power bank on top. It's now a robot — WiFi is its only tether.</li>
+    <li><b>Tank-mix mapping:</b> pad_up = both fwd · pad_down = both back · pad_left/right =
+    opposite sides (spin) · A = horn beep · B = headlight LEDs · C = 360° flourish.</li>
+    <li>PWM the driver's enable pins to cap speed ~60% — fast rovers flip and bore.</li>
+    <li>Wire the HC-SR04 facing forward; in code: under 10 cm → refuse forward drive (user
+    steers, robot declines to ram). This override ALWAYS wins.
+    <span class="check">✅ Checkpoint: drive it at a wall on purpose; it stops itself.</span></li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $2 · 90 s ·
+  <span class="note">[after outputs mission, phase 2] camera relay = drivable from anywhere on earth.</span></div>
+</div>
+
+<!-- ═══ R17 ═══ -->
+<div class="recipe" id="r17">
+  <h3><span class="rn">R17</span>The Stage Rigging</h3>
+  <div class="badges"><span class="b adv">ROBOTICS · ONE WEEKEND</span><span class="b cost">~$60</span></div>
+  <p class="crowd">Architectural drama on command: the disco ball descends, the curtain reveals the mural, the mirror tilts the sunset across the room.</p>
+  <div class="what"><b>What you're really building:</b> one strong, slow, scripted movement.
+  Linear actuators are beginner-perfect because the end-stops are built in — it physically
+  cannot overrun itself.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>12 V linear actuator</td><td>$35</td><td>built-in end-stops; pick stroke length for the move</td></tr>
+    <tr><td>2-ch relay module</td><td>$8</td><td>one polarity each way = extend / retract</td></tr>
+    <tr><td>12 V supply</td><td>$12</td><td>sized to the actuator's amps</td></tr>
+    <tr><td>Limit switches ×2</td><td>$4</td><td>only if you wind a winch instead — wired IN SERIES with motor power</td></tr></table>
+  <ol>
+    <li>Rig the mechanical path first and run it BY HAND until silky — motors amplify friction problems, never fix them.</li>
+    <li>Wiring (DPDT-style reversal): the two relays swap the actuator's + and − to run it
+    each way. Follow a “relay H-bridge actuator” diagram exactly, and interlock in software
+    so both relays can never close together.</li>
+    <li>Time the full travel (say 9 s). Scripted moves only: A = full reveal (run 9 s), B =
+    return, d-pad = 0.5 s theatrical nudges. No freehand jog near people.</li>
+    <li>On <code>item</code> pause/off: stop instantly, hold position.
+    <span class="check">✅ Checkpoint: pause mid-travel, resume, and A still lands exactly at
+    full-open (because the actuator's own end-stop trues it up).</span></li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> AUCTION mode shines here — one reveal per round, the room bids for the lever. Starting bid $3.</div>
+  <div class="safe"><b>Overhead = rated rigging + a secondary steel safety cable.</b> The $35
+  actuator MOVES the disco ball; the safety loop is what HOLDS it. Venues will (rightly) ask.</div>
+</div>
+
+<!-- ═══ R18 ═══ -->
+<div class="recipe" id="r18">
+  <h3><span class="rn">R18</span>The Puppet</h3>
+  <div class="badges"><span class="b adv">ROBOTICS · TWO WEEKENDS</span><span class="b cost">~$55</span></div>
+  <p class="crowd">A character above the bar — jaw flaps, brows raise, arm waves — puppeteered by strangers. Name it; it becomes the venue's mascot.</p>
+  <div class="what"><b>What you're really building:</b> animatronics = servos pulling wires
+  against springs. Servo horn → stiff wire → jaw. Spring pulls it back. Everything else is
+  character design and zip ties.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>Thrift-store puppet / skull / mannequin head</td><td>$10</td><td>character is free at thrift stores</td></tr>
+    <tr><td>4× MG90S + PCA9685 (Kit B+)</td><td>$30</td><td>jaw, brows, head pan, arm</td></tr>
+    <tr><td>Piano wire, springs, zip ties, hot glue</td><td>$10</td><td>animatronics is 80% zip ties</td></tr>
+    <tr><td>USB audio + small amp</td><td>$15</td><td>the voice (R0's rig)</td></tr></table>
+  <ol>
+    <li>Build a frame INSIDE/BEHIND the puppet (coat-hanger wire or a wood dowel spine).</li>
+    <li>One joint at a time, jaw first: servo on the frame, horn → stiff wire → chin; spring
+    from chin → frame. Sweep the servo slowly to find the natural jaw range — usually only
+    ~25° reads as full speech. Clamp it.</li>
+    <li>Channels: 0 jaw · 1 brows · 2 head pan · 3 arm. Same PCA9685 setup as R3/R14.</li>
+    <li>Map: <b>d-pad = head pan / brows · A = jaw-flap burst + a voice clip (motion + sound
+    = ALIVE — this is the whole magic) · B = wave · C = dance preset.</b></li>
+    <li>Record presets as keyframe arrays <code>{ch, angle, ms}</code> and play them eased.
+    Build one 3-second “dance” from 8 keyframes.</li>
+    <li>Idle loop between slots: slow blink/breath sway — attract mode you can build TODAY
+    (it's just your script when no holder is active).
+    <span class="check">✅ Checkpoint: someone across the room asks if it's watching them.</span></li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $2 · 60 s · pair with R10 so the marquee names the current puppeteer.</div>
+</div>
+
+<h2><span class="n">G</span>New builds from the creative-tech world</h2>
+<p class="note">These seven come from researching what actually draws crowds in interactive
+art and maker circles — kinetic sand tables (Sisyphus's museum pieces turned Kickstarter
+phenomenon, with thriving open-source clones), barbots (a whole Hackaday genre), receipt-printer
+art, vortex cannons, capacitive-touch plant instruments, and Rozin-style mechanical mirrors —
+each translated into a Volt item with the pay-to-control loop attached.</p>
+
+<!-- ═══ R19 ═══ -->
+<div class="recipe" id="r19">
+  <h3><span class="rn">R19</span>The Fortune Teller</h3>
+  <div class="badges"><span class="b easy">EASY · ONE EVENING</span><span class="b cost">~$35</span><span class="b today">WORKS TODAY</span></div>
+  <p class="crowd">Press A and a little machine spits out a printed fortune, a doodle, a dare, or tonight's “quest.” People pin them to the wall; the wall becomes the thing.</p>
+  <div class="what"><b>What you're really building:</b> a thermal receipt printer (the
+  gas-station kind — no ink, paper is $2/roll) on USB, plus text files of fortunes. The Pi
+  prints one at random per press. Absurdly little work for how much people love it.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>USB thermal receipt printer (58/80 mm, ESC/POS)</td><td>$30–45</td><td>“POS-58” style; ESC/POS is the standard language they all speak</td></tr>
+    <tr><td>Paper rolls</td><td>$5</td><td>thermal — no ink ever</td></tr></table>
+  <ol>
+    <li>Plug the printer into the Pi by USB. <code>ls /dev/usb/lp0</code> — that's it.</li>
+    <li>Prove it prints: <code>echo -e "VOLT SAYS HELLO\n\n\n" | sudo tee /dev/usb/lp0</code>.
+    <span class="check">✅ Checkpoint: paper says hello.</span> (If permission-denied:
+    <code>sudo usermod -a -G lp will</code>, log out/in.)</li>
+    <li>Write 60 fortunes in three files: <code>fortunes.txt</code>, <code>dares.txt</code>,
+    <code>quests.txt</code> — one per line. You're the oracle; be funny.</li>
+    <li>Map: A = random fortune, B = random dare, C = tonight's quest; d-pad prints doodle
+    stamps (ESC/POS prints bitmaps too — <code>npm i escpos</code> makes images easy).</li>
+    <li>Finish every print with the buyer's name + timestamp + “VOLT · scan to play” + the QR
+    (escpos prints QR codes natively) — <b>every fortune is also a flyer.</b></li>
+    <li>Mount printer face-out in a little booth; string + clothespins on the wall beside it.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $1 · 15 s (a slot = one print, R4's vending logic) · the wall of fortunes is the attract mode.</div>
+</div>
+
+<!-- ═══ R20 ═══ -->
+<div class="recipe" id="r20">
+  <h3><span class="rn">R20</span>The Sand Table</h3>
+  <div class="badges"><span class="b adv">ADVANCED · MULTI-WEEKEND</span><span class="b cost">~$150 DIY</span></div>
+  <p class="crowd">A steel ball glides through sand drawing endless patterns — a Sisyphus-style kinetic sculpture. Slot holders steer the ball; the table erases and redraws all night. Museum-grade mesmerizing.</p>
+  <div class="what"><b>What you're really building:</b> a magnet on a 2-axis motion rig UNDER
+  a sand tray; a steel ball on the sand follows the magnet. The famous Sisyphus tables run on
+  a Pi; open-source builds (search “DIY-Machines kinetic sand table” or “Sand-Table” on GitHub,
+  patterns from sandify.org) publish the frames, electronics, and G-code players. Your twist:
+  live d-pad steering instead of only playlists.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>2 stepper motors + drivers (or a CoreXY/polar kit per the open-source plans)</td><td>$50</td><td>the motion rig</td></tr>
+    <tr><td>Frame: plywood ring/box + glass or acrylic top</td><td>$50</td><td>IKEA-table conversions are a known cheat</td></tr>
+    <tr><td>Neodymium magnet + steel ball + fine sand</td><td>$20</td><td>baking soda also works and photographs bright</td></tr>
+    <tr><td>LED ring (Kit D leftovers)</td><td>$10</td><td>edge lighting makes the grooves pop</td></tr></table>
+  <ol>
+    <li>Build the open-source mechanics (their guides are excellent — follow one, don't
+    invent). Get their demo patterns playing first.
+    <span class="check">✅ Checkpoint: the table draws a spiral on its own.</span></li>
+    <li>The plans all end in “feed it G-code” — which is R6's plotter interface. Reuse your
+    plotter driver: d-pad = 5 mm ball moves (clamped to the tray!), A = “spiral here” macro,
+    B = eraser pass, C = cycle LED color.</li>
+    <li>Speed-limit the moves — the ball detaches from the magnet above ~80 mm/s. Slow is
+    also the aesthetic.</li>
+    <li>Between slots: attract mode = resume the pattern playlist (patterns from sandify.org).</li>
+    <li>Venue fit: galleries, hotel lobbies, coffee shops — this one belongs where people sit.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $3 · 120 s · or auction Sunday
+  “final pattern of the night” (photo posted, R19 prints them a certificate).</div>
+</div>
+
+<!-- ═══ R21 ═══ -->
+<div class="recipe" id="r21">
+  <h3><span class="rn">R21</span>The Barbot</h3>
+  <div class="badges"><span class="b adv">ADVANCED · TWO WEEKENDS</span><span class="b cost">~$85</span></div>
+  <p class="crowd">Pick a mix on your phone; the machine pours it before your eyes. A Hackaday-classic build wearing your pay-to-control loop.</p>
+  <div class="what"><b>What you're really building:</b> 4–6 peristaltic pumps (the food-safe
+  kind that squeeze silicone tubing — liquid touches only the tube) each pouring one
+  ingredient; a press runs pumps for metered seconds. Open-source barbots (BarBot on GitHub,
+  Bar Mixvah) prove the pattern.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>4× peristaltic pumps, 12 V food-grade</td><td>$40</td><td>$10 each; silicone tubing included</td></tr>
+    <tr><td>4-ch MOSFET board + 12 V 3 A supply</td><td>$15</td><td>pump drivers</td></tr>
+    <tr><td>Frame + drip tray + bottles</td><td>$20</td><td>plywood + a baking sheet</td></tr>
+    <tr><td>Food-safe tubing spares</td><td>$8</td><td>replace monthly</td></tr></table>
+  <ol>
+    <li>One pump first: MOSFET wiring exactly like R11's pump. Time how long 30 ml takes
+    (~10–20 s typical). <span class="check">✅ Checkpoint: repeatable 30 ml pours, ±10%.</span></li>
+    <li>Mount 4 pumps over a cup shelf; each draws from its bottle through its own tube.
+    Label everything.</li>
+    <li>Define mixes as recipes in code: <code>{a:[3,0,2,1], b:[0,4,1,1], c:[2,2,2,0]}</code> —
+    seconds per pump, run sequentially. A/B/C = the three house mixes; d-pad “+1 s of X” customizes.</li>
+    <li>Interlock: one pour at a time; cup-present switch (a $2 microswitch under the shelf)
+    or staff-placed cups only.</li>
+    <li>Flush-clean weekly: run warm water through all lines (a “clean” admin action).</li>
+    <li><b>Start with mocktails/sodas</b> — Italian-soda bar, spritzers, cold brew + syrups.
+    All the theater, none of the liquor law.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $3–5 (includes the drink!) · 30 s ·
+  one pour per slot. The pour IS the show — face it outward.</div>
+  <div class="safe"><b>Alcohol changes the rules:</b> self-pour/automated dispensing of liquor
+  is regulated and license-specific — if a bar wants booze in it, the BAR's license and staff
+  must own the pour (e.g. staff loads a measured shot; the machine only mixes). Mocktail mode
+  needs none of that. Food-grade tubing only, cleaned on schedule. Not legal advice.</div>
+</div>
+
+<!-- ═══ R22 ═══ -->
+<div class="recipe" id="r22">
+  <h3><span class="rn">R22</span>The Pinball</h3>
+  <div class="badges"><span class="b med">MEDIUM · ONE WEEKEND</span><span class="b cost">machine + $15</span></div>
+  <p class="crowd">A real pinball machine where YOUR PHONE is the flippers. High score of the night wins the auction crowd's roar.</p>
+  <div class="what"><b>What you're really building:</b> R7's button-hack on the two flipper
+  buttons (+ plunger if motorized). Pinball flippers demand LOW LATENCY — this recipe is also
+  your latency showcase: presses land in ~100 ms, which plays shockingly well.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>Used/borrowed pinball machine</td><td>varies</td><td>a tired 90s machine or a $300 tabletop both work; venue may already own one</td></tr>
+    <tr><td>2-ch relay or optocouplers</td><td>$6</td><td>across the flipper BUTTONS (low-voltage switch side, NOT the coil side)</td></tr></table>
+  <ol>
+    <li>Open the cabinet's front panel; the flipper buttons are simple leaf switches — two
+    contacts each. (You are wiring the BUTTON, never the flipper coil — coils carry high current.)</li>
+    <li>Beep-test, label, wire one relay/opto across each button (R7 steps 4–5).</li>
+    <li>Test by hand-shorting: flippers flip. Then map <b>pad_left/right = hold-to-flip</b>
+    (relay held while the press repeats — holds and traps work!), A = launch if the machine
+    has a button plunger, else staff launches.</li>
+    <li>Free-play DIP switch like R7; machine keeps its own score.
+    <span class="check">✅ Checkpoint: you can trap and backhand from your phone. Grin.</span></li>
+    <li>Point a phone/webcam at the backglass score for the crowd (or read the score with the
+    camera later — telemetry's favorite party trick).</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $2 = one ball (slot ends on drain —
+  staff or a drain sensor skips it) · Friday: AUCTION one “championship game.”</div>
+</div>
+
+<!-- ═══ R23 ═══ -->
+<div class="recipe" id="r23">
+  <h3><span class="rn">R23</span>The Smoke Rings</h3>
+  <div class="badges"><span class="b med">MEDIUM · ONE WEEKEND</span><span class="b cost">~$65</span></div>
+  <p class="crowd">A cannon thumps out glowing fog vortex rings that drift across the room. Patio legend by 10 pm.</p>
+  <div class="what"><b>What you're really building:</b> a bucket with a hole: fog fills it, a
+  speaker/diaphragm “thump” on the back pushes a perfect vortex ring out the front. Physics
+  does the pretty part.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>400 W fog machine (with wired remote port)</td><td>$35</td><td>the wired remote is two contacts — §C's trick</td></tr>
+    <tr><td>Bucket/planter + shower cap or rubber membrane</td><td>$8</td><td>the cannon: ~8 cm hole in the lid, membrane on the back</td></tr>
+    <tr><td>Big cheap subwoofer driver or a solenoid “thumper”</td><td>$15</td><td>kicks the membrane</td></tr>
+    <tr><td>Relay module + LED ring at the muzzle</td><td>$8</td><td>fog trigger + glow</td></tr></table>
+  <ol>
+    <li>Build the cannon: hole saw an ~8 cm circle in the bucket lid (front); stretch the
+    membrane over the open back, bungee it. Rigid body + elastic back + round hole = ring machine.</li>
+    <li>Relay across the fog machine's wired-remote contacts (beep-test — it's a simple
+    switch). A 300 ms burst fills the bucket with a thin fog charge.</li>
+    <li>Mount the thumper against the membrane: a solenoid tap or a subwoofer driver pulsed by
+    a cheap amp — either “kicks” it. Hand-test: fill, thump.
+    <span class="check">✅ Checkpoint: a ring sails 3–5 m. Adjust hole size / thump strength for crispness.</span></li>
+    <li>Map: A = fog charge · B = FIRE · d-pad = pan the whole cannon on a lazy-susan servo
+    (optional) · C = muzzle LED color.</li>
+    <li>Sequence guard in code: fire only 1–4 s after a charge (rings need fresh fog).
+    Cooldown 5 s. Venue: point along the patio, not at faces (it's harmless, but manners).</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $1/ring or $2 = 3 rings · outdoor/festival gold ·
+  mind smoke detectors indoors — patio item first.</div>
+</div>
+
+<!-- ═══ R24 ═══ -->
+<div class="recipe" id="r24">
+  <h3><span class="rn">R24</span>The Plant Synth</h3>
+  <div class="badges"><span class="b med">MEDIUM · ONE WEEKEND</span><span class="b cost">~$30</span></div>
+  <p class="crowd">Touch the ferns and they PLAY — every leaf a synth key. The phone holder conducts: picks the instrument, scale, and effects while the crowd plays the plants.</p>
+  <div class="what"><b>What you're really building:</b> an MPR121 board (12 capacitive touch
+  inputs — the phone-screen principle) with wires clipped to real plants; touching a plant is
+  a “key press” the Pi turns into synth notes. The Volt twist: the PAYING user controls the
+  sound; the whole crowd gets to touch. Collaborative by design.</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>MPR121 capacitive touch board</td><td>$8</td><td>12 channels, I2C (same bus as PCA9685)</td></tr>
+    <tr><td>Alligator-clip wires</td><td>$6</td><td>board → plant stems</td></tr>
+    <tr><td>USB audio + speaker</td><td>$8</td><td>R0's rig</td></tr>
+    <tr><td>6–12 sturdy plants</td><td>have/venue's</td><td>ferns and pothos read touches well</td></tr></table>
+  <ol>
+    <li>MPR121 → Pi I2C (VCC 3.3 V, GND, SDA, SCL — same four wires as R3's board; both can
+    share the bus). <code>i2cdetect -y 1</code> shows <code>5a</code>.</li>
+    <li>Clip a wire from channel 0 to a plant's stem (into the soil works too). Read the
+    channel in a loop (<code>npm i mpr121</code> or the Python lib).
+    <span class="check">✅ Checkpoint: touching the plant flips the reading.</span></li>
+    <li>Sound: simplest is samples — 12 note files per instrument (marimba, pad, laser,
+    choir), played on touch via mpg123/aplay. (Synth nerd path: <code>fluidsynth</code> +
+    a soundfont = real polyphony.)</li>
+    <li>Wire 8–12 plants, tune each note to a pentatonic scale — pentatonic means strangers
+    can't play a wrong note. That's the trick that makes it magic.</li>
+    <li>The ITEM controls the sound, not the touching: A/B/C = instrument banks, pad_up/down
+    = octave, pad_left/right = scale/effect (echo on/off).</li>
+    <li>Sign: “TOUCH THE PLANTS. (Phone holder picks the sound — scan to take over.)”</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $2 · 120 s of conducting · crowd
+  interaction makes this the best group-photo item in the book.</div>
+</div>
+
+<!-- ═══ R25 ═══ -->
+<div class="recipe" id="r25">
+  <h3><span class="rn">R25</span>The Mechanical Mirror</h3>
+  <div class="badges"><span class="b adv">SHOWPIECE · MANY WEEKENDS</span><span class="b cost">~$130 mini</span></div>
+  <p class="crowd">A wall of wooden tiles that ripples in waves and paints patterns by tilting — Daniel Rozin's famous mechanical mirrors, miniaturized, crowd-steered.</p>
+  <div class="what"><b>What you're really building:</b> the honest version — Rozin's mirrors
+  use hundreds of servos; your MINI is a 4×8 grid (32 tiles, 32 servos, two chained PCA9685
+  boards). Each servo tilts a tile that catches the light differently. Patterns = arrays of
+  angles. It's R14's code with more channels and zero safety worries (nothing to pinch).</div>
+  <table><tr><th>Part</th><th>~$</th><th>Note</th></tr>
+    <tr><td>32× SG90 servos</td><td>$65</td><td>buy the 10-packs</td></tr>
+    <tr><td>2× PCA9685</td><td>$24</td><td>they CHAIN: solder a different address jumper on board 2</td></tr>
+    <tr><td>5 V 10 A supply</td><td>$18</td><td>32 servos sip a lot; move max 8 at once in code</td></tr>
+    <tr><td>Plywood, 32 tiles (wood/mirror/acrylic)</td><td>$25</td><td>laser-cut or hand-cut 60 mm squares</td></tr></table>
+  <ol>
+    <li>Prove the chain: two PCA9685s, address jumper on the second, <code>i2cdetect</code>
+    shows <code>40</code> and <code>41</code>. Your servo code now has 32 channels.</li>
+    <li>Build ONE column first (4 tiles): servo glued to frame, tile on horn, ±40° travel.
+    Light it from a side angle — tilt = brightness. <span class="check">✅ Checkpoint: one
+    column doing a smooth wave.</span></li>
+    <li>Replicate ×8 columns. Wire looms per column; label obsessively.</li>
+    <li>Software: a 4×8 array of target angles + one easing loop (move ≤8 servos per frame to
+    cap current). Patterns are just functions writing the array: wave, ripple-from-center,
+    rain, checkerboard, “breathe.”</li>
+    <li>Map: d-pad = push waves from that edge · A = ripple burst at random tile · B = pattern
+    cycle · C = mirror-flat reset.</li>
+    <li>Side-light it warm; the shadows are the display. Galleries and lobbies will ask whose it is.</li>
+  </ol>
+  <div class="settings"><b>Earning settings:</b> buy-now · $2 · 90 s · this is the portfolio
+  piece — the one that gets you invited into venues that would never take a claw machine.</div>
+</div>
+
+<h2><span class="n">H</span>Which recipe first?</h2>
+<table>
+  <tr><th>If you want…</th><th>Build</th></tr>
+  <tr><td>Something earning this weekend</td><td>R0 Soundboard or R1 Beacon → R2 Light Wall</td></tr>
+  <tr><td>The best venue pitch package</td><td>R2 Light Wall + R0 + R19 Fortune Teller (glow, noise, and a takeaway)</td></tr>
+  <tr><td>The most money per square foot</td><td>R7 Claw (R4 Candy Drop is the training build), R22 Pinball if one's already in the room</td></tr>
+  <tr><td>To learn real robotics, in order</td><td>R3 Searchlight → R14 Arm → R16 Rover → R20 Sand Table (each teaches the next)</td></tr>
+  <tr><td>The showpiece people film</td><td>R23 Smoke Rings outdoors · R25 Mechanical Mirror indoors · R17 Rigging in auction mode</td></tr>
+  <tr><td>The music angle</td><td>R12 Jukebox + R5 Drumbot + R24 Plant Synth (a whole audio corner)</td></tr>
+</table>
+
+<footer>Volt Recipe Book · 26 builds · companion to VOLT-PI-PLAYBOOK.md (setup detail, venue
+&amp; business playbook) · build missions: PROMPT-CONTROL-SPLIT.md → PROMPT-OUTPUTS-REDUNDANCY.md →
+PROMPT-JUKEBOX.md · prices are July 2026 ballparks · mains through smart plugs, motors through
+drivers, everything through the duty limits.</footer>
+
+</div>
+</body>
+</html>

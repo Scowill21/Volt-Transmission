@@ -241,6 +241,32 @@ const ok = (m) => { console.log('OK  ', passed + 1, m); passed++; };
 
   server.close();
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+
+  /* ══ Part C — the private operator vault (real index.js child boot) ══ */
+  const { spawn } = require('node:child_process');
+  const cget = (port, p, headers) => new Promise((resolve) => {
+    const rq = http.get({ host: '127.0.0.1', port, path: p, headers: headers || {} }, (x) => { let b = ''; x.on('data', c => b += c); x.on('end', () => resolve({ status: x.statusCode, body: b })); });
+    rq.on('error', () => resolve({ status: 0, body: '' }));
+  });
+  async function bootIndex(port, extraEnv){
+    const child = spawn('node', ['server/index.js'], { cwd: __dirname, env: { ...process.env, PORT: String(port), ADMIN_KEY: 'dev', ...extraEnv }, stdio: 'ignore' });
+    for (let i = 0; i < 40; i++){ if ((await cget(port, '/healthz')).status === 200) return child; await settle(); }
+    child.kill('SIGKILL'); throw new Error('index.js did not boot on ' + port);
+  }
+  // configured vault: wrong code 401, right code 200 + content, file NOT static-served
+  let vc = await bootIndex(8811, { VAULT_CODE: 'test-secret-123' });
+  assert.strictEqual((await cget(8811, '/api/vault', { 'x-vault-code': 'nope' })).status, 401, 'wrong vault code → 401');
+  const good = await cget(8811, '/api/vault', { 'x-vault-code': 'test-secret-123' });
+  assert.strictEqual(good.status, 200, 'correct vault code → 200'); assert.ok(good.body.length > 100, 'vault serves content');
+  assert.strictEqual((await cget(8811, '/.vault/recipe-book.html')).status, 404, 'the vault file is NOT served statically (no leak)');
+  vc.kill('SIGKILL');
+  ok('vault: correct code serves content · wrong code 401 · file blocked from static');
+  // unconfigured vault (no VAULT_CODE) → fails CLOSED (503), even with a code
+  vc = await bootIndex(8812, { VAULT_CODE: '' });
+  assert.strictEqual((await cget(8812, '/api/vault', { 'x-vault-code': 'anything' })).status, 503, 'no VAULT_CODE → vault off (503)');
+  vc.kill('SIGKILL');
+  ok('vault: fails CLOSED (503) when VAULT_CODE is unset');
+
   Object.assign(process.env, save.A ? { ADMIN_KEY: save.A } : {});
   console.log(`\nALL CLEAR — ${passed} security checks passed`);
   process.exit(0);
