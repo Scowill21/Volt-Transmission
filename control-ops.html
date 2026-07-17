@@ -277,6 +277,22 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
   opacity:0; pointer-events:none; transition:opacity .25s; max-width:88vw; text-align:center;
 }
 #toast.show{ opacity:1; }
+
+/* ── jukebox ops (live panel + catalog editor) ── */
+.jb-live{ border-top:1px solid var(--edge); margin-top:.5rem; padding-top:.5rem; }
+.jb-np{ font-size:.9rem; margin:.2rem 0 .4rem; }
+.jb-q{ margin:.2rem 0 .4rem; }
+.jb-q li{ display:flex; align-items:center; gap:.4rem; font-size:.82rem; padding:.2rem 0; }
+.jb-q .pos{ font-weight:700; color:var(--accent-ink); min-width:1.4em; }
+.jb-q .ox{ margin-left:auto; background:none; border:none; color:var(--warn); font-size:1rem; padding:.1rem .4rem; cursor:pointer; }
+.jb-fields{ border-top:1px dashed var(--edge); margin-top:.4rem; padding-top:.5rem; }
+.jb-fields > .jb-legend{ grid-column:span 2; font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--sub); font-weight:700; margin:.3rem 0 0; }
+.jb-cat-edit{ grid-column:span 2; list-style:none; margin:.3rem 0 0; padding:0; }
+.jb-cat-edit li{ display:grid; grid-template-columns:1.4fr 1.2fr 1.4fr .6fr auto; gap:.3rem; margin-bottom:.3rem; align-items:center; }
+.jb-cat-edit input{ font-size:.78rem; padding:.35rem .4rem; }
+.jb-cat-edit .ox{ background:none; border:none; color:var(--warn); font-size:1rem; cursor:pointer; padding:.1rem .3rem; }
+.jb-checkrow{ grid-column:span 2; display:flex; gap:1rem; align-items:center; font-size:.8rem; color:var(--sub); }
+.jb-checkrow label{ flex-direction:row; align-items:center; gap:.35rem; }
 </style>
 </head>
 <body>
@@ -308,6 +324,8 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
           <label class="span2">name<input id="nItemName" placeholder="e.g. Lobby Lamp" /></label>
           <label class="span2">controls guide — what the d-pad and A/B/C do (shown to players)
             <textarea id="nItemInstr" rows="3" placeholder="▲▼ tilt the lamp · ◀▶ swing it · A strobe · B color · C chaos"></textarea></label>
+          <label>surface<select id="nItemSurface"><option value="pad">pad · d-pad/A-B-C</option><option value="jukebox">jukebox · music</option></select></label>
+          <label id="nJukeMonWrap" hidden>money<select id="nJukeMon"><option value="controller_slot">control slot</option><option value="per_action">per action</option></select></label>
           <label>mode<select id="nItemMode"><option value="buynow">buy now</option><option value="auction">auction</option></select></label>
           <label>price / start ($)<input id="nItemPrice" type="number" step="0.50" value="5.00" inputmode="decimal" /></label>
           <label>slot (seconds)<input id="nItemSlot" type="number" value="120" inputmode="numeric" /></label>
@@ -668,19 +686,28 @@ async function refreshAdmin(){
 setInterval(refreshAdmin, 4000);
 
 $('nItemMode').addEventListener('change', () => { $('nAuctionWrap').hidden = $('nItemMode').value !== 'auction'; });
+// jukebox surface: reveal the monetization picker. controller_slot still sells
+// a slot (mode/price/slot below configure it); per_action prices each action.
+$('nItemSurface').addEventListener('change', () => { $('nJukeMonWrap').hidden = $('nItemSurface').value !== 'jukebox'; });
 
 async function createItem(){
   const msg = $('createMsg');
   msg.className = 'status-line'; msg.textContent = '…';
   try {
-    const item = await adminApi('POST', '/api/items', {
+    const surface = $('nItemSurface').value;
+    const body = {
       name: $('nItemName').value,
       instructions: $('nItemInstr').value,
       mode: $('nItemMode').value,
       priceCents: Math.round(parseFloat($('nItemPrice').value || '0') * 100),
       slotSeconds: parseInt($('nItemSlot').value, 10) || 120,
       auctionSeconds: parseInt($('nItemAuction').value, 10) || 60,
-    });
+    };
+    if (surface === 'jukebox'){          // rest defaults server-side; catalog + knobs are set in the item's edit form
+      body.surface = 'jukebox';
+      body.jukebox = { monetization: $('nJukeMon').value };
+    }
+    const item = await adminApi('POST', '/api/items', body);
     $('nItemName').value = ''; $('nItemInstr').value = '';
     msg.className = 'status-line ok';
     msg.textContent = `created — code ${item.item}`;
@@ -693,24 +720,30 @@ async function createItem(){
 $('createBtn').addEventListener('click', createItem);
 
 function adminCard(p){
+  const isJb = p.surface === 'jukebox';
   const a = p.active;
   const live = p.status !== 'on' ? '○ off'
     : a ? `◉ ${esc(a.name)}${a.paused ? ' · ⏸ paused' : ''} · ${fmtClock(remainingMs(a))} left`
     : p.auction ? `🔨 ${fmt$(p.auction.topCents)} (${esc(p.auction.topName)}) · ${fmtClock(Math.max(0, p.auction.endsAt - Date.now()))}`
     : '· idle';
   const depth = p.mode === 'buynow' ? `${p.queue.length} in line` : (p.auction ? `${p.auction.bidCount} bids` : 'no round');
+  const cfg = p.jukeboxConfig;                // raw config (admin-only), present for jukebox items
+  const meta = isJb && cfg
+    ? `jukebox · ${cfg.monetization === 'per_action' ? 'per action' : 'control slot'} · ${cfg.backend} · ${(cfg.catalog || []).length} songs`
+    : `${p.mode === 'buynow' ? 'buy now' : 'auction'} · ${fmt$(p.priceCents)} · ${p.slotSeconds}s slot · ${depth}`;
   return `
-  <div class="card icard" data-code="${p.item}">
+  <div class="card icard" data-code="${p.item}" data-surface="${p.surface || 'pad'}">
     <div style="display:flex; align-items:center; gap:.6rem">
       <b style="flex:1">${esc(p.name)}</b>
       <button class="code" data-act="copy" title="copy code">${p.item}</button>
     </div>
-    <div class="meta">${p.mode === 'buynow' ? 'buy now' : 'auction'} · ${fmt$(p.priceCents)} · ${p.slotSeconds}s slot · ${depth}</div>
+    <div class="meta">${meta}</div>
     <div class="live-line">${live}${outputSummary(p)}</div>
     ${chainBlock(p)}
+    ${isJb ? jukeboxLive(p) : ''}
     <div class="acts">
       <button data-act="qr">QR</button>
-      <button data-act="skip">Skip</button>
+      ${isJb ? '' : '<button data-act="skip">Skip</button>'}
       <button data-act="pauseresume">${a && a.paused ? 'Resume' : 'Pause'}</button>
       <button data-act="onoff">${p.status === 'on' ? 'Off' : 'On'}</button>
       <button data-act="edit">Edit</button>
@@ -718,18 +751,88 @@ function adminCard(p){
     </div>
     <form class="edit-form" data-edit hidden>
       <label class="span2">name<input name="name" value="${esc(p.name)}" /></label>
-      <label class="span2">controls guide<textarea name="instructions" rows="3">${esc(p.instructions || '')}</textarea></label>
+      <label class="span2">controls guide<textarea name="instructions" rows="2">${esc(p.instructions || '')}</textarea></label>
       <label>mode<select name="mode">
         <option value="buynow"${p.mode === 'buynow' ? ' selected' : ''}>buy now</option>
         <option value="auction"${p.mode === 'auction' ? ' selected' : ''}>auction</option></select></label>
-      <label>price ($)<input name="price" type="number" step="0.50" value="${(p.priceCents / 100).toFixed(2)}" /></label>
+      <label>${isJb ? 'slot price ($)' : 'price ($)'}<input name="price" type="number" step="0.50" value="${(p.priceCents / 100).toFixed(2)}" /></label>
       <label>slot (s)<input name="slot" type="number" value="${p.slotSeconds}" /></label>
       <label>auction clock (s)<input name="auction" type="number" value="${p.auctionSeconds}" /></label>
       <label class="span2">min bid step ($)<input name="step" type="number" step="0.25" value="${(p.minIncrementCents / 100).toFixed(2)}" /></label>
+      ${isJb && cfg ? jukeboxFields(cfg) : ''}
       <button class="btn slim span2" type="submit">Save</button>
     </form>
     <div class="status-line" data-cardmsg></div>
   </div>`;
+}
+
+// Live music panel for a jukebox card: now-playing + the running queue (each
+// row vetoable) + force-skip / clear-queue / house toggle. Drives /jukebox/admin.
+function jukeboxLive(p){
+  const jb = p.jukebox || {};              // patron shape: nowPlaying, queue, houseMode
+  const cfg = p.jukeboxConfig || {};
+  const np = jb.nowPlaying;
+  const rows = (jb.queue || []).map(q => `<li>
+    <span class="pos">${q.position}</span>${esc(q.title)}
+    <span class="okind">${q.playNext ? '⏭ next' : esc(q.byName || '')}</span>
+    <button class="ox" data-jb="remove" data-song="${esc(q.songId)}" data-by="${esc(q.byId || '')}" title="veto">✕</button></li>`).join('');
+  return `
+  <div class="jb-live">
+    <div class="jb-np">${np ? `▶ <b>${esc(np.title)}</b>${np.artist ? ' · ' + esc(np.artist) : ''}` : (cfg.houseMode ? '♪ house mix' : '· idle')}</div>
+    <ul class="chain jb-q">${rows || '<li class="okind" style="border:none; padding:.2rem 0">queue empty</li>'}</ul>
+    <div class="acts">
+      <button data-jb="force_skip">⏭ Skip track</button>
+      <button data-jb="clear_queue">Clear queue</button>
+      <button data-jb="house">${cfg.houseMode ? 'House: on' : 'House: off'}</button>
+    </div>
+  </div>`;
+}
+
+// The jukebox knob block inside the edit form (bound by name; gathered on Save).
+function jukeboxFields(c){
+  const s = c.skip || {}, pu = s.perUser || {}, g = s.global || {}, qr = c.queueRules || {};
+  const opt = (v, cur, label) => `<option value="${v}"${v === cur ? ' selected' : ''}>${label}</option>`;
+  return `
+    <div class="jb-fields edit-form" style="grid-column:span 2; margin-top:.2rem">
+      <div class="jb-legend">Jukebox</div>
+      <label>money<select name="jb_monetization">
+        ${opt('controller_slot', c.monetization, 'control slot')}${opt('per_action', c.monetization, 'per action')}</select></label>
+      <label>play mode<select name="jb_mode">
+        ${opt('buynow', c.mode, 'queue (flat)')}${opt('bid', c.mode, 'bid to play next')}</select></label>
+      <label>backend<select name="jb_backend">
+        ${opt('mpd', c.backend, 'mpd (local files)')}${opt('log', c.backend, 'log (no audio)')}</select></label>
+      <div class="jb-checkrow"><label><input type="checkbox" name="jb_house"${c.houseMode ? ' checked' : ''}/> house mode fills silence</label></div>
+      <label>queue price ($)<input name="jb_queuePrice" type="number" step="0.25" value="${((c.queuePriceCents || 0) / 100).toFixed(2)}" /></label>
+      <label>play-next price ($)<input name="jb_playNextPrice" type="number" step="0.25" value="${c.playNextPriceCents != null ? (c.playNextPriceCents / 100).toFixed(2) : ''}" placeholder="off" /></label>
+      <label>skip price ($)<input name="jb_skipPrice" type="number" step="0.25" value="${((s.priceCents || 0) / 100).toFixed(2)}" /></label>
+      <div class="jb-checkrow"><label><input type="checkbox" name="jb_allowMidSong"${s.allowMidSong ? ' checked' : ''}/> allow mid-song skips</label></div>
+      <label>skip only before (s)<input name="jb_onlyBeforeSec" type="number" value="${s.onlyBeforeSec ?? 15}" /></label>
+      <label>min play floor (s)<input name="jb_minPlaySec" type="number" value="${s.minPlaySec ?? 10}" /></label>
+      <label>skips / user<input name="jb_puMax" type="number" value="${pu.max ?? 2}" /></label>
+      <label>· per (min)<input name="jb_puWin" type="number" value="${pu.windowMin ?? 30}" /></label>
+      <label>skips / room<input name="jb_gMax" type="number" value="${g.max ?? 6}" /></label>
+      <label>· per (min)<input name="jb_gWin" type="number" value="${g.windowMin ?? 60}" /></label>
+      <label>queue max<input name="jb_qMaxLen" type="number" value="${qr.maxLen ?? 25}" /></label>
+      <label>queue / user<input name="jb_qMaxUser" type="number" value="${qr.maxPerUser ?? 3}" /></label>
+      <label class="span2">no-repeat window (min)<input name="jb_noRepeat" type="number" value="${qr.noRepeatMin ?? 60}" /></label>
+      <div class="jb-legend">Catalog</div>
+      <ul class="jb-cat-edit" data-catalog>
+        ${(c.catalog || []).map(catalogEditRow).join('')}
+      </ul>
+      <button type="button" class="btn ghost slim span2" data-cat="add">+ add song</button>
+    </div>`;
+}
+function catalogEditRow(s){
+  s = s || {};
+  // carry the existing id (hidden) so a re-save keeps it stable — otherwise the
+  // server re-slugs from title and mid-session recent/queue refs would break.
+  return `<li>
+    <input data-cf="id" type="hidden" value="${esc(s.id || '')}" />
+    <input data-cf="title" placeholder="title" value="${esc(s.title || '')}" />
+    <input data-cf="artist" placeholder="artist" value="${esc(s.artist || '')}" />
+    <input data-cf="file" placeholder="file / uri" value="${esc(s.file || '')}" />
+    <input data-cf="dur" type="number" placeholder="sec" value="${s.durationSec || ''}" />
+    <button type="button" class="ox" data-cat="del" title="remove">✕</button></li>`;
 }
 // One-glance output summary on the live line: none / N online / OFFLINE.
 function outputSummary(p){
@@ -863,7 +966,7 @@ $('adminList').addEventListener('submit', async (e) => {
   const msg = card.querySelector('[data-cardmsg]');
   const f = new FormData(form);
   try {
-    await adminApi('PATCH', '/api/items/' + card.dataset.code, {
+    const body = {
       name: f.get('name'),
       instructions: f.get('instructions'),
       mode: f.get('mode'),
@@ -871,10 +974,88 @@ $('adminList').addEventListener('submit', async (e) => {
       slotSeconds: parseInt(f.get('slot'), 10),
       auctionSeconds: parseInt(f.get('auction'), 10),
       minIncrementCents: Math.round(parseFloat(f.get('step') || '0.5') * 100),
-    });
+    };
+    if (card.dataset.surface === 'jukebox'){ body.surface = 'jukebox'; body.jukebox = gatherJukebox(form); }
+    await adminApi('PATCH', '/api/items/' + card.dataset.code, body);
     msg.className = 'status-line ok'; msg.textContent = 'saved';
+    form.hidden = true;                 // close the form so the guarded refresh can land
     await refreshAdmin();
   } catch (err){ msg.className = 'status-line err'; msg.textContent = String(err.message); }
+});
+
+// Read the jukebox knob block + catalog rows back into a config object. Blank
+// catalog rows (no title) are dropped; the server re-validates/normalizes.
+function gatherJukebox(form){
+  const g = (n) => form.querySelector(`[name="${n}"]`);
+  const int = (n, d) => { const v = parseInt(g(n).value, 10); return Number.isFinite(v) ? v : d; };
+  const cents = (n) => Math.round((parseFloat(g(n).value) || 0) * 100);
+  const pnRaw = (g('jb_playNextPrice').value || '').trim();
+  const catalog = [...form.querySelectorAll('[data-catalog] li')].map(li => {
+    const cf = (k) => (li.querySelector(`[data-cf="${k}"]`).value || '').trim();
+    return { id: cf('id') || undefined, title: cf('title'), artist: cf('artist'),
+             file: cf('file'), durationSec: parseInt(cf('dur'), 10) || 0 };
+  }).filter(s => s.title);
+  return {
+    monetization: g('jb_monetization').value,
+    mode: g('jb_mode').value,
+    backend: g('jb_backend').value,
+    houseMode: g('jb_house').checked,
+    queuePriceCents: cents('jb_queuePrice'),
+    playNextPriceCents: pnRaw === '' ? null : Math.round((parseFloat(pnRaw) || 0) * 100),
+    skip: {
+      priceCents: cents('jb_skipPrice'),
+      allowMidSong: g('jb_allowMidSong').checked,
+      onlyBeforeSec: int('jb_onlyBeforeSec', 15),
+      minPlaySec: int('jb_minPlaySec', 10),
+      perUser: { max: int('jb_puMax', 2), windowMin: int('jb_puWin', 30) },
+      global: { max: int('jb_gMax', 6), windowMin: int('jb_gWin', 60) },
+    },
+    queueRules: { maxLen: int('jb_qMaxLen', 25), maxPerUser: int('jb_qMaxUser', 3), noRepeatMin: int('jb_noRepeat', 60) },
+    catalog,
+  };
+}
+
+// Jukebox live-panel actions (force_skip / clear_queue / house / remove) and the
+// catalog editor's add/remove rows — a separate namespace from data-act/data-out.
+function mergeJukebox(updated){
+  const i = S.adminItems.findIndex(x => x.item === updated.item);
+  if (i >= 0){
+    const prev = S.adminItems[i].jukeboxConfig;           // keep the admin-only config; sync the toggle that just changed
+    if (prev) updated.jukeboxConfig = { ...prev, ...(updated.jukebox ? { houseMode: updated.jukebox.houseMode } : {}) };
+    S.adminItems[i] = updated;
+  } else S.adminItems.push(updated);
+  renderAdmin();
+}
+$('adminList').addEventListener('click', async (e) => {
+  const catBtn = e.target.closest('button[data-cat]');
+  if (catBtn){                                           // pure DOM edits inside the open form (no server call)
+    e.preventDefault();
+    if (catBtn.dataset.cat === 'add')
+      e.target.closest('[data-edit]').querySelector('[data-catalog]').insertAdjacentHTML('beforeend', catalogEditRow({}));
+    else if (catBtn.dataset.cat === 'del') catBtn.closest('li').remove();
+    return;
+  }
+  const btn = e.target.closest('button[data-jb]'); if (!btn) return;
+  const card = e.target.closest('[data-code]');
+  const code = card.dataset.code;
+  const msg = card.querySelector('[data-cardmsg]');
+  const say = (t, cls) => { msg.className = 'status-line ' + (cls || ''); msg.textContent = t; };
+  const act = btn.dataset.jb;
+  try {
+    if (act === 'remove'){
+      const updated = await adminApi('POST', `/api/items/${code}/jukebox/admin`, { action: 'remove', songId: btn.dataset.song, byId: btn.dataset.by });
+      mergeJukebox(updated); say('removed from queue', 'ok');
+    } else if (act === 'house'){
+      const cur = S.adminItems.find(i => i.item === code);
+      const on = !(cur && cur.jukeboxConfig && cur.jukeboxConfig.houseMode);   // toggle from the current config
+      const updated = await adminApi('POST', `/api/items/${code}/jukebox/admin`, { action: 'house', on });
+      mergeJukebox(updated); say('house ' + (on ? 'on' : 'off'), 'ok');
+    } else {
+      if (act === 'clear_queue' && !confirm('Clear the whole queue?')) return;
+      const updated = await adminApi('POST', `/api/items/${code}/jukebox/admin`, { action: act });
+      mergeJukebox(updated); say(act === 'force_skip' ? 'track skipped' : 'queue cleared', 'ok');
+    }
+  } catch (err){ say(String(err.message), 'err'); }
 });
 
 /* QR modal (+ print) */
@@ -899,6 +1080,8 @@ window.__unlockAdmin = unlockAdmin;
 window.__refreshAdmin = refreshAdmin;
 window.__createItem = createItem;
 window.__qrEncode = QR.encode;
+window.__adminCard = adminCard;
+window.__renderAdmin = renderAdmin;
 </script>
 </body>
 </html>

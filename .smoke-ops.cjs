@@ -37,7 +37,22 @@ const DB = {
   '2AWK6P': { type: 'item_queues', item: '2AWK6P', name: 'Laser Head', description: null,
     mode: 'auction', priceCents: 200, slotSeconds: 60, auctionSeconds: 45, minIncrementCents: 50,
     status: 'on', outputs: [], active: null, queue: [], auction: null, ts: 0 },
+  JUKE01: { type: 'item_queues', item: 'JUKE01', name: 'Bar Jukebox', description: 'music', instructions: '',
+    surface: 'jukebox', mode: 'buynow', priceCents: 500, slotSeconds: 120, auctionSeconds: 60, minIncrementCents: 50,
+    status: 'on', outputs: [{ kind: 'rig', name: 'pi-jukebox', priority: 1 }], active: null, queue: [], auction: null, ts: 0,
+    jukebox: { monetization: 'per_action', mode: 'buynow', backend: 'log', houseMode: true,
+      nowPlaying: null, queueLen: 1,
+      queue: [{ position: 1, songId: 'aaa', title: 'Song A', byName: 'Pat', byId: 'u1', playNext: false }],
+      catalog: [{ id: 'aaa', title: 'Song A', artist: 'A', durationSec: 180 }, { id: 'bbb', title: 'Song B', artist: 'B', durationSec: 200 }],
+      prices: { queueCents: 200, playNextCents: 400, skipCents: 100 }, skipState: { roomLeft: 6 }, bidRound: null },
+    // admin-only raw config (the real GET /api/items attaches this for jukebox items)
+    jukeboxConfig: { monetization: 'per_action', mode: 'buynow', backend: 'log', houseMode: true,
+      queuePriceCents: 200, playNextPriceCents: 400,
+      skip: { priceCents: 100, allowMidSong: false, onlyBeforeSec: 15, minPlaySec: 10, perUser: { max: 2, windowMin: 30 }, global: { max: 6, windowMin: 60 } },
+      queueRules: { maxLen: 25, maxPerUser: 3, noRepeatMin: 60 },
+      catalog: [{ id: 'aaa', title: 'Song A', artist: 'A', file: 'a.mp3', durationSec: 180 }, { id: 'bbb', title: 'Song B', artist: 'B', file: 'b.mp3', durationSec: 200 }] } },
 };
+let lastCreate = null;   // last POST /api/items body (assert surface/jukebox flow)
 const payload = (code) => JSON.parse(JSON.stringify({ ...DB[code], ts: now() }));
 const respond = (status, body) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) });
 const calls = [];   // record method+path so we can assert the right endpoint fired
@@ -64,6 +79,17 @@ w.fetch = (url, opts = {}) => {
     const item = payload(m[1]);
     return respond(201, body.kind === 'rig' ? { rigKey: 'K'.repeat(32), item } : { item });
   }
+  m = u.match(/\/api\/items\/([A-Z0-9]{6})\/jukebox\/admin$/);
+  if (m){
+    if (!admin) return respond(401, { error: 'bad admin key' });
+    const jb = DB[m[1]].jukebox, cfg = DB[m[1]].jukeboxConfig;
+    if (body.action === 'force_skip') jb.nowPlaying = null;
+    else if (body.action === 'clear_queue'){ jb.queue = []; jb.queueLen = 0; }
+    else if (body.action === 'house'){ cfg.houseMode = !!body.on; jb.houseMode = !!body.on; }
+    else if (body.action === 'remove'){ jb.queue = jb.queue.filter(q => !(q.songId === body.songId && q.byId === body.byId)); jb.queueLen = jb.queue.length; }
+    const resp = payload(m[1]); delete resp.jukeboxConfig;   // prod returns publicItem (no config) — merge must preserve it
+    return respond(200, resp);
+  }
   m = u.match(/\/api\/items\/([A-Z0-9]{6})\/(skip|state)$/);
   if (m){
     if (!admin) return respond(401, { error: 'bad admin key' });
@@ -73,13 +99,22 @@ w.fetch = (url, opts = {}) => {
   m = u.match(/\/api\/items\/([A-Z0-9]{6})$/);
   if (m){
     if (!admin) return respond(401, { error: 'bad admin key' });
-    if (method === 'PATCH'){ if (body.name) DB[m[1]].name = body.name; return respond(200, payload(m[1])); }
+    if (method === 'PATCH'){
+      if (body.name) DB[m[1]].name = body.name;
+      if (body.surface === 'jukebox' && body.jukebox) DB[m[1]].jukeboxConfig = JSON.parse(JSON.stringify(body.jukebox));
+      return respond(200, payload(m[1]));
+    }
     if (method === 'DELETE'){ delete DB[m[1]]; return respond(204, null); }
   }
   if (/\/api\/items$/.test(u)){
     if (!admin) return respond(401, { error: 'bad admin key' });
     if (method === 'GET') return respond(200, Object.keys(DB).map(payload));
-    if (method === 'POST'){ DB.NEW111 = { ...JSON.parse(JSON.stringify(DB.PSDV7H)), item: 'NEW111', name: body.name, outputs: [] }; return respond(201, payload('NEW111')); }
+    if (method === 'POST'){
+      lastCreate = body;
+      DB.NEW111 = { ...JSON.parse(JSON.stringify(DB.PSDV7H)), item: 'NEW111', name: body.name, outputs: [],
+        surface: body.surface || 'pad', ...(body.surface === 'jukebox' ? { jukebox: JSON.parse(JSON.stringify(DB.JUKE01.jukebox)), jukeboxConfig: JSON.parse(JSON.stringify(DB.JUKE01.jukeboxConfig)) } : {}) };
+      return respond(201, payload('NEW111'));
+    }
   }
   return respond(404, { error: 'unhandled ' + method + ' ' + u });
 };
@@ -112,7 +147,7 @@ const $ = (id) => w.document.getElementById(id);
   assert.strictEqual(await w.__unlockAdmin('dev'), true);
   assert.ok($('adminGate').hidden && !$('adminDash').hidden, 'gate swapped for dash');
   let cards = w.document.querySelectorAll('#adminList .icard');
-  assert.strictEqual(cards.length, 2, 'both items listed');
+  assert.strictEqual(cards.length, 3, 'all three items listed (pad, auction, jukebox)');
   ok('unlock: dev key → dashboard renders the item list');
 
   // create → new code + QR modal opens
@@ -178,6 +213,60 @@ const $ = (id) => w.document.getElementById(id);
     assert.ok(m.every(row => row.length === s && row.every(v => v === 0 || v === 1)), 'square 0/1 matrix');
   }
   ok('QR matrices: correct versions + finder patterns (decode: qr tooling)');
+
+  /* ── jukebox card: surface-aware meta, live panel, editor, live actions ── */
+  const jbCard = () => w.document.querySelector('#adminList .icard[data-code="JUKE01"]');
+  assert.strictEqual(jbCard().dataset.surface, 'jukebox', 'card tagged as a jukebox surface');
+  assert.match(jbCard().querySelector('.meta').textContent, /jukebox · per action · log · 2 songs/, 'jukebox meta line');
+  assert.ok(jbCard().querySelector('[data-jb="force_skip"]'), 'live panel: Skip track');
+  assert.ok(jbCard().querySelector('[data-jb="clear_queue"]'), 'live panel: Clear queue');
+  assert.ok(jbCard().querySelector('[data-jb="house"]'), 'live panel: House toggle');
+  assert.ok(!jbCard().querySelector('[data-act="skip"]'), 'no slot-Skip button on a jukebox card');
+  assert.match(jbCard().querySelector('.jb-q').textContent, /Song A/, 'live queue shows the running song');
+  ok('jukebox card: surface meta + live panel (skip/clear/house), no slot-skip');
+
+  // live action: Clear queue → POST /jukebox/admin, queue empties, config preserved
+  calls.length = 0;
+  jbCard().querySelector('[data-jb="clear_queue"]').click(); await tick();
+  assert.ok(calls.some(c => c === 'POST /api/items/JUKE01/jukebox/admin'), 'clear → /jukebox/admin');
+  assert.match(jbCard().querySelector('.jb-q').textContent, /queue empty/i, 'queue cleared in the live panel');
+  assert.ok(jbCard().querySelector('[data-jb="house"]').textContent.match(/House: on/), 'jukeboxConfig preserved across the merge (house label intact)');
+  ok('jukebox live action: Clear queue hits /jukebox/admin, config survives the merge');
+
+  // House toggle flips the config-backed label
+  jbCard().querySelector('[data-jb="house"]').click(); await tick();
+  assert.match(jbCard().querySelector('[data-jb="house"]').textContent, /House: off/, 'house toggled off');
+  ok('jukebox live action: House toggle flips on the config');
+
+  // edit form: jukebox knobs + catalog editor render; add a song + save → PATCH
+  jbCard().querySelector('[data-act="edit"]').click();
+  const jform = jbCard().querySelector('form[data-edit]');
+  assert.ok(!jform.hidden, 'jukebox edit form opened');
+  assert.ok(jform.querySelector('[name="jb_monetization"]') && jform.querySelector('[name="jb_skipPrice"]'), 'jukebox knobs render');
+  assert.strictEqual(jform.querySelectorAll('[data-catalog] li').length, 2, 'catalog editor lists the 2 songs');
+  jbCard().querySelector('[data-cat="add"]').click();
+  const newLi = jform.querySelectorAll('[data-catalog] li');
+  newLi[newLi.length - 1].querySelector('[data-cf="title"]').value = 'Song C';
+  newLi[newLi.length - 1].querySelector('[data-cf="file"]').value = 'c.mp3';
+  jform.querySelector('[name="jb_queuePrice"]').value = '3.00';
+  calls.length = 0;
+  jform.dispatchEvent(new w.Event('submit', { cancelable: true, bubbles: true })); await tick();
+  assert.ok(calls.some(c => c === 'PATCH /api/items/JUKE01'), 'jukebox edit → PATCH');
+  assert.strictEqual(DB.JUKE01.jukeboxConfig.catalog.length, 3, 'the added song persisted through the PATCH');
+  assert.strictEqual(DB.JUKE01.jukeboxConfig.queuePriceCents, 300, 'the changed queue price persisted');
+  ok('jukebox editor: knobs + catalog editor save via PATCH (add song, price change)');
+
+  // create a jukebox item: surface + monetization ride the create body
+  $('nItemName').value = 'Cafe Jukebox';
+  $('nItemSurface').value = 'jukebox';
+  $('nItemSurface').dispatchEvent(new w.Event('change'));
+  assert.ok(!$('nJukeMonWrap').hidden, 'monetization picker revealed for a jukebox');
+  $('nJukeMon').value = 'per_action';
+  await w.__createItem(); await tick();
+  assert.strictEqual(lastCreate.surface, 'jukebox', 'create body carries surface:jukebox');
+  assert.strictEqual(lastCreate.jukebox.monetization, 'per_action', 'create body carries the monetization');
+  $('qrClose').click();
+  ok('create jukebox: surface + monetization ride the create request');
 
   console.log(`\nALL CLEAR — ${passed} ops-page checks passed`);
   w.close();

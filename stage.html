@@ -75,6 +75,26 @@ canvas#stage{ position:fixed; inset:0; width:100vw; height:100vh; display:block;
   opacity:0;
 }
 .toast.on{ opacity:1; }
+
+/* Marquee — the jukebox stage variant (?view=marquee): a venue now-playing
+   board. Big now-playing + up-next scroll + scan-to-queue, no scene canvas. */
+.marquee{
+  position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:1vh; text-align:center; padding:6vh 6vw;
+  background:radial-gradient(ellipse at 50% 38%, #17120a 0%, #050407 76%);
+}
+.marquee .mq-eyebrow{ color:var(--accent); font-weight:700; letter-spacing:.32em; font-size:2.2vh; }
+.marquee .mq-title{ font-size:9vh; font-weight:700; line-height:1.04; margin:.3vh 0; max-width:92vw; }
+.marquee.idle .mq-title{ color:var(--dim); font-weight:500; }
+.marquee .mq-artist{ font-size:4vh; color:var(--dim); margin-top:.3vh; }
+.marquee .mq-bar{ width:min(60vw,900px); height:1.1vh; background:rgba(255,255,255,.12); border-radius:999px; overflow:hidden; margin:2.6vh 0 1vh; }
+.marquee .mq-bar i{ display:block; height:100%; width:0; background:var(--accent); border-radius:999px; transition:width .3s linear; }
+.marquee .mq-next{ color:var(--ink); font-size:3.1vh; opacity:.9; max-width:82vw; }
+.marquee .mq-next b{ color:var(--accent); font-weight:700; letter-spacing:.16em; font-size:2.3vh; margin-right:.6em; }
+.marquee .mq-foot{ position:fixed; bottom:4vh; display:flex; align-items:center; gap:1.6vw; }
+.marquee .mq-foot canvas{ width:12vh; height:auto; image-rendering:pixelated; border-radius:8px; background:#fff; padding:.6vh; }
+.marquee .mq-cta{ color:var(--dim); letter-spacing:.14em; font-size:2.3vh; }
+.marquee .mq-cta b{ color:var(--accent); font-family:ui-monospace,Menlo,monospace; letter-spacing:.22em; }
 </style>
 </head>
 <body>
@@ -92,6 +112,18 @@ canvas#stage{ position:fixed; inset:0; width:100vw; height:100vh; display:block;
     <h1 id="attractName">—</h1>
     <div class="codeTxt" id="attractCode">——————</div>
     <div class="host">or type the code at <b id="attractHost">…</b>/control</div>
+  </div>
+</div>
+
+<div class="marquee" id="marquee" hidden>
+  <div class="mq-eyebrow" id="mqEyebrow">NOW PLAYING</div>
+  <div class="mq-title" id="mqTitle">—</div>
+  <div class="mq-artist" id="mqArtist" hidden></div>
+  <div class="mq-bar"><i id="mqFill"></i></div>
+  <div class="mq-next" id="mqNext"></div>
+  <div class="mq-foot">
+    <canvas id="mqQR" width="0" height="0"></canvas>
+    <div class="mq-cta">SCAN TO QUEUE · <b id="mqCode">——————</b></div>
   </div>
 </div>
 
@@ -472,8 +504,10 @@ const S = {
   program: null, online: [],
   ws: null, wsDelay: 1000,
   scene: null,
+  marquee: false, jbRecvAt: 0,           // jukebox stage variant + now-playing clock anchor
 };
 const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
 function toast(text){
   const el = $('toast');
@@ -499,6 +533,7 @@ function applyItem(m){
   if (m.ts && m.ts < S.lastTs) return;   // stale — a slow reply must not roll back a fresh push
   S.lastTs = m.ts || S.lastTs;
   S.item = m;
+  if (m.jukebox) S.jbRecvAt = Date.now();   // clock anchor for the marquee progress bar
   if (m.program !== undefined){ S.program = m.program; S.online = m.outputsOnline || []; }
   render();
 }
@@ -567,6 +602,9 @@ function render(){
     return;
   }
   $('muted').hidden = true;
+  // A jukebox item has no scene — the marquee owns the whole screen.
+  if (it.surface === 'jukebox' && it.jukebox){ renderMarquee(it); return; }
+  $('marquee').hidden = true;
   if (active){
     $('attract').hidden = true;
     pill.textContent = active.outputPaused ? '⏸ output gap — clock paused'
@@ -588,6 +626,36 @@ function render(){
   }
 }
 
+/* The jukebox marquee: a venue now-playing board. Progress ticks in loop(). */
+function renderMarquee(it){
+  $('attract').hidden = true;
+  const mq = $('marquee'); mq.hidden = false;
+  const jb = it.jukebox, np = jb.nowPlaying;
+  mq.classList.toggle('idle', !np);
+  $('mqEyebrow').textContent = np ? 'NOW PLAYING' : (jb.houseMode ? 'HOUSE MIX' : 'JUKEBOX');
+  $('mqTitle').textContent = np ? np.title : (jb.houseMode ? 'House mix' : (it.status === 'off' ? 'Closed' : 'Nothing playing'));
+  $('mqArtist').textContent = np && np.artist ? np.artist : '';
+  $('mqArtist').hidden = !(np && np.artist);
+  if (!np) $('mqFill').style.width = '0%';    // no track → empty bar now (loop only fills while playing)
+  const q = jb.queue || [];
+  $('mqNext').innerHTML = q.length
+    ? `<b>UP NEXT</b>${q.slice(0, 4).map(s => esc(s.title)).join(' &nbsp;·&nbsp; ')}${q.length > 4 ? ' …' : ''}`
+    : '';
+  $('mqCode').textContent = S.code;
+  if (!renderMarquee._qr){ try { drawQR($('mqQR'), `${location.origin}/control?item=${S.code}`); renderMarquee._qr = true; } catch { /* headless */ } }
+  const pill = $('hudPill');
+  pill.textContent = it.status === 'off' ? 'jukebox off' : np ? '● PLAYING' : 'open — scan to queue';
+  pill.className = 'pill' + (np ? ' live' : '');
+}
+// Tick the marquee progress bar from the now-playing anchor (skew-free).
+function tickMarquee(){
+  const jb = S.item && S.item.jukebox; if (!jb) return;
+  const np = jb.nowPlaying, fill = $('mqFill');
+  if (!np || !np.durationSec){ fill.style.width = '0%'; return; }
+  const el = (np.elapsedSec || 0) + (Date.now() - (S.jbRecvAt || Date.now())) / 1000;
+  fill.style.width = Math.max(0, Math.min(100, (el / np.durationSec) * 100)) + '%';
+}
+
 /* ═══ render loop — cover-fit the virtual 1280×720 stage ═══ */
 const cv = $('stage');
 const g2 = cv.getContext('2d');
@@ -605,6 +673,8 @@ function loop(now){
   const H = Math.round(W * cv.clientHeight / Math.max(1, cv.clientWidth));
   if (cv.width !== W) cv.width = W;
   if (cv.height !== H) cv.height = H;
+  // Jukebox marquee: no scene to draw — just tick the now-playing bar.
+  if (S.item && S.item.surface === 'jukebox'){ tickMarquee(); return; }
   if (!S.scene) return;
   attractDrive(t);
   S.scene.step(dt);
@@ -628,7 +698,7 @@ function attractDrive(t){
 /* Test shims (page-scope const/let are unreachable from a separate eval —
    .smoke-stage.cjs drives through these; inert in production). */
 window.__stage = {
-  S, SCENES, applyItem, onOutput, isMuted, render, drawQR,
+  S, SCENES, applyItem, onOutput, isMuted, render, drawQR, renderMarquee, tickMarquee,
   setScene: (n) => { S.scene = SCENES[n]; S.scene.reset(); },
   frames: () => frames,
 };
@@ -639,6 +709,7 @@ window.__stage = {
   S.code = String(q.get('item') || '').trim().toUpperCase();
   S.rig = (q.get('rig') || '').trim() || null;
   S.rigKey = (q.get('rigKey') || '').trim() || null;
+  S.marquee = (q.get('view') || '').trim() === 'marquee';   // canonical jukebox URL; content still gates on surface
   const wanted = (q.get('scene') || '').trim();
   if (!/^[A-HJ-NP-Z2-9]{6}$/.test(S.code)){
     $('hudPill').textContent = 'add ?item=CODE to the URL';

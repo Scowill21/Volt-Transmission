@@ -210,6 +210,37 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
   opacity:0; pointer-events:none; transition:opacity .25s; max-width:88vw; text-align:center;
 }
 #toast.show{ opacity:1; }
+
+/* ── jukebox surface (music as a control surface) ── */
+.jukebox .jb-eyebrow{ font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; color:var(--sub); font-weight:700; margin:0 0 .3rem; }
+.jb-now{ padding:.2rem 0 .3rem; }
+.jb-now.idle .jb-title{ color:var(--sub); font-weight:500; }
+.jb-title{ font-size:1.35rem; font-weight:700; line-height:1.15; }
+.jb-artist{ margin:.05rem 0 0; }
+.jb-prog{ margin:.6rem 0 .3rem; }
+.jb-house{ margin-top:.35rem; color:var(--accent-ink); }
+.jb-skip{ margin:.2rem 0 .9rem; }
+.jb-sec{ margin-top:1rem; padding-top:.9rem; border-top:1px solid var(--edge); }
+.jb-queue{ margin-top:.5rem; }
+.jb-queue .jb-empty{ border:none; background:none; padding:.3rem 0; }
+.jb-catalog{ list-style:none; margin:.5rem 0 0; padding:0; }
+.jb-cat{ display:flex; align-items:center; gap:.5rem; padding:.5rem .1rem; border-bottom:1px solid var(--edge); }
+.jb-cat:last-child{ border-bottom:none; }
+.jb-cat-meta{ flex:1; min-width:0; }
+.jb-cat-title{ font-weight:500; }
+.jb-cat-actions{ display:flex; gap:.4rem; flex-shrink:0; }
+.jb-pill{ border:1.5px solid var(--edge); background:var(--card); color:var(--ink); border-radius:999px;
+  padding:.4rem .9rem; font-size:.82rem; font-weight:700; min-height:38px; }
+.jb-pill.primary{ background:var(--accent); color:#fff; border-color:var(--accent); }
+.jb-pill[disabled]{ opacity:.4; }
+.jb-cat-btn{ width:100%; display:flex; align-items:center; gap:.5rem; text-align:left;
+  border:1.5px solid var(--edge); background:var(--card); color:var(--ink); border-radius:12px; padding:.6rem .8rem; }
+.jb-cat.picked .jb-cat-btn{ border-color:var(--accent); background:var(--accent-soft); }
+.jb-cat-btn .jb-cat-title{ flex:1; }
+.jb-cat-dur{ flex-shrink:0; }
+.jb-cat-btn[disabled]{ opacity:.5; }
+.jb-gate{ margin:.2rem 0 .5rem; font-weight:500; }
+.jb-bid{ margin-top:1rem; padding-top:.9rem; border-top:1px solid var(--edge); }
 </style>
 </head>
 <body>
@@ -301,6 +332,46 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
       <button class="btn" id="bidBtn">Bid</button>
       <div class="status-line" id="bidMsg"></div>
       <button class="btn ghost slim" id="releaseBtn2" hidden>Release the controls</button>
+    </div>
+
+    <!-- jukebox surface: now-playing + queue + add + (bid). Shown when the
+         item's control surface is a jukebox. In the controller_slot posture the
+         slot cards above still SELL the controls and this drives them; in the
+         per_action posture the slot cards are hidden and each action is priced. -->
+    <div class="card jukebox" id="jukeboxCard" hidden>
+      <div class="jb-now" id="jbNow">
+        <div class="jb-eyebrow">Now playing</div>
+        <div class="jb-title" id="jbNpTitle">—</div>
+        <div class="jb-artist mini" id="jbNpArtist" hidden></div>
+        <div class="meter jb-prog"><i id="jbProgFill"></i></div>
+        <div class="jb-time mini" id="jbNpTime"></div>
+        <div class="jb-house" id="jbHouse" hidden>♪ house mix — queue a song to take over</div>
+      </div>
+      <button class="btn ghost slim jb-skip" id="jbSkip" hidden></button>
+
+      <div class="jb-bid" id="jbBid" hidden>
+        <div class="jb-eyebrow">Bid to play next</div>
+        <div class="bid-top"><span class="amount" id="jbBidTop"></span> <span class="mini" id="jbBidWho"></span></div>
+        <div class="note" id="jbBidClock"></div>
+        <div class="row" style="margin-top:.6rem">
+          <input id="jbBidCustom" type="number" step="0.50" min="0" inputmode="decimal" aria-label="Bid in dollars"
+                 style="flex:1; min-width:0; border:1.5px solid var(--edge); border-radius:12px; padding:.7rem .8rem; font:inherit" placeholder="$ amount" />
+          <button class="btn slim" id="jbBidBtn" style="width:auto; padding:.7rem 1.4rem">Bid</button>
+        </div>
+        <div class="mini" id="jbBidPick" style="margin-top:.4rem">pick a song below, then bid</div>
+      </div>
+
+      <div class="jb-sec">
+        <div class="jb-eyebrow">Up next <span class="mini" id="jbQueueLen"></span></div>
+        <ul class="queue jb-queue" id="jbQueue"></ul>
+      </div>
+
+      <div class="jb-sec">
+        <div class="jb-eyebrow">Add a song <span class="mini" id="jbAddHint"></span></div>
+        <div class="note warn jb-gate" id="jbGate" hidden></div>
+        <ul class="jb-catalog" id="jbCatalog"></ul>
+      </div>
+      <div class="status-line" id="jbMsg"></div>
     </div>
 
     <div class="card signin" id="signinCard" hidden>
@@ -409,6 +480,8 @@ const S = {
   holding: false,                  // am I the active holder?
   ws: null, wsDelay: 1000,
   bidChoice: 0,                    // selected extra cents over the min next bid
+  jbPick: null,                    // jukebox bid-mode: the song selected to bid on
+  jbRecvAt: 0,                     // when the last jukebox payload landed (progress/skip anchor)
 };
 
 async function api(method, path, body, headers){
@@ -528,7 +601,9 @@ async function submitCode(raw){
     const item = await api('GET', '/api/items/' + code);
     S.code = code;
     applyItem(item);
-    show(S.holding && item.status === 'on' ? 'controller' : 'item');
+    // A jukebox holder drives from the item view (queue/skip/bid), never the
+    // d-pad controller — only pad/btn surfaces open the full-screen controller.
+    show(S.holding && item.status === 'on' && item.surface !== 'jukebox' ? 'controller' : 'item');
     liveSync();
     return true;
   } catch (e){
@@ -557,8 +632,10 @@ function applyItem(p){
   if (p.ts && S.item && S.item.ts > p.ts) return;
   const wasHolding = S.holding;
   S.item = p;
+  if (p.jukebox) S.jbRecvAt = Date.now();      // clock anchor for the now-playing progress + skip window
   S.holding = !!(p.active && p.active.userId === IDENTITY.id);
-  if (S.holding && p.status === 'on' && S.view !== 'controller') show('controller');
+  const jukebox = p.surface === 'jukebox';
+  if (S.holding && p.status === 'on' && S.view !== 'controller' && !jukebox) show('controller');
   else if (wasHolding && !S.holding && S.view === 'controller') timesUp();
   renderItem();
   renderController();
@@ -597,9 +674,16 @@ function renderItem(){
     : (p.status === 'on' && (!configured || (p.program != null)));
   $('offlineCard').hidden = !(configured && p.status === 'on' && !sellable);
 
+  // A jukebox is a room-level surface — no per-holder d-pad mirror. In the
+  // controller_slot posture the slot still sells (below); in per_action the
+  // slot machinery is hidden and each action is individually priced.
+  const isJukebox = p.surface === 'jukebox';
+  const slotSell = !isJukebox || (p.jukebox && p.jukebox.monetization === 'controller_slot');
+
   // spectator strip: shown whenever SOMEONE ELSE holds the controls (a live
-  // mini-mirror while you watch/wait). Hidden when you hold or it's yours.
-  const showSpec = !!(p.active && p.active.userId !== IDENTITY.id) && !S.holding;
+  // mini-mirror while you watch/wait). Hidden when you hold, it's yours, or the
+  // surface is a jukebox (there are no pad/btn presses to mirror).
+  const showSpec = !isJukebox && !!(p.active && p.active.userId !== IDENTITY.id) && !S.holding;
   $('spectatorCard').hidden = !showSpec;
   if (showSpec) $('specWho').textContent = `${p.active.name} is driving`;
 
@@ -615,8 +699,8 @@ function renderItem(){
   const queued = p.queue.some(q => q.userId === IDENTITY.id);
 
   // buy-now
-  $('buyCard').hidden = p.mode !== 'buynow';
-  if (p.mode === 'buynow'){
+  $('buyCard').hidden = !slotSell || p.mode !== 'buynow';
+  if (slotSell && p.mode === 'buynow'){
     $('buyPrice').innerHTML = `${fmt$(p.priceCents)}<small>· ${fmtClock(p.slotSeconds * 1000)} of control</small>`;
     $('buyBtn').hidden = mine || queued;
     $('buyBtn').disabled = p.status !== 'on' || !sellable;
@@ -633,8 +717,8 @@ function renderItem(){
   }
 
   // auction
-  $('bidCard').hidden = p.mode !== 'auction';
-  if (p.mode === 'auction'){
+  $('bidCard').hidden = !slotSell || p.mode !== 'auction';
+  if (slotSell && p.mode === 'auction'){
     const a = p.auction;
     if (a){
       $('topBid').textContent = fmt$(a.topCents);
@@ -653,8 +737,166 @@ function renderItem(){
     syncBidChoice();
   }
 
+  renderJukebox(p);
   renderTimers();
 }
+
+/* ── jukebox surface render ── */
+// Who may act on the jukebox right now: per_action → any signed-in payer;
+// controller_slot → the current slot holder (buy the slot above to drive).
+function jbCanAct(jb){ return jb.monetization === 'per_action' ? canPay() : !!S.holding; }
+const minJbBid = (jb) => (jb.bidRound && jb.bidRound.minNextCents) || 100;
+
+function renderJukebox(p){
+  const isJb = p.surface === 'jukebox';
+  $('jukeboxCard').hidden = !isJb;
+  if (!isJb || !p.jukebox) return;
+  const jb = p.jukebox;
+  const perAction = jb.monetization === 'per_action';
+  const canAct = jbCanAct(jb);
+  const bidMode = jb.mode === 'bid';
+
+  // gate line
+  const gate = perAction
+    ? (canPay() ? '' : 'sign in to queue, skip or bid')
+    : (S.holding ? '' : 'buy the control slot above to drive the music');
+  $('jbGate').hidden = !gate;
+  $('jbGate').textContent = gate;
+
+  // now playing (progress ticks in renderTimers)
+  const np = jb.nowPlaying;
+  $('jbNow').classList.toggle('idle', !np);
+  $('jbNpTitle').textContent = np ? np.title : (jb.houseMode ? 'House mix' : 'Nothing playing');
+  $('jbNpArtist').textContent = np && np.artist ? np.artist : '';
+  $('jbNpArtist').hidden = !(np && np.artist);
+  $('jbHouse').hidden = !!np || !jb.houseMode;
+  if (!np){ $('jbProgFill').style.width = '0%'; $('jbNpTime').textContent = ''; }  // no track → empty bar (renderTimers only fills when playing)
+
+  renderSkip(p);
+
+  // up next
+  $('jbQueueLen').textContent = jb.queueLen ? `· ${jb.queueLen}` : '';
+  $('jbQueue').innerHTML = (jb.queue && jb.queue.length)
+    ? jb.queue.map(q => `<li class="${q.byId === IDENTITY.id ? 'me' : ''}">
+        <span class="pos">${q.position}</span> ${esc(q.title)}
+        <span class="eta">${q.playNext ? '⏭ next' : esc(q.byName || '')}</span></li>`).join('')
+    : `<li class="jb-empty mini">nothing queued${jb.houseMode ? ' — house mix is filling in' : ''}</li>`;
+
+  // bid-for-next panel
+  $('jbBid').hidden = !bidMode;
+  if (bidMode){
+    const br = jb.bidRound;
+    $('jbBidTop').textContent = br ? fmt$(br.topCents) : fmt$(0);
+    $('jbBidWho').textContent = br
+      ? (br.topUserId === IDENTITY.id ? 'you lead' : `${esc(br.topName || 'someone')} leads · ${br.bidCount} bid${br.bidCount === 1 ? '' : 's'}`)
+      : 'no bids yet — open the round';
+    $('jbBidClock').textContent = np ? 'winner plays when this song ends' : 'a song must be playing to bid on the next one';
+    $('jbBidBtn').disabled = !canAct || !np;
+    $('jbBidPick').textContent = S.jbPick
+      ? `bidding on “${esc((jb.catalog.find(s => s.id === S.jbPick) || {}).title || S.jbPick)}” · min ${fmt$(minJbBid(jb))}`
+      : 'pick a song below, then bid';
+  }
+
+  // add-a-song hint + catalog
+  $('jbAddHint').textContent = !canAct ? ''
+    : perAction
+      ? (bidMode ? `bids from ${fmt$(minJbBid(jb))}`
+                 : `queue ${fmt$(jb.prices.queueCents)}${jb.prices.playNextCents != null ? ` · skip the line ${fmt$(jb.prices.playNextCents)}` : ''}`)
+      : 'your pick';
+  $('jbCatalog').innerHTML = jb.catalog.map(s => catalogRow(s, jb, canAct, bidMode)).join('');
+}
+
+// Local skip eligibility — mirrors server skipEligibility(), ticking between
+// broadcasts so the button flips the instant a window opens/closes. startedAt
+// cancels on both sides, so no client/server clock skew. The tap re-validates
+// server-side regardless.
+function skipNow(p){
+  const jb = p.jukebox, np = jb.nowPlaying, ss = jb.skipState || {};
+  if (!np) return { ok: false, reason: 'nothing playing' };
+  const el = (np.elapsedSec || 0) + (Date.now() - (S.jbRecvAt || Date.now())) / 1000;
+  const minPlayEl = ss.minPlayUntil ? (ss.minPlayUntil - np.startedAt) / 1000 : 0;
+  const skipUntilEl = ss.skippableUntil ? (ss.skippableUntil - np.startedAt) / 1000 : Infinity;
+  if (el < minPlayEl) return { ok: false, reason: `protected ${Math.ceil(minPlayEl - el)}s more` };
+  if (el > skipUntilEl) return { ok: false, reason: 'too late to skip this one' };
+  if (ss.yourLeft !== undefined && ss.yourLeft <= 0) return { ok: false, reason: 'no skips left for you' };
+  if (ss.roomLeft !== undefined && ss.roomLeft <= 0) return { ok: false, reason: 'room skip limit reached' };
+  return { ok: true };
+}
+function renderSkip(p){
+  const jb = p.jukebox, btn = $('jbSkip');
+  if (!jb.nowPlaying){ btn.hidden = true; return; }
+  btn.hidden = false;
+  const perAction = jb.monetization === 'per_action';
+  const price = perAction && jb.prices.skipCents ? ` · ${fmt$(jb.prices.skipCents)}` : '';
+  if (!jbCanAct(jb)){ btn.disabled = true; btn.textContent = `⏭ Skip${price}`; return; }
+  const s = skipNow(p);
+  btn.disabled = !s.ok;
+  btn.textContent = s.ok ? `⏭ Skip this song${price}` : `⏭ ${s.reason}`;
+}
+
+function catalogRow(s, jb, canAct, bidMode){
+  const dur = s.durationSec ? fmtClock(s.durationSec * 1000) : '';
+  const meta = `<span class="jb-cat-title">${esc(s.title)}</span>${s.artist ? ` <span class="mini">${esc(s.artist)}</span>` : ''}`;
+  if (bidMode){
+    const picked = S.jbPick === s.id;
+    return `<li class="jb-cat ${picked ? 'picked' : ''}"><button class="jb-cat-btn" data-song="${esc(s.id)}" data-act="pick" ${canAct ? '' : 'disabled'}>
+      ${meta}<span class="jb-cat-dur mini">${picked ? '✓ picked' : dur}</span></button></li>`;
+  }
+  const playing = jb.nowPlaying && jb.nowPlaying.songId === s.id;
+  const queued = (jb.queue || []).some(q => q.songId === s.id);
+  const label = playing ? 'playing' : queued ? 'queued' : 'Queue';
+  const pn = jb.prices.playNextCents != null && !playing && !queued
+    ? `<button class="jb-pill" data-song="${esc(s.id)}" data-act="playnext" ${canAct ? '' : 'disabled'}>Next</button>` : '';
+  return `<li class="jb-cat"><div class="jb-cat-meta">${meta}${dur ? ` <span class="mini">${dur}</span>` : ''}</div>
+    <div class="jb-cat-actions">${pn}<button class="jb-pill primary" data-song="${esc(s.id)}" data-act="queue" ${(!canAct || playing || queued) ? 'disabled' : ''}>${label}</button></div></li>`;
+}
+
+/* ── jukebox actions ── */
+function jbMsg(text, isErr, isOk){
+  const el = $('jbMsg');
+  el.className = 'status-line' + (isErr ? ' err' : isOk ? ' ok' : '');
+  el.textContent = text;
+}
+function jbNeedAct(){
+  const jb = S.item && S.item.jukebox; if (!jb) return true;
+  if (jb.monetization === 'per_action') return needSignin();
+  if (!S.holding){ toast('buy the control slot to drive the music'); return true; }
+  return false;
+}
+async function jbAct(fn, okMsg){
+  jbMsg('…');
+  try { applyItem(await fn()); jbMsg(okMsg, false, true); }
+  catch (e){
+    if (e.status === 401){ $('signinCard').hidden = false; $('signinLink').href = '/account.html?return=' + encodeURIComponent('/control?item=' + S.code); }
+    jbMsg(String(e.message), true);
+  }
+}
+function doJbQueue(songId, playNext){
+  if (jbNeedAct()) return;
+  jbAct(() => api('POST', `/api/items/${S.code}/jukebox/queue`, payBody({ songId, playNext: !!playNext })), playNext ? 'jumped the line ✓' : 'added ✓');
+}
+function doJbSkip(){
+  if (jbNeedAct()) return;
+  const np = S.item && S.item.jukebox && S.item.jukebox.nowPlaying;
+  jbAct(() => api('POST', `/api/items/${S.code}/jukebox/skip`, payBody({ songId: np && np.songId })), 'skipped ✓');
+}
+function doJbBid(){
+  if (jbNeedAct()) return;
+  if (!S.jbPick){ jbMsg('pick a song below first', true); return; }
+  const dollars = parseFloat($('jbBidCustom').value);
+  const cents = Number.isFinite(dollars) && dollars > 0 ? Math.round(dollars * 100) : minJbBid(S.item.jukebox);
+  jbAct(() => api('POST', `/api/items/${S.code}/jukebox/bid`, payBody({ songId: S.jbPick, cents })), 'bid placed ✓')
+    .then(() => { $('jbBidCustom').value = ''; });
+}
+$('jbCatalog').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-song]'); if (!b || b.disabled) return;
+  const songId = b.dataset.song;
+  if (b.dataset.act === 'pick'){ S.jbPick = (S.jbPick === songId ? null : songId); renderItem(); }
+  else if (b.dataset.act === 'queue') doJbQueue(songId, false);
+  else if (b.dataset.act === 'playnext') doJbQueue(songId, true);
+});
+$('jbSkip').addEventListener('click', doJbSkip);
+$('jbBidBtn').addEventListener('click', doJbBid);
 
 const minNextCents = () => {
   const p = S.item;
@@ -700,6 +942,16 @@ function renderTimers(){
         ? 'next round opens when this slot ends'
         : `first bid starts a ${p.auctionSeconds}s countdown`;
     }
+  }
+  // jukebox now-playing progress + live skip-window button (anchored on the
+  // last payload's elapsedSec so it's skew-free and keeps moving between broadcasts)
+  if (p.surface === 'jukebox' && p.jukebox && p.jukebox.nowPlaying){
+    const np = p.jukebox.nowPlaying;
+    const el = (np.elapsedSec || 0) + (Date.now() - (S.jbRecvAt || Date.now())) / 1000;
+    const dur = np.durationSec || 0;
+    $('jbProgFill').style.width = (dur ? Math.max(0, Math.min(100, (el / dur) * 100)) : 0) + '%';
+    $('jbNpTime').textContent = dur ? `${fmtClock(el * 1000)} / ${fmtClock(dur * 1000)}` : fmtClock(el * 1000);
+    renderSkip(p);
   }
 }
 setInterval(renderTimers, 250);
@@ -854,6 +1106,12 @@ window.__bucket = BUCKET;
 window.__doBuy = doBuy;
 window.__doBid = doBid;
 window.__chosenBidCents = chosenBidCents;
+window.__renderJukebox = renderJukebox;
+window.__renderSkip = renderSkip;
+window.__skipNow = skipNow;
+window.__doJbQueue = doJbQueue;
+window.__doJbSkip = doJbSkip;
+window.__doJbBid = doJbBid;
 </script>
 </body>
 </html>

@@ -169,7 +169,19 @@ attract mode). Rig keys hashed at rest, shown once; duty-cycle limits per
 item (privileged bypass). Empty chain = pre-redundancy behavior. Still
 open here: pooled FX from other viewers' keys, account-tied rate limits;
 Phase-2 menu (web-app outputs, scores, pay-to-extend/jump, camera, pooled
-free mode, schedules, push) in `PROMPT-OUTPUTS-REDUNDANCY.md`. Two modes worth building: **pooled** (everyone's hits spawn effects,
+free mode, schedules, push) in `PROMPT-OUTPUTS-REDUNDANCY.md`.
+**Fifth slice shipped — VOLT JUKEBOX, audio as a control surface (test tier):**
+an item's `surface` can be `jukebox` — the room becomes a venue music
+controller. Paid patrons queue from an admin catalog, skip (bounded by admin
+sliding-window rules), or bid for the next play; `server/jukebox.js` is the
+authority and a Pi **player rig** (`tools/volt-jukebox.mjs`, MPD or `log`) is a
+dumb output driven by `{type:'jukebox'}` bus commands that reports truth back
+(`track_started`/`ended`/`position` — a server-consumed RIG_REPORT set). Two
+postures: `controller_slot` (reuses the slot machinery — sell the *controller*,
+not the music) and `per_action`. Rides the whole output-layer chain (election,
+failover, resync). **Spotify is deferred by design** — the server is
+backend-blind, but streaming-service terms + performance-rights reality keep the
+pilot on rights-clean local files (`PROMPT-JUKEBOX.md` §8 / `SETUP.md`). Two modes worth building: **pooled** (everyone's hits spawn effects,
 rate-limited per user) and **takeover** (one paid user holds the controls
 for N minutes — this is a *product*, pairs beautifully with Stripe from
 Tier 2). The console is already staged for it: keys 1–4 are the **live

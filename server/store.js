@@ -123,7 +123,78 @@ function normalizeLimits(raw){
 function withOutputDefaults(item){
   if (!Array.isArray(item.outputs)) item.outputs = [];
   item.limits = { ...DEFAULT_LIMITS, ...(item.limits || {}) };
+  if (item.surface !== 'jukebox') item.surface = 'pad';   // back-compat: every legacy item is a pad
+  if (item.surface === 'jukebox') item.jukebox = normalizeJukebox(item.jukebox || {});
+  else item.jukebox = null;
   return item;
+}
+
+/* ── Jukebox surface (server/jukebox.js) — audio as a control surface.
+   An item with surface:'jukebox' carries this config. All server-authoritative;
+   the rig is a dumb player. spotify secrets (deferred backend) would live under
+   jukebox.spotify server-side ONLY — never in a public payload/broadcast/log. */
+export const JUKEBOX_BACKENDS = ['mpd', 'log'];          // 'spotify' deferred (see PROMPT-JUKEBOX §7-8)
+export const JUKEBOX_MONETIZATION = ['controller_slot', 'per_action'];
+export const JUKEBOX_MODES = ['buynow', 'bid'];
+const bool = (v, d) => (v === undefined ? d : !!v);
+const numOr = (v, min, max, d, name) => (v === undefined || v === null ? d : itemInt(v, min, max, name));
+const CATALOG_MAX = 500;
+const SONG_ID_RE = /^[a-z0-9][a-z0-9-]{0,47}$/;
+
+export function normalizeCatalog(arr){
+  if (!Array.isArray(arr)) throw httpError(400, 'catalog must be an array');
+  if (arr.length > CATALOG_MAX) throw httpError(400, `catalog max ${CATALOG_MAX} songs`);
+  const seen = new Set();
+  return arr.map((s, i) => {
+    const title = String(s.title || '').trim().slice(0, 120);
+    if (!title) throw httpError(400, `catalog[${i}]: title required`);
+    let id = String(s.id || '').trim().toLowerCase();
+    if (!id) id = (title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 's') + '-' + (i + 1);
+    if (!SONG_ID_RE.test(id)) throw httpError(400, `catalog[${i}]: bad id "${id}"`);
+    if (seen.has(id)) throw httpError(400, `catalog: duplicate id "${id}"`);
+    seen.add(id);
+    return {
+      id, title,
+      artist: String(s.artist || '').trim().slice(0, 120) || null,
+      durationSec: numOr(s.durationSec, 0, 7200, 0, 'durationSec'),   // 0 = unknown; rig backfills
+      file: String(s.file || '').trim().slice(0, 300) || null,        // rig filename or track URI
+    };
+  });
+}
+export function normalizeJukebox(raw){
+  if (typeof raw !== 'object' || raw === null) raw = {};
+  const monetization = JUKEBOX_MONETIZATION.includes(raw.monetization) ? raw.monetization : 'controller_slot';
+  const backend = JUKEBOX_BACKENDS.includes(raw.backend) ? raw.backend : 'log';
+  const mode = JUKEBOX_MODES.includes(raw.mode) ? raw.mode : 'buynow';
+  const s = raw.skip || {};
+  const q = raw.queueRules || {};
+  const minPlaySec = numOr(s.minPlaySec, 0, 3600, 10, 'minPlaySec');
+  let onlyBeforeSec = (s.onlyBeforeSec === undefined || s.onlyBeforeSec === null) ? 15 : itemInt(s.onlyBeforeSec, 0, 3600, 'onlyBeforeSec');
+  // The skip window is [minPlaySec, onlyBeforeSec] when mid-song skips are off;
+  // if the admin set onlyBeforeSec below the minPlay floor the window would be
+  // EMPTY (song permanently unskippable, misleading "too late" the instant it
+  // clears the floor). Widen it to at least the floor so the window is coherent.
+  if (onlyBeforeSec < minPlaySec) onlyBeforeSec = minPlaySec;
+  return {
+    monetization, backend, mode,
+    catalog: normalizeCatalog(raw.catalog || []),
+    queuePriceCents: numOr(raw.queuePriceCents, 0, 50000, 200, 'queuePriceCents'),
+    playNextPriceCents: (raw.playNextPriceCents === undefined || raw.playNextPriceCents === null)
+      ? null : itemInt(raw.playNextPriceCents, 0, 50000, 'playNextPriceCents'),
+    skip: {
+      priceCents:   numOr(s.priceCents, 0, 50000, 100, 'skip.priceCents'),
+      allowMidSong: bool(s.allowMidSong, false),
+      onlyBeforeSec, minPlaySec,
+      perUser: { max: numOr(s.perUser?.max, 0, 100, 2, 'perUser.max'), windowMin: numOr(s.perUser?.windowMin, 1, 1440, 30, 'perUser.windowMin') },
+      global:  { max: numOr(s.global?.max, 0, 1000, 6, 'global.max'),  windowMin: numOr(s.global?.windowMin, 1, 1440, 60, 'global.windowMin') },
+    },
+    queueRules: {
+      maxLen:     numOr(q.maxLen, 1, 200, 25, 'maxLen'),
+      maxPerUser: numOr(q.maxPerUser, 1, 50, 3, 'maxPerUser'),
+      noRepeatMin: numOr(q.noRepeatMin, 0, 1440, 60, 'noRepeatMin'),
+    },
+    houseMode: bool(raw.houseMode, true),
+  };
 }
 
 function normalizeNewItem(props = {}){
@@ -143,6 +214,9 @@ function normalizeNewItem(props = {}){
     outputs: [], limits: normalizeLimits(props.limits) };
   for (const [f, [min, max]] of Object.entries(ITEM_FIELDS))
     item[f] = props[f] === undefined ? defaults[f] : itemInt(props[f], min, max, f);
+  // Control surface: 'pad' (default, back-compat) or 'jukebox' (music).
+  item.surface = props.surface === 'jukebox' ? 'jukebox' : 'pad';
+  item.jukebox = item.surface === 'jukebox' ? normalizeJukebox(props.jukebox || {}) : null;
   return item;
 }
 
@@ -169,6 +243,16 @@ function applyItemPatch(item, patch = {}){
   if (patch.limits !== undefined) item.limits = normalizeLimits(patch.limits);
   if (patch.outputs !== undefined)   // chain edits use POST/PATCH/DELETE …/outputs
     throw httpError(400, 'use the /api/items/:code/outputs endpoints to edit the output chain');
+  // Surface flip + jukebox config. items.js guards a flip against live runtime
+  // (like the mode-flip guard) before calling this.
+  if (patch.surface !== undefined){
+    if (!['pad', 'jukebox'].includes(patch.surface)) throw httpError(400, 'surface must be pad|jukebox');
+    item.surface = patch.surface;
+  }
+  if (item.surface === 'jukebox'){
+    if (patch.jukebox !== undefined || !item.jukebox)
+      item.jukebox = normalizeJukebox(patch.jukebox || item.jukebox || {});
+  } else item.jukebox = null;
   return item;
 }
 
@@ -368,6 +452,9 @@ class PgStore {
     // Output chains + duty limits (redundancy layer) — additive, default = legacy behavior.
     await this.pool.query(`ALTER TABLE items ADD COLUMN IF NOT EXISTS outputs JSONB NOT NULL DEFAULT '[]'`);
     await this.pool.query('ALTER TABLE items ADD COLUMN IF NOT EXISTS limits JSONB');
+    // Jukebox surface — additive; default surface 'pad' keeps every legacy item a pad.
+    await this.pool.query(`ALTER TABLE items ADD COLUMN IF NOT EXISTS surface TEXT NOT NULL DEFAULT 'pad'`);
+    await this.pool.query('ALTER TABLE items ADD COLUMN IF NOT EXISTS jukebox JSONB');
     const { rows } = await this.pool.query('SELECT COUNT(*)::int AS n FROM channels');
     if (rows[0].n === 0) for (const c of SEED){
       await this.pool.query('INSERT INTO channels (id, name, default_scene) VALUES ($1,$2,$3)', [c.id, c.name, c.defaultScene]);
@@ -471,7 +558,7 @@ class PgStore {
       instructions: r.instructions,
       priceCents: r.price_cents, slotSeconds: r.slot_seconds, auctionSeconds: r.auction_seconds,
       minIncrementCents: r.min_increment_cents, status: r.status,
-      outputs: r.outputs, limits: r.limits,
+      outputs: r.outputs, limits: r.limits, surface: r.surface, jukebox: r.jukebox,
       createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at });
   }
 
@@ -487,11 +574,12 @@ class PgStore {
       try {
         await this.pool.query(
           `INSERT INTO items (code, name, description, instructions, mode, price_cents, slot_seconds,
-             auction_seconds, min_increment_cents, status, outputs, limits, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+             auction_seconds, min_increment_cents, status, outputs, limits, surface, jukebox, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
           [item.code, item.name, item.description, item.instructions, item.mode, item.priceCents,
            item.slotSeconds, item.auctionSeconds, item.minIncrementCents, item.status,
-           JSON.stringify(item.outputs), JSON.stringify(item.limits), item.createdAt]);
+           JSON.stringify(item.outputs), JSON.stringify(item.limits),
+           item.surface, item.jukebox ? JSON.stringify(item.jukebox) : null, item.createdAt]);
         return item;
       } catch (e){
         if (e.code !== '23505') throw e;        // anything but a code collision is real
@@ -505,10 +593,11 @@ class PgStore {
     const item = applyItemPatch(this._itemRow(rows[0]), patch);
     await this.pool.query(
       `UPDATE items SET name=$2, description=$3, instructions=$4, mode=$5, price_cents=$6,
-         slot_seconds=$7, auction_seconds=$8, min_increment_cents=$9, status=$10, limits=$11 WHERE code=$1`,
+         slot_seconds=$7, auction_seconds=$8, min_increment_cents=$9, status=$10, limits=$11,
+         surface=$12, jukebox=$13 WHERE code=$1`,
       [code, item.name, item.description, item.instructions, item.mode, item.priceCents,
        item.slotSeconds, item.auctionSeconds, item.minIncrementCents, item.status,
-       JSON.stringify(item.limits)]);
+       JSON.stringify(item.limits), item.surface, item.jukebox ? JSON.stringify(item.jukebox) : null]);
     return item;
   }
 

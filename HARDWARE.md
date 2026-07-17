@@ -8,6 +8,11 @@ or UDP actions. Because it's a rig in the item's **output chain**, the server
 counts it as a live output — TouchDesigner is optional, and if you add a
 second rig (or a browser scene) the system fails over automatically.
 
+> **Two kinds of rig, same chain.** Sections 1–8 cover the **GPIO/actuator** rig
+> (`bus-to-pi.mjs`) for pad-surface items. **Section 9** covers the **jukebox
+> player** rig (`tools/volt-jukebox.mjs`, MPD/log) for `surface:jukebox` items —
+> it plays music instead of firing pins but joins the output chain the same way.
+
 > ESP32 / MQTT / Home-Assistant / Art-Net bridges and multi-venue fleets are a
 > future direction — this guide covers the Raspberry Pi rig only.
 
@@ -195,3 +200,86 @@ it isn't program**: it ignores controller keys and drives every pin to a safe
   diode; don't back-feed the Pi.
 - Keep `pins.json` `ms` values sane so a held button can't cook a relay — and
   set per-item **duty limits** in the ops page as a server-side backstop.
+
+---
+
+## 9. The jukebox player rig (`tools/volt-jukebox.mjs`)
+
+A **jukebox** item (`surface:jukebox` in the ops page) plays *music* instead of
+firing pins. Same rig model: the Pi joins the item's output chain as an
+authenticated rig and is the **player**; the server owns the queue, the skip
+rules, the bid round, and what plays next. The rig only receives
+`play` / `house` / `stop` / `skip` commands and reports back what actually
+happened (`track_started` / `track_ended` / `position`) so the server's clocks
+track *real* playback. On (re)connect — or when it's promoted program by
+failover, or when the item is turned back on — the server resyncs it to the
+current track.
+
+**Add it to the chain exactly like a GPIO rig** (section 3): create the jukebox
+item, open its Outputs chain, add a rig named e.g. `pi-jukebox`, copy the key.
+An **unlisted** rig is never elected program, so the jukebox reads "player
+offline" and refuses requests — the rig MUST be in the chain.
+
+### Backends
+
+| `--backend` | what it does | needs |
+| --- | --- | --- |
+| `mpd` | plays local files through **Music Player Daemon** (rights-clean) | `mpd` installed + a music library |
+| `log` | no audio — prints every command and **simulates** playback with timers, reporting the same events | nothing (runs on a laptop) |
+
+Spotify is **deliberately not a backend yet** — the server is backend-blind, so
+it slots in later as its own `--backend spotify` once the OAuth/licensing path
+is signed off (`PROMPT-JUKEBOX.md` §8 / `SETUP.md`).
+
+### MPD in one minute (on the Pi)
+
+```bash
+sudo apt install -y mpd mpc
+# point MPD at your music + enable it (edit /etc/mpd.conf: music_directory "/home/pi/Music")
+sudo systemctl enable --now mpd
+mpc update && mpc listall | head        # confirm it sees your files
+```
+
+Put each catalog song's **`file`** (in the ops catalog editor) as MPD's URI —
+the path **relative to `music_directory`** (e.g. `bowie/rebel-rebel.mp3`). House
+mode adds the whole library on random+repeat; point it at a folder/playlist with
+`--house "chill"` if you want a specific vibe.
+
+### Run it
+
+```bash
+# on the Pi, MPD backend:
+node tools/volt-jukebox.mjs \
+  --url wss://td-stream-control.onrender.com/api/bus \
+  --item ABC123 --rig pi-jukebox --key <the key from step 3> \
+  --backend mpd            # [--mpd-host 127.0.0.1 --mpd-port 6600 --house ""]
+
+# on any laptop, no audio — prove the whole loop end to end:
+node tools/volt-jukebox.mjs --url wss://…/api/bus \
+  --item ABC123 --rig pi-jukebox --key … --backend log --sim-sec 20
+```
+
+On success it prints `connected as rig "pi-jukebox" … backend:mpd` and the
+chain dot goes green. Queue a song from a phone (`/control?item=ABC123`) — it
+plays; when it ends the rig reports back and the server advances the queue (or
+resumes the house mix). Run it under **systemd** exactly like section 5 (swap the
+`ExecStart` line for the `volt-jukebox.mjs` command above).
+
+### What the jukebox rig does on events
+
+- **Self-mute / failover** — identical to a GPIO rig: if another player is
+  program, this one goes **silent** (stops the player, ignores commands) and
+  resumes automatically when it's elected program again (the server re-sends the
+  current track).
+- **Item off** stops the player; **item on** resumes (server re-issues the
+  track). A **slot pause / slot end does NOT stop the music** — the queue and
+  house mode are room-level, not tied to one holder's presence (unlike a GPIO
+  rig, which goes pins-safe on pause).
+- Reconnects forever with backoff; Ctrl-C stops the player and exits clean.
+
+| Symptom | Cause → fix |
+| --- | --- |
+| "player offline — not taking requests" on phones | The rig isn't in the item's Outputs chain, or isn't connected. Add it / start it. |
+| `mpd not connected` / `mpd greeting timeout` | MPD isn't running or is on another host/port. `sudo systemctl start mpd`, or pass `--mpd-host/--mpd-port`. |
+| A queued song never plays | Its catalog **`file`** doesn't match an MPD URI. `mpc listall` and copy the exact relative path into the ops catalog editor. |
+| House mode silent | `add ""` (whole library) found nothing — set `music_directory` correctly and `mpc update`, or pass `--house "<folder/playlist>"`. |

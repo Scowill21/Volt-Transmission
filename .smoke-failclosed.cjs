@@ -96,6 +96,21 @@ async function waitForBoot(tries){
     if (r.status !== 401) fail(`item bid should 401 during outage, got ${r.status}: ${r.body}`);
     ok('payload-identity item bid → 401 (fail-closed)');
 
+    // Jukebox actions (queue/skip/bid) resolve identity BEFORE the item lookup,
+    // so the same escape-hatch closure applies — a spoofed payload identity must
+    // 401 during the outage, never fall through to 404/409 or be trusted.
+    r = await req('POST', '/api/items/ZZZZZZ/jukebox/queue', { songId: 'x', user: { id: 'attacker', name: 'Mallory' } });
+    if (r.status !== 401) fail(`jukebox queue should 401 during outage, got ${r.status}: ${r.body}`);
+    ok('payload-identity jukebox queue → 401 (fail-closed)');
+
+    r = await req('POST', '/api/items/ZZZZZZ/jukebox/skip', { user: { id: 'attacker', name: 'Mallory' } });
+    if (r.status !== 401) fail(`jukebox skip should 401 during outage, got ${r.status}: ${r.body}`);
+    ok('payload-identity jukebox skip → 401 (fail-closed)');
+
+    r = await req('POST', '/api/items/ZZZZZZ/jukebox/bid', { songId: 'x', cents: 500, user: { id: 'attacker', name: 'Mallory' } });
+    if (r.status !== 401) fail(`jukebox bid should 401 during outage, got ${r.status}: ${r.body}`);
+    ok('payload-identity jukebox bid → 401 (fail-closed)');
+
     // Sanity: the public read still works and creates no state.
     r = await req('GET', '/api/channels/volt-fm/queues');
     if (r.status !== 200) fail(`GET /queues should 200, got ${r.status}`);

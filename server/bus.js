@@ -28,10 +28,15 @@ const ADMIN_KEY = process.env.ADMIN_KEY || 'dev';   // single source (mirrors in
 // 'queues'; items.js broadcasts 'item' + 'item_queues' + 'output' election
 // results). Clients may never inject them — otherwise any peer could forge
 // queue/lock/auction/program state or fake "denied" notices to the room.
-const RESERVED = new Set(['queues', 'denied', 'item', 'item_queues', 'output']);
+const RESERVED = new Set(['queues', 'denied', 'item', 'item_queues', 'output', 'jukebox']);
 // Types only RIGS (authenticated hardware/renderers) or privileged senders
 // may originate — plain viewers' copies are dropped exactly like RESERVED.
 const RIG_ONLY = new Set(['score', 'telemetry']);
+// Rig → SERVER reports (jukebox player truth). Like RIG_ONLY (rig/admin only),
+// but the SERVER CONSUMES them (rigHooks.message) instead of fanning them out —
+// nowPlaying/skip-window math depends on them, so they must never come from a
+// client clock. Not broadcast to the room.
+const RIG_REPORT = new Set(['track_started', 'track_ended', 'position']);
 const PRIVILEGED = new Set(['vj', 'radio', 'admin']);
 
 // Pluggable permission checks for {type:'key'} actions. Each paid product
@@ -109,9 +114,16 @@ export function attachBus(server, app){
       try { msg = JSON.parse(String(data).slice(0, 4096)); } catch { return; }
       if (!msg || typeof msg.type !== 'string') return;
       if (RESERVED.has(msg.type)) return;      // clients can't forge server control-plane types
+      const priv = ws._rig || (ws._user && PRIVILEGED.has(ws._user.role));
       // score/telemetry come from RIGS (or privileged sessions) only — a
       // plain viewer's copy is dropped exactly like a RESERVED forgery.
-      if (RIG_ONLY.has(msg.type) && !ws._rig && !(ws._user && PRIVILEGED.has(ws._user.role))) return;
+      if (RIG_ONLY.has(msg.type) && !priv) return;
+      // Rig → server jukebox reports: consume them, don't broadcast. Only an
+      // authenticated rig (or privileged) may report player truth.
+      if (RIG_REPORT.has(msg.type)){
+        if (priv && rigHooks && rigHooks.message) rigHooks.message(channel, ws._rig ? ws._rig.name : 'admin', msg);
+        return;
+      }
       // Gating: key actions only pass for whoever holds the relevant controls
       // (paid.js: scene_1..4 takeover · items.js: pad/btn in item rooms).
       if (msg.type === 'key'){
@@ -169,6 +181,12 @@ export function attachBus(server, app){
     // score/telemetry are rig-originated — over HTTP only X-Admin-Key may inject.
     if (RIG_ONLY.has(msg.type) && !admin)
       return res.status(403).json({ error: 'rig-originated message type — rigs or X-Admin-Key only' });
+    // Rig jukebox reports over HTTP: X-Admin-Key only, server-consumed not broadcast.
+    if (RIG_REPORT.has(msg.type)){
+      if (!admin) return res.status(403).json({ error: 'rig report — rigs or X-Admin-Key only' });
+      if (rigHooks && rigHooks.message) rigHooks.message(req.params.id, 'admin', msg);
+      return res.json({ ok: true, consumed: true });
+    }
     // Same gates as the socket path (X-Admin-Key acts as privileged).
     if (msg.type === 'key'){
       const verdict = gateVerdict(req.params.id, { _user: admin ? { role: 'admin' } : null }, msg);

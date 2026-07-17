@@ -142,6 +142,36 @@ const ok = (label) => { console.log('OK  ', passed + 1, label); passed++; };
   assert.ok(st.S.item.active, 'stale snapshot ignored — active NOT rolled back');
   ok('resync staleness guard: an older ts never rolls back fresh state');
 
+  /* ── jukebox MARQUEE variant (?view=marquee): a now-playing board ── */
+  const JUKE = { type: 'item_queues', item: 'PSDV7H', name: 'Bar Jukebox', surface: 'jukebox', status: 'on',
+    outputs: [{ kind: 'rig', name: 'stage', priority: 1 }], program: { kind: 'rig', name: 'stage' },
+    outputsOnline: ['stage'], sellable: true, active: null, queue: [], auction: null, ts: 9000,
+    jukebox: { monetization: 'per_action', mode: 'buynow', backend: 'log', houseMode: true,
+      nowPlaying: { songId: 'aaa', title: 'Midnight City', artist: 'M83', startedAt: Date.now() - 30000, durationSec: 240, elapsedSec: 30 },
+      queue: [{ position: 1, songId: 'bbb', title: 'Levels' }, { position: 2, songId: 'ccc', title: 'One More Time' }], queueLen: 2,
+      skipState: { roomLeft: 6 }, bidRound: null } };
+  st.applyItem(JUKE);
+  assert.ok(!w.document.getElementById('marquee').hidden, 'marquee shown for a jukebox item');
+  assert.ok(w.document.getElementById('attract').hidden, 'attract hidden under the marquee');
+  assert.match(w.document.getElementById('mqTitle').textContent, /Midnight City/, 'now-playing title on the board');
+  assert.match(w.document.getElementById('mqArtist').textContent, /M83/, 'artist shown');
+  assert.match(w.document.getElementById('mqNext').textContent, /Levels/, 'up-next lists the queue');
+  assert.strictEqual(w.document.getElementById('mqCode').textContent, 'PSDV7H', 'scan-to-queue code shown');
+  ok('jukebox marquee: now-playing + up-next + scan code render');
+
+  // the progress bar ticks off the elapsed anchor in the render loop
+  pump(3, 2000);
+  assert.ok(parseFloat(w.document.getElementById('mqFill').style.width) > 0, 'progress bar filled from elapsed time');
+  ok('marquee progress bar reflects the now-playing elapsed');
+
+  // idle → HOUSE MIX headline (never a dead board)
+  const houseP = JSON.parse(JSON.stringify(JUKE)); houseP.ts = 9500; houseP.jukebox.nowPlaying = null;
+  st.applyItem(houseP);
+  assert.match(w.document.getElementById('mqEyebrow').textContent, /HOUSE MIX/i, 'house-mix eyebrow when idle');
+  assert.match(w.document.getElementById('mqTitle').textContent, /House mix/i, 'house-mix title when idle');
+  assert.strictEqual(w.document.getElementById('mqFill').style.width, '0%', 'progress empties with no track');
+  ok('marquee idle: HOUSE MIX headline, empty progress');
+
   console.log(`\nALL CLEAR — ${passed} stage checks passed`);
   process.exit(0);
 })().catch((e) => { console.error('\nFAIL:', e.message); console.error(e.stack); process.exit(1); });

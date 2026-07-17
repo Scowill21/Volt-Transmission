@@ -591,6 +591,83 @@ online, in priority order, and fails over automatically. Manage it on
 
 ---
 
+## Volt Jukebox — audio as a control surface (test tier)
+
+A Volt Control item can drive **music** instead of a physical object. In the ops
+page (`/control-ops`), a new item's **surface** dropdown has **jukebox · music**.
+A jukebox turns the item's room into a walk-up music controller: patrons scan the
+QR, pick from a catalog you curate, and pay to queue / skip / bump the line — or
+bid for what plays next.
+
+**The server is the boss.** It owns the queue, the skip rules, the bid round, and
+what plays next. A **player rig** (a Raspberry Pi running
+`tools/volt-jukebox.mjs`, or a laptop in `log` mode) is a dumb output that just
+plays what it's told and reports back what's actually happening — so the skip
+windows and "now playing" track *real* playback, never a guessed clock. Set the
+player up exactly like any other rig: add it to the item's **Outputs chain** and
+copy its key (see `HARDWARE.md` §9). No rig in the chain → the jukebox reads
+"player offline" and politely refuses requests.
+
+### Two ways to charge (the `money` dropdown)
+
+- **control slot** (default) — the item sells a **timed control slot** with the
+  exact buy-now / auction machinery you already know. Whoever holds the slot
+  drives the music for free *while their time runs* — but every skip window and
+  cap below still binds them (a slot buys the controls, not immunity). Cleanest
+  posture; reuses everything.
+- **per action** — no slots; each **queue-add**, **skip**, and **bid** is priced
+  individually. Set the prices in the item's edit form.
+
+### The catalog + the knobs (item → Edit)
+
+Open a jukebox item's **Edit** form for the full panel:
+
+- **Catalog** — add a row per song: title, artist, **file** (the player's URI —
+  for MPD, the path relative to its music library, e.g. `bowie/rebel.mp3`), and
+  length. This is the *only* thing patrons can pick from. (v1 is admin-entered;
+  keep it curated.)
+- **Prices** — queue, **play-next** (skip the line, defaults to 2× queue), skip.
+- **Skip rules** — a song is always protected for **min play floor** seconds;
+  after that it's skippable only within **skip only before** seconds (unless you
+  tick **allow mid-song skips**); and skips are rate-limited **per user** and
+  **per room** on sliding windows (e.g. 2 per user / 30 min, 6 per room / 60 min)
+  so one person can't skip-spam the night.
+- **Queue rules** — max length, max per user, and a no-repeat window so the same
+  song can't be re-queued for N minutes.
+- **House mode** — when nothing's queued, the player fills the silence from its
+  library; a paid request interrupts it. Toggle it live from the card too.
+
+### The live panel (item card)
+
+The jukebox card shows **now playing** + the running **queue**, with a ✕ to veto
+any row, plus **Skip track**, **Clear queue**, and a **House** toggle — all live,
+key-gated. The **stage** view has a venue now-playing board at
+`/stage?item=CODE&view=marquee` (big now-playing + up-next + a scan-to-queue QR).
+
+### ⚠️ Music licensing — read before you charge the public (`PROMPT-JUKEBOX.md` §8)
+
+Playing recorded music **in a venue** is a **public performance**, and charging
+patrons to pick or skip songs does **not** transfer any music rights to you.
+This build ships the **rights-clean pilot path** on purpose:
+
+- The **MPD backend plays local files you already have the right to play**, from
+  a catalog **you** enter — so *you* control what's in the pool.
+- **Spotify (and any streaming service) is deliberately NOT wired in.** Their
+  terms forbid this kind of paid, third-party jukebox control, and their API
+  access can be revoked. The code is backend-blind so it *could* be added later,
+  but only behind a proper licensing agreement — don't.
+- **What you still owe:** a public-performance license for the venue (in the US,
+  ASCAP + BMI + SESAC; a background-music provider like Soundtrack Your Brand
+  bundles this). The **"sell the controller experience," not the music** framing
+  (the `control slot` posture) is the safest pilot: patrons pay for the fun of
+  driving the vibe on *your* licensed, curated library.
+
+When in doubt, run it as a **private/BYO-music** setup first (your own files, your
+own event) and get the venue's performance license sorted before taking money
+from the public.
+
+---
+
 ## The shop + cabinet (records & art — test tier)
 
 Footer → **Shop** (or the bag icon). Two kinds of products, payment stubbed

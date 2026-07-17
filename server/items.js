@@ -28,6 +28,7 @@
 import crypto from 'node:crypto';
 import { publish, registerKeyGate, registerRigHooks } from './bus.js';
 import { requester } from './paid.js';
+import { attachJukebox } from './jukebox.js';
 import { devIdentityAllowed } from './auth.js';
 import { httpError, ITEM_CODE_RE, STAGE_SCENES, DEFAULT_LIMITS } from './store.js';
 
@@ -123,6 +124,11 @@ function applyElection(item){
   } else {
     maybeBroadcastRoster(item, next);          // program same but the online set may have moved
   }
+  // Promotion by election (failover/preemption) resyncs the NEW jukebox player:
+  // the connect-time resync (rigHooks.connected) only covers a rig JOINING, not
+  // one already online being elected program. The rig dedupes an identical play
+  // command, so the rare first-connect + first-election overlap is harmless.
+  if (changed && next && item.surface === 'jukebox' && jukeboxApi) jukeboxApi.onRigConnect(code);
   const c = state.get(code);
   if (next && c && c.active && c.active.outputPaused){   // output returned mid-slot → resume the clock
     c.active.outputPaused = false;
@@ -189,7 +195,7 @@ const topBid = (auction) => auction.bids.reduce((a, b) => (b.cents > a.cents ? b
 /* The public shape — GET /api/items/:code and every bus state broadcast.
    userIds ride along (like paid.js's queues) so a phone can find itself in
    the queue / on the slot; they're session ids, not secrets. */
-function publicItem(item){
+function publicItem(item, who){
   const c = peek(item.code);
   const now = Date.now();
   const activeRemainingMs = c.active
@@ -232,9 +238,17 @@ function publicItem(item){
       estimatedStartAt: now + activeRemainingMs + i * item.slotSeconds * 1000,
     })),
     auction,
+    // Control surface. A jukebox item carries its music state (personalized
+    // for `who` on the GET path; room-wide on broadcasts).
+    surface: item.surface || 'pad',
+    ...(item.surface === 'jukebox' && jukeboxApi ? { jukebox: jukeboxApi.publicJukebox(item, who, now) } : {}),
     ts: now,
   };
 }
+let jukeboxApi = null;            // set by attachJukebox inside attachItems
+// The raw jukebox config for the ADMIN dashboard, minus any secret (the
+// deferred spotify backend's OAuth token would live under .spotify).
+const jukeboxSafeConfig = (jb) => { if (!jb) return null; const { spotify, ...safe } = jb; return safe; };
 const broadcastState = (item) => publish(itemRoom(item.code), publicItem(item), null);
 
 // Server-only TD announcements ({type:'item'} is RESERVED in bus.js — clients
@@ -405,6 +419,8 @@ export async function attachItems(app, requireAdmin, store){
       const now = Date.now();
       rigsOnline.get(code).set(rigName, { since: now, lastSeen: now, ws });
       applyElection(item);                     // may preempt a lower-priority program immediately
+      // A jukebox player rig (re)joining resyncs to current state FROM the server.
+      if (item.surface === 'jukebox' && jukeboxApi && (programs.get(code)?.name === rigName)) jukeboxApi.onRigConnect(code);
     },
     closed(channel, rigName, ws){
       const code = String(channel).slice(5);
@@ -425,14 +441,51 @@ export async function attachItems(app, requireAdmin, store){
       const rec = rigsOnline.get(String(channel).slice(5))?.get(rigName);
       if (rec) rec.lastSeen = Date.now();
     },
+    // Rig → server jukebox reports (track_started/ended/position) — bus routes
+    // only authenticated-rig / admin messages here; delegate to the jukebox engine.
+    message(channel, rigName, msg){
+      if (!jukeboxApi || !String(channel).startsWith('item:')) return;
+      const code = String(channel).slice(5);
+      // Only the ELECTED PROGRAM player reports truth — a spare keyed rig in the
+      // chain must not hijack nowPlaying / the skip window / the queue. 'admin'
+      // is the privileged inject sender (bus.js), always trusted.
+      if (rigName === 'admin' || programs.get(code)?.name === rigName) jukeboxApi.onReport(code, msg);
+    },
   };
   registerRigHooks(rigHooks);
   __test.rigHooks = rigHooks;                  // suites drive auth/presence directly
 
+  /* ── the jukebox surface (server/jukebox.js) rides on top of items ── */
+  jukeboxApi = attachJukebox(app, requireAdmin, store, {
+    items,
+    activeSlot: (code) => peek(code).active,
+    elect,
+    // Jukebox commands are server→RIG only (patrons never consume them) and can
+    // carry the catalog `file` / track URI, which publicJukebox deliberately
+    // strips from patron payloads. So send them ONLY to the item's authenticated
+    // rig sockets — never fan them out to the whole room, where any subscriber
+    // would read the file paths. Non-program rigs receive + self-mute, as before.
+    command: (code, m) => {
+      const rigs = rigsOnline.get(code);
+      if (!rigs || !rigs.size) return;
+      const data = JSON.stringify({ type: 'jukebox', ...m, item: code, ts: Date.now() });
+      for (const rec of rigs.values())
+        if (rec.ws && rec.ws.readyState === rec.ws.OPEN){ try { rec.ws.send(data); } catch { /* dead — reaper handles it */ } }
+    },
+    broadcast: broadcastState,
+    announce,
+    public: (item, who) => publicItem(item, who),
+  });
+  __test.jukebox = jukeboxApi.__test;
+
   /* ── public: anyone can watch an item (no account, no state created) ── */
-  app.get('/api/items/:code', (req, res, next) => {
-    try { res.json(publicItem(findItem(normCode(req.params.code)))); }
-    catch (e){ next(e); }
+  app.get('/api/items/:code', async (req, res, next) => {
+    try {
+      const item = findItem(normCode(req.params.code));
+      // personalize a jukebox's skipState for the caller (optional identity)
+      const who = item.surface === 'jukebox' ? await requester(req).catch(() => null) : null;
+      res.json(publicItem(item, who));
+    } catch (e){ next(e); }
   });
 
   /* ── signed-in: buy / bid / cancel (verified session; dev hatch only
@@ -528,7 +581,14 @@ export async function attachItems(app, requireAdmin, store){
 
   // The dashboard's data: every item + its live state.
   app.get('/api/items', requireAdmin, (req, res) => {
-    res.json(Array.from(items.values()).map(publicItem));
+    // Admin dashboard needs the RAW jukebox config (rule knobs + catalog files)
+    // to edit it — publicItem's jukebox block is the patron shape. jukeboxConfig
+    // is admin-only (this route is requireAdmin) and carries no secrets (spotify
+    // tokens, when that backend lands, are stripped before here).
+    res.json(Array.from(items.values()).map(i => ({
+      ...publicItem(i),
+      ...(i.surface === 'jukebox' ? { jukeboxConfig: jukeboxSafeConfig(i.jukebox) } : {}),
+    })));
   });
 
   app.post('/api/items', requireAdmin, async (req, res, next) => {
@@ -554,7 +614,15 @@ export async function attachItems(app, requireAdmin, store){
       if (req.body && req.body.mode !== undefined && req.body.mode !== cur.mode
           && c && (c.active || c.queue.length || c.auction))
         throw httpError(409, 'end the current slot/queue/round before switching modes');
+      // Flipping the control surface (pad↔jukebox) with live runtime would
+      // strand a slot holder or a music queue — demand a clean slate too.
+      if (req.body && req.body.surface !== undefined && req.body.surface !== cur.surface){
+        const jkActive = jukeboxApi && cur.surface === 'jukebox' && jukeboxApi.__test.rt.get(code);
+        if ((c && (c.active || c.queue.length || c.auction)) || (jkActive && (jkActive.nowPlaying || jkActive.queue.length)))
+          throw httpError(409, 'end the current slot/queue before switching the surface');
+      }
       const item = await store.updateItem(code, req.body || {});
+      if (jukeboxApi && item.surface !== 'jukebox') jukeboxApi.dropRuntime(code);
       items.set(code, item);
       broadcastState(item);                    // open phones re-render prices etc.
       res.json(publicItem(item));
@@ -573,6 +641,7 @@ export async function attachItems(app, requireAdmin, store){
         try { rec.ws.close(4401, 'item deleted'); } catch { /* already gone */ }
       }
       rigsOnline.delete(code); programs.delete(code); graceUntil.delete(code); duty.delete(code); rosters.delete(code);
+      if (jukeboxApi) jukeboxApi.dropRuntime(code);
       res.status(204).end();
     } catch (e){ next(e); }
   });
@@ -616,6 +685,11 @@ export async function attachItems(app, requireAdmin, store){
         item = await store.updateItem(code, { status: action });
         items.set(code, item);
         announce(code, action);
+        // A jukebox player stops on the 'off' announce; on 'on' it needs the
+        // current track (or house) re-issued so music resumes without waiting
+        // for the next request. onRigConnect does exactly that and no-ops when
+        // the item isn't a jukebox / isn't back on.
+        if (action === 'on' && item.surface === 'jukebox' && jukeboxApi) jukeboxApi.onRigConnect(code);
       } else throw httpError(400, 'action must be pause|resume|on|off');
       broadcastState(item);
       res.json(publicItem(item));

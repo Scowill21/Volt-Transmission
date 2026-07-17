@@ -40,6 +40,20 @@ item defs persist via store.js (items table / `server/items.json`), runtime
 queues reset on deploy like paid.js; admin ops live in control.html's gear view
 (same X-Admin-Key), QR encoder is embedded + decoder-verified. `src/` +
 `react-app.html` is an archived React variant — reference only, don't extend it.
+**VOLT JUKEBOX** (`server/jukebox.js`, same tier): an item's `surface` is `'pad'`
+(default, the d-pad above) or `'jukebox'` — audio as a control surface. A jukebox
+room lets paid patrons queue from an admin catalog, skip (bounded by admin
+sliding-window rules), or bid for the next play; the SERVER owns the queue/rules/
+what-plays-next and a Pi rig (`tools/volt-jukebox.mjs`, MPD or `log` backend) is
+a dumb player driven by `{type:'jukebox', action}` bus commands (RESERVED) that
+reports truth back via `track_started`/`track_ended`/`position` (bus RIG_REPORT
+set — server-CONSUMED, never broadcast, rig/admin only). Two postures
+(`jukebox.monetization`): `controller_slot` (reuses the buy-now/auction slot;
+holder drives free but windows still bind) · `per_action` (each action priced).
+Spotify is DEFERRED — the server is backend-blind (see `PROMPT-JUKEBOX.md` §8).
+Surface flip is guarded (no stranded slot/queue); jukebox config lives in
+`item.jukebox`, runtime (nowPlaying/queue/skips/bidRound) is in-memory in
+`jukebox.js`'s `rt` map, resets on deploy.
 
 ## Golden rules
 
@@ -75,9 +89,10 @@ node .smoke-test.cjs     # client: headless run of every console path (jsdom)
 node .smoke-server.cjs   # server: the paid control gate (in-process, auth-unconfigured)
 node .smoke-failclosed.cjs  # server: fail-closed on DB outage (boots a child w/ Supabase env set + DB down)
 node .smoke-items.cjs    # server: Volt Control items + output layer (queue, auction, gate, election, failover)
-node .smoke-control.cjs  # client: control.html USER page (entry, item, controller, throttle, redundancy UI)
-node .smoke-ops.cjs      # client: control-ops.html admin dashboard (gate, create/edit/actions, chain, QR)
-node .smoke-stage.cjs    # client: stage.html browser output plane (scenes, election, attract)
+node .smoke-jukebox.cjs  # server: JUKEBOX rules engine (skip windows, queue caps, bid rounds, rig reports, forgery)
+node .smoke-control.cjs  # client: control.html USER page (entry, item, controller, throttle, redundancy UI, jukebox surface)
+node .smoke-ops.cjs      # client: control-ops.html admin dashboard (gate, create/edit/actions, chain, QR, jukebox editor)
+node .smoke-stage.cjs    # client: stage.html browser output plane (scenes, election, attract, jukebox marquee)
 ```
 
 `.smoke-test.cjs` evals the whole page script (also catches syntax errors) and
@@ -98,8 +113,15 @@ plus a hard assertion that NO admin code/key/QR-encoder ships to visitors.
 `.smoke-ops.cjs` drives the split-out admin dashboard control-ops.html (key
 gate, create + QR poster, skip/pause/off, edit PATCH, the chain manager, the
 edit-open refresh guard). `.smoke-stage.cjs` drives stage.html (scenes render +
-react, output election self-mute, attract mode, resync staleness guard). Keep
-all seven green and extend them when adding features.
+react, output election self-mute, attract mode, resync staleness guard, the
+jukebox `?view=marquee` now-playing board). `.smoke-jukebox.cjs` is the JUKEBOX
+rules engine's hermetic matrix — pad↔jukebox back-compat, catalog-only queueing,
+idle-start, queue caps + no-repeat, play-next fairness, the full skip decision
+(minPlaySec floor · onlyBeforeSec window · per-user + global sliding-window caps
+that slide not reset), allowMidSong, stale-songId skips (no window decrement),
+rig `track_started`/`ended`/`position` reports, forged-wire rejection, bid-round
+close, controller_slot vs per_action, and admin force-skip/clear/remove. Keep all
+EIGHT green and extend them when adding features.
 
 ## Deploy
 

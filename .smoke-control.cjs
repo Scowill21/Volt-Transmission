@@ -42,6 +42,15 @@ const DB = {
   '2AWK6P': { type: 'item_queues', item: '2AWK6P', name: 'Laser Head', description: null,
     mode: 'auction', priceCents: 200, slotSeconds: 60, auctionSeconds: 45, minIncrementCents: 50,
     status: 'on', active: null, queue: [], auction: null, ts: 0 },
+  JUKE01: { type: 'item_queues', item: 'JUKE01', name: 'Bar Jukebox', description: 'Pick the vibe',
+    surface: 'jukebox', mode: 'buynow', priceCents: 500, slotSeconds: 120, auctionSeconds: 60, minIncrementCents: 50,
+    status: 'on', active: null, queue: [], auction: null, ts: 0,
+    jukebox: { monetization: 'per_action', mode: 'buynow', backend: 'log',
+      catalog: [{ id: 'aaa', title: 'Song A', artist: 'Artist A', durationSec: 180 },
+                { id: 'bbb', title: 'Song B', artist: 'Artist B', durationSec: 200 },
+                { id: 'ccc', title: 'Song C', artist: null, durationSec: 0 }],
+      prices: { queueCents: 200, playNextCents: 400, skipCents: 100 }, houseMode: true,
+      nowPlaying: null, queue: [], queueLen: 0, skipState: { roomLeft: 6 }, bidRound: null } },
 };
 const payload = (code) => JSON.parse(JSON.stringify({ ...DB[code], ts: now() }));
 const respond = (status, body) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) });
@@ -73,6 +82,30 @@ w.fetch = (url, opts = {}) => {
         topUserId: body.user.id, bidCount: (p.auction ? p.auction.bidCount : 0) + 1,
         minNextCents: body.cents + p.minIncrementCents };
     } else p.active = null;
+    return respond(201, payload(m[1]));
+  }
+
+  m = u.match(/\/api\/items\/([A-Z0-9]{6})\/jukebox\/(queue|skip|bid)$/);
+  if (m){
+    const p = DB[m[1]];
+    if (!p || !p.jukebox) return respond(404, { error: 'no item with that code' });
+    if (!body.user) return respond(401, { error: 'sign in first' });
+    const jb = p.jukebox;
+    if (m[2] === 'queue'){
+      const song = jb.catalog.find(s => s.id === body.songId);
+      if (!song) return respond(409, { error: 'that song is not in the catalog' });
+      if (!jb.nowPlaying) jb.nowPlaying = { songId: song.id, title: song.title, artist: song.artist, startedAt: now(), durationSec: song.durationSec || 180, elapsedSec: 0 };
+      else jb.queue.push({ position: jb.queue.length + 1, songId: song.id, title: song.title, byName: body.user.name, byId: body.user.id, playNext: !!body.playNext });
+      jb.queueLen = jb.queue.length;
+    } else if (m[2] === 'skip'){
+      if (!jb.nowPlaying) return respond(409, { error: 'nothing is playing' });
+      jb.nowPlaying = jb.queue.length ? (() => { const n = jb.queue.shift(); jb.queueLen = jb.queue.length;
+        return { songId: n.songId, title: n.title, artist: null, startedAt: now(), durationSec: 180, elapsedSec: 0 }; })() : null;
+    } else if (m[2] === 'bid'){
+      if (jb.mode !== 'bid') return respond(409, { error: 'this jukebox is not in bid mode' });
+      jb.bidRound = { topCents: body.cents, topName: body.user.name, topUserId: body.user.id,
+        bidCount: (jb.bidRound ? jb.bidRound.bidCount : 0) + 1, minNextCents: body.cents + 50, closesAt: now() + 60000 };
+    }
     return respond(201, payload(m[1]));
   }
 
@@ -296,6 +329,71 @@ const ok = (label) => { console.log('OK  ', passed + 1, label); passed++; };
   assert.ok(!/unlockAdmin|adminApi|const QR = /.test(html), 'user page ships no admin JS / QR encoder');
   assert.ok(!/id="viewAdmin"|id="gearBtn"|id="qrModal"/.test(html), 'user page has no admin markup');
   ok('split invariant: user page carries NO admin code, key, or QR encoder');
+
+  /* ── jukebox surface (per_action) ── */
+  assert.strictEqual(await w.__submitCode('JUKE01'), true);
+  assert.strictEqual(w.__S.view, 'item');
+  assert.ok(!w.document.getElementById('jukeboxCard').hidden, 'jukebox card visible');
+  assert.ok(w.document.getElementById('buyCard').hidden, 'per_action hides the slot buy card');
+  assert.ok(w.document.getElementById('bidCard').hidden, 'per_action hides the slot bid card');
+  assert.strictEqual(w.document.querySelectorAll('#jbCatalog [data-act="queue"]').length, 3, 'all 3 catalog rows render a Queue button');
+  assert.match(w.document.getElementById('jbNpTitle').textContent, /House mix/i, 'idle jukebox shows the house-mix now-playing');
+  ok('jukebox per_action: jukebox card shown, slot cards hidden, catalog + house render');
+
+  // queue on an idle jukebox → it starts playing that song
+  w.__doJbQueue('aaa', false); await tick();
+  assert.match(w.document.getElementById('jbNpTitle').textContent, /Song A/, 'now-playing = the queued song');
+  ok('queue on idle jukebox → now-playing = Song A');
+
+  // a second add lands in up-next
+  w.__doJbQueue('bbb', false); await tick();
+  assert.match(w.document.getElementById('jbQueue').textContent, /Song B/, 'second add appears in up-next');
+  ok('second queue add → shows in up-next');
+
+  // live skip window: protected < minPlay · open inside onlyBefore · too late after
+  const jukePayload = (elapsedSec, extra) => {
+    const st = now() - elapsedSec * 1000;
+    const jp = payload('JUKE01');
+    jp.jukebox.nowPlaying = { songId: 'aaa', title: 'Song A', artist: 'Artist A', startedAt: st, durationSec: 180, elapsedSec };
+    jp.jukebox.skipState = Object.assign({ canSkip: true, yourLeft: 2, roomLeft: 6, minPlayUntil: st + 10000, skippableUntil: st + 30000 }, extra || {});
+    return jp;
+  };
+  w.__applyItem(jukePayload(5));
+  assert.strictEqual(w.document.getElementById('jbSkip').disabled, true, 'skip disabled within the minPlay floor');
+  assert.match(w.document.getElementById('jbSkip').textContent, /protected/i, 'shows the protected reason');
+  w.__applyItem(jukePayload(20));
+  assert.strictEqual(w.document.getElementById('jbSkip').disabled, false, 'skip enabled inside the window');
+  w.__applyItem(jukePayload(40));
+  assert.strictEqual(w.document.getElementById('jbSkip').disabled, true, 'skip disabled past onlyBeforeSec');
+  assert.match(w.document.getElementById('jbSkip').textContent, /too late/i, 'shows the too-late reason');
+  // exhausted personal skips → disabled even inside the window
+  w.__applyItem(jukePayload(20, { yourLeft: 0 }));
+  assert.strictEqual(w.document.getElementById('jbSkip').disabled, true, 'no skips left → disabled');
+  ok('skip button ticks the window: protected < minPlay · open in window · too late after · caps bind');
+
+  // controller_slot posture: the slot buy card AND the jukebox card both show;
+  // actions are gated on holding the slot (not on paying per-action)
+  const csp = payload('JUKE01');
+  csp.jukebox.monetization = 'controller_slot'; csp.active = null;
+  w.__applyItem(csp);
+  assert.ok(!w.document.getElementById('buyCard').hidden, 'controller_slot shows the slot buy card');
+  assert.ok(!w.document.getElementById('jukeboxCard').hidden, 'jukebox card also shown');
+  assert.match(w.document.getElementById('jbGate').textContent, /control slot/i, 'non-holder is told to buy the slot');
+  ok('controller_slot: slot buy + jukebox card both show, actions gated on the slot');
+
+  // bid mode: bid panel appears, a bid updates the top (flip the backing item too
+  // so the /jukebox/bid endpoint accepts it, not just the client render)
+  DB.JUKE01.jukebox.mode = 'bid';
+  DB.JUKE01.jukebox.monetization = 'per_action';
+  DB.JUKE01.jukebox.nowPlaying = { songId: 'aaa', title: 'Song A', artist: 'Artist A', startedAt: now(), durationSec: 180, elapsedSec: 0 };
+  DB.JUKE01.jukebox.queue = []; DB.JUKE01.jukebox.queueLen = 0; DB.JUKE01.jukebox.bidRound = null;
+  w.__applyItem(payload('JUKE01'));
+  assert.ok(!w.document.getElementById('jbBid').hidden, 'bid panel shown in bid mode');
+  w.__S.jbPick = 'bbb';
+  w.document.getElementById('jbBidCustom').value = '2.50';
+  w.__doJbBid(); await tick();
+  assert.match(w.document.getElementById('jbBidTop').textContent, /\$2\.50/, 'top bid reflects the placed bid');
+  ok('bid mode: bid-for-next panel bids on the picked song, top updates');
 
   console.log(`\nALL CLEAR — ${passed} control-page (user) checks passed`);
   w.close();

@@ -100,6 +100,12 @@ the old `/control` gear is gone.)
   and test with the HTTP inject before doors open.
 - Queues/auctions are in-memory at this tier — a deploy or restart clears
   them (item definitions survive; they're in the database).
+- **Jukebox items** (surface = jukebox): same page. Curate the **catalog** and
+  the skip/queue **knobs** in the item's Edit form, run a **player rig**
+  (`tools/volt-jukebox.mjs` — HARDWARE.md §9), and drive it live from the card
+  (now-playing, veto a row, Skip track, Clear queue, House on/off). ⚠️ **Read
+  the music-licensing note** (SETUP.md → "Volt Jukebox") before charging the
+  public — Spotify is deliberately not wired in; play your own licensed files.
 
 ### Testing — run before every push
 ```bash
@@ -107,10 +113,12 @@ node .smoke-test.cjs        # client: every console path (jsdom)
 node .smoke-server.cjs      # server: the paid permission gate
 node .smoke-failclosed.cjs  # server: fail-closed on a DB outage
 node .smoke-items.cjs       # server: Volt Control items product
+node .smoke-jukebox.cjs     # server: the jukebox rules engine
 node .smoke-control.cjs     # client: the /control USER page (jsdom)
 node .smoke-ops.cjs         # client: the /control-ops admin page (jsdom)
+node .smoke-stage.cjs       # client: the /stage output plane (jsdom)
 ```
-All five must print `ALL CLEAR`. Extend them when you add features (it's a rule
+All eight must print `ALL CLEAR`. Extend them when you add features (it's a rule
 in `CLAUDE.md`).
 
 ### Monitoring & health

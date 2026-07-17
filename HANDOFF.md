@@ -32,16 +32,17 @@ paid features (test tier), and a shop — served by a small Express API
 | `SETUP.md` | Operator guide: TD, songs, action bus, paid tier, shop |
 | `ROADMAP.md` | Tier plan; what's shipped vs open |
 | `PAYMENTS-SETUP.md` | The full Supabase + Stripe (2b) go-live playbook |
-| `HARDWARE.md` | Raspberry Pi rig guide (`tools/bus-to-pi.mjs`): wiring, pins.json, systemd, failover |
+| `HARDWARE.md` | Raspberry Pi rig guide — `tools/bus-to-pi.mjs` (GPIO) + `tools/volt-jukebox.mjs` (jukebox player): wiring, pins.json, MPD, systemd, failover |
 | `PROMPT-CONTROL-SPLIT.md` | The user/admin split build spec — SHIPPED this session (control-ops.html) |
 | `PROMPT-OUTPUTS-REDUNDANCY.md` | The output-layer build spec — Phase 1 SHIPPED this session; §9 Phase-2 menu open |
 | `PROMPT-ITEM-CONTROL.md` | The original Volt Control build spec (owner decisions, executed) |
+| `PROMPT-JUKEBOX.md` | The Volt Jukebox build spec — SHIPPED this session (server/jukebox.js, tools/volt-jukebox.mjs); §8 = licensing reality |
 | `ARCHITECTURE.md` | One-pager: Render vs Supabase vs backend |
 | `README.md` | Mostly the archived React variant — low value |
 
 ---
 
-## 2. Current state (verified live, 2026-07-15)
+## 2. Current state (verified live, 2026-07-16)
 
 Everything below is **deployed and working in production** unless marked.
 
@@ -139,6 +140,39 @@ Everything below is **deployed and working in production** unless marked.
   split: `.smoke-control.cjs` → USER (20) + the no-admin invariant; NEW
   `.smoke-ops.cjs` → dashboard (9, gate/create/QR/actions/edit/chain/refresh
   guard). The `PROMPT-CONTROL-SPLIT.md` mission is now DONE.
+- **VOLT JUKEBOX — audio as a control surface (test tier, this session)** —
+  an item can now have `surface:'jukebox'` (default stays `'pad'`, byte-identical
+  back-compat). A jukebox turns its `item:<CODE>` room into a venue music
+  controller: paid patrons queue songs from an admin catalog, skip (bounded by
+  admin windows), or bid for the next play. **The SERVER is the sole authority**
+  (queue, skip windows, bid round, what plays next); a **rig** (Raspberry Pi via
+  `tools/volt-jukebox.mjs`, MPD or `log` backend) is a dumb player that receives
+  `{type:'jukebox', action}` commands and reports reality back
+  (`track_started`/`track_ended`/`position`, a new bus RIG_REPORT set the server
+  CONSUMES, never broadcasts). On (re)connect / election-promotion / item-on the
+  rig resyncs FROM the server. Two monetization postures
+  (`jukebox.monetization`): **`controller_slot`** (default — the shipped
+  buy-now/auction machinery sells a timed slot; the holder drives for free but
+  every admin window/cap still binds) and **`per_action`** (each queue-add / skip
+  / bid individually priced). `server/jukebox.js` is the reviewed heart; UIs:
+  `control.html` patron surface (now-playing, live skip-eligibility, catalog,
+  bid), `control-ops.html` catalog editor + knobs + live veto panel,
+  `stage.html?view=marquee` venue now-playing board. **Spotify is deliberately
+  DEFERRED** (server is backend-blind; it slots in as its own backend once
+  OAuth/licensing is signed off — see `PROMPT-JUKEBOX.md` §8 / `SETUP.md`). Money
+  stubbed at `STRIPE:` seams; runtime in-memory (resets on deploy). NEW suite
+  `.smoke-jukebox.cjs` (20, hermetic rules matrix — incl. the ship-review
+  regressions); fail-closed +3, control +6, ops +5, stage +3. **Adversarial
+  review ran before ship** (two agents, hardest look at time math + window
+  pruning + the auth boundary); fixes applied: jukebox `play` commands now go
+  **rig-only** (never fan the catalog `file`/URI to the room), `noRepeatMin=0`
+  still blocks duplicate queued/playing songs (no lost paid play), a skip cap of
+  **0 = skips off** (not unlimited), a **one-skip-per-track latch** stops a
+  double-tap double-charging the quota, player **reports accepted only from the
+  elected program rig** (a spare can't hijack nowPlaying), `position` `sec` is
+  clamped, `track_ended` can't double-advance, and `onlyBeforeSec` is floored to
+  `minPlaySec` so the skip window is never empty. The `PROMPT-JUKEBOX.md` mission
+  is DONE.
 - **⚠️ CABINET DEMO LOOK IS ON** — `CABINET_DEMO = true` in `index.html`
   renders a furnished, NON-functional cabinet preview (3 fake records + 12
   prints; clicks explain). **When William says "remove demo": flip that one
@@ -162,10 +196,13 @@ node .smoke-test.cjs        # client: whole console in jsdom (~20 steps)
 node .smoke-server.cjs      # server: paid gate + shop gates (15 checks, hermetic)
 node .smoke-failclosed.cjs  # boots real server w/ Supabase env set + DB down → 401s (incl. item buy/bid)
 node .smoke-items.cjs       # server: Volt Control items + OUTPUT LAYER (41 checks, hermetic)
-node .smoke-control.cjs     # client: control.html USER page in jsdom (20 checks)
-node .smoke-ops.cjs         # client: control-ops.html admin dashboard (9 checks)
-node .smoke-stage.cjs       # client: stage.html browser output plane (7 checks)
+node .smoke-jukebox.cjs     # server: JUKEBOX rules engine — skip windows/queue/bid/reports (20, hermetic)
+node .smoke-control.cjs     # client: control.html USER page in jsdom (26 checks — incl. jukebox surface)
+node .smoke-ops.cjs         # client: control-ops.html admin dashboard (14 checks — incl. jukebox editor)
+node .smoke-stage.cjs       # client: stage.html browser output plane (10 checks — incl. marquee)
 ```
+(`.smoke-failclosed.cjs` now also proves jukebox queue/skip/bid 401 during a DB
+outage — 10 checks.)
 
 Extend them with every feature (CLAUDE.md rule). They are the ONLY gate —
 there is no CI.
