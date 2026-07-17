@@ -293,6 +293,33 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
 .jb-cat-edit .ox{ background:none; border:none; color:var(--warn); font-size:1rem; cursor:pointer; padding:.1rem .3rem; }
 .jb-checkrow{ grid-column:span 2; display:flex; gap:1rem; align-items:center; font-size:.8rem; color:var(--sub); }
 .jb-checkrow label{ flex-direction:row; align-items:center; gap:.35rem; }
+
+/* Control hub — glanceable controller + connect panel + live OSC monitor */
+.ctl-tag{ color:var(--accent-ink); text-transform:uppercase; letter-spacing:.03em; font-size:.78rem; }
+.hub-wrap{ border-top:1px solid var(--edge); margin-top:.5rem; }
+.hub-wrap > summary{ cursor:pointer; font-size:.82rem; color:var(--sub); padding:.45rem 0; list-style:none; }
+.hub-wrap > summary::-webkit-details-marker{ display:none; }
+.hub-wrap > summary::before{ content:'▸ '; color:var(--accent); }
+.hub-wrap[open] > summary::before{ content:'▾ '; }
+.hub-body, .mon-body{ padding:.2rem 0 .6rem; }
+.hub-lead{ font-size:.82rem; color:var(--sub); margin-bottom:.5rem; }
+.osc-list{ margin-bottom:.6rem; }
+.osc-row{ display:flex; gap:.6rem; align-items:baseline; padding:.2rem 0; border-bottom:1px dashed var(--edge); }
+.osc-row:last-child{ border-bottom:none; }
+.osc-label{ font-size:.78rem; color:var(--ink); min-width:8.5em; }
+.osc-addr{ font-family:ui-monospace,Menlo,monospace; font-size:.74rem; color:var(--accent-ink); word-break:break-all; }
+.cmd-row{ margin:.45rem 0; }
+.cmd-lbl{ display:block; font-size:.72rem; color:var(--sub); text-transform:uppercase; letter-spacing:.04em; margin-bottom:.15rem; }
+.cmd{ display:block; font-family:ui-monospace,Menlo,monospace; font-size:.72rem; background:var(--bg, #f7f4ef); border:1px solid var(--edge);
+  border-radius:8px; padding:.45rem .55rem; color:var(--ink); word-break:break-all; white-space:pre-wrap; }
+.cmd-copy{ margin-top:.2rem; font-size:.72rem; border:1px solid var(--edge); background:var(--card); border-radius:7px; padding:.2rem .6rem; cursor:pointer; color:var(--sub); }
+.mon-hint{ font-size:.78rem; color:var(--sub); margin-bottom:.4rem; }
+.mon-log{ max-height:11rem; overflow-y:auto; border:1px solid var(--edge); border-radius:10px; background:#0f0d0b; padding:.4rem .5rem; }
+.mon-idle{ color:#8a8378; font-size:.78rem; font-family:ui-monospace,Menlo,monospace; padding:.3rem; }
+.mon-row{ display:flex; gap:.7rem; align-items:baseline; padding:.16rem .2rem; border-bottom:1px solid rgba(255,255,255,.05); animation:monin .25s ease; }
+@keyframes monin{ from{ background:rgba(209,114,15,.28); } to{ background:transparent; } }
+.mon-act{ color:#f4f0ea; font-family:ui-monospace,Menlo,monospace; font-size:.76rem; min-width:11em; }
+.mon-osc{ color:#e0a253; font-family:ui-monospace,Menlo,monospace; font-size:.74rem; word-break:break-all; }
 </style>
 </head>
 <body>
@@ -307,10 +334,11 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
     <div class="admin-head">
       <h2>Items · ops</h2>
     </div>
+    <p class="note" style="margin:-.6rem 0 1rem">Pay-to-control physical items &amp; jukeboxes — create an item, pick its controller, wire up your rig, and watch the live output. Its own product; the audio-reactive console has its own admin.</p>
 
     <div id="adminGate">
       <div class="card">
-        <p class="note" style="margin-top:0">Admin key — same <code>X-Admin-Key</code> as <a href="/admin.html">the ops room</a>. Held in memory only.</p>
+        <p class="note" style="margin-top:0">Your operator key (the <code>ADMIN_KEY</code> / <code>X-Admin-Key</code>). Held in this tab's memory only, never stored.</p>
         <input id="adminKeyIn" type="password" placeholder="admin key" autocomplete="off" />
         <button class="btn slim" id="adminUnlock">Unlock</button>
         <div class="status-line" id="adminGateMsg"></div>
@@ -324,7 +352,12 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
           <label class="span2">name<input id="nItemName" placeholder="e.g. Lobby Lamp" /></label>
           <label class="span2">controls guide — what the d-pad and A/B/C do (shown to players)
             <textarea id="nItemInstr" rows="3" placeholder="▲▼ tilt the lamp · ◀▶ swing it · A strobe · B color · C chaos"></textarea></label>
-          <label>surface<select id="nItemSurface"><option value="pad">pad · d-pad/A-B-C</option><option value="jukebox">jukebox · music</option></select></label>
+          <label>surface<select id="nItemSurface"><option value="pad">pad · controls</option><option value="jukebox">jukebox · music</option></select></label>
+          <label id="nCtlWrap">controller<select id="nItemController">
+            <option value="dpad">d-pad · ▲▼◀▶ + A/B/C</option>
+            <option value="joystick">joystick · XY + fire</option>
+            <option value="faders">faders · 4 sliders</option>
+            <option value="grid">grid · 3×3 pads</option></select></label>
           <label id="nJukeMonWrap" hidden>money<select id="nJukeMon"><option value="controller_slot">control slot</option><option value="per_action">per action</option></select></label>
           <label>mode<select id="nItemMode"><option value="buynow">buy now</option><option value="auction">auction</option></select></label>
           <label>price / start ($)<input id="nItemPrice" type="number" step="0.50" value="5.00" inputmode="decimal" /></label>
@@ -678,8 +711,10 @@ const adminApi = (method, path, body) => api(method, path, body, { 'X-Admin-Key'
 async function refreshAdmin(){
   if (!S.adminKey) return;
   // Never clobber work in progress: an open edit form (or focus anywhere in
-  // the list) would lose typed values + focus to the innerHTML rebuild.
+  // the list) would lose typed values + focus to the innerHTML rebuild — and an
+  // open live monitor would be torn down (orphaning its socket). Hold the poll.
   if (document.querySelector('#adminList form[data-edit]:not([hidden])')
+      || document.querySelector('#adminList details.mon-wrap[open]')
       || $('adminList').contains(document.activeElement)) return;
   try { S.adminItems = await adminApi('GET', '/api/items'); renderAdmin(); } catch {}
 }
@@ -688,7 +723,11 @@ setInterval(refreshAdmin, 4000);
 $('nItemMode').addEventListener('change', () => { $('nAuctionWrap').hidden = $('nItemMode').value !== 'auction'; });
 // jukebox surface: reveal the monetization picker. controller_slot still sells
 // a slot (mode/price/slot below configure it); per_action prices each action.
-$('nItemSurface').addEventListener('change', () => { $('nJukeMonWrap').hidden = $('nItemSurface').value !== 'jukebox'; });
+$('nItemSurface').addEventListener('change', () => {
+  const jb = $('nItemSurface').value === 'jukebox';
+  $('nJukeMonWrap').hidden = !jb;
+  $('nCtlWrap').hidden = jb;                 // controller layout is a pad-only choice
+});
 
 async function createItem(){
   const msg = $('createMsg');
@@ -706,6 +745,8 @@ async function createItem(){
     if (surface === 'jukebox'){          // rest defaults server-side; catalog + knobs are set in the item's edit form
       body.surface = 'jukebox';
       body.jukebox = { monetization: $('nJukeMon').value };
+    } else {
+      body.controller = $('nItemController').value;   // which controller layout the pad holder gets
     }
     const item = await adminApi('POST', '/api/items', body);
     $('nItemName').value = ''; $('nItemInstr').value = '';
@@ -730,7 +771,7 @@ function adminCard(p){
   const cfg = p.jukeboxConfig;                // raw config (admin-only), present for jukebox items
   const meta = isJb && cfg
     ? `jukebox · ${cfg.monetization === 'per_action' ? 'per action' : 'control slot'} · ${cfg.backend} · ${(cfg.catalog || []).length} songs`
-    : `${p.mode === 'buynow' ? 'buy now' : 'auction'} · ${fmt$(p.priceCents)} · ${p.slotSeconds}s slot · ${depth}`;
+    : `${p.mode === 'buynow' ? 'buy now' : 'auction'} · ${fmt$(p.priceCents)} · ${p.slotSeconds}s slot · <b class="ctl-tag">${esc(p.controller || 'dpad')}</b> · ${depth}`;
   return `
   <div class="card icard" data-code="${p.item}" data-surface="${p.surface || 'pad'}">
     <div style="display:flex; align-items:center; gap:.6rem">
@@ -740,7 +781,7 @@ function adminCard(p){
     <div class="meta">${meta}</div>
     <div class="live-line">${live}${outputSummary(p)}</div>
     ${chainBlock(p)}
-    ${isJb ? jukeboxLive(p) : ''}
+    ${isJb ? jukeboxLive(p) : padHub(p)}
     <div class="acts">
       <button data-act="qr">QR</button>
       ${isJb ? '' : '<button data-act="skip">Skip</button>'}
@@ -759,6 +800,8 @@ function adminCard(p){
       <label>slot (s)<input name="slot" type="number" value="${p.slotSeconds}" /></label>
       <label>auction clock (s)<input name="auction" type="number" value="${p.auctionSeconds}" /></label>
       <label class="span2">min bid step ($)<input name="step" type="number" step="0.25" value="${(p.minIncrementCents / 100).toFixed(2)}" /></label>
+      ${isJb ? '' : `<label class="span2">controller<select name="controller">
+        ${['dpad', 'joystick', 'faders', 'grid'].map(c => `<option value="${c}"${(p.controller || 'dpad') === c ? ' selected' : ''}>${c}</option>`).join('')}</select></label>`}
       ${isJb && cfg ? jukeboxFields(cfg) : ''}
       <button class="btn slim span2" type="submit">Save</button>
     </form>
@@ -881,7 +924,102 @@ function chainBlock(p){
 let revealed = null;
 const STAGE_SCENE_OPTS = ['orb', 'grid'].map(s => `<option value="${s}">${s}</option>`).join('');
 
+/* ── the Control hub: per-item connect help + a live OSC/action monitor ── */
+// The OSC address each controller layout emits (mirrors tools/bus-to-osc.mjs).
+const OSC_ADDR = {
+  dpad:     [['▲▼◀▶ d-pad', '/volt/key/pad_up · pad_down · pad_left · pad_right'], ['A / B / C', '/volt/key/btn_a · btn_b · btn_c']],
+  joystick: [['drag (XY)', '/volt/xy   → float x, float y  (0..1)'], ['FIRE', '/volt/key/btn_a']],
+  faders:   [['fader 1–4', '/volt/fader/0 … /volt/fader/3   → float v  (0..1)']],
+  grid:     [['pads 1–9', '/volt/key/cell_0 … /volt/key/cell_8']],
+};
+const busBase = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/bus`;
+function connectCmds(code){
+  const b = busBase();
+  return {
+    osc: `node tools/bus-to-osc.mjs --url "${b}?channel=item:${code}&as=vj" --osc 127.0.0.1:7000`,
+    pi:  `node tools/bus-to-pi.mjs --url ${b} --item ${code} --rig <name> --key <KEY> --map pins.json`,
+    td:  `${b}?channel=item:${code}`,
+  };
+}
+// Translate a live {type:'key', …} bus message to a readable line + its OSC address.
+const fmtN = (n) => (typeof n === 'number' ? n.toFixed(2) : n);
+function actionToOsc(m){
+  if (m.action === 'pad_xy') return { label: `pad_xy  x=${fmtN(m.x)}  y=${fmtN(m.y)}`, osc: `/volt/xy ${fmtN(m.x)} ${fmtN(m.y)}` };
+  if (m.action === 'fader')  return { label: `fader ${m.i}  v=${fmtN(m.v)}`, osc: `/volt/fader/${m.i} ${fmtN(m.v)}` };
+  return { label: m.action, osc: `/volt/key/${m.action}` };
+}
+function padHub(p){
+  const c = p.controller || 'dpad';
+  const cmd = connectCmds(p.item);
+  const addr = (OSC_ADDR[c] || OSC_ADDR.dpad)
+    .map(([l, a]) => `<div class="osc-row"><span class="osc-label">${esc(l)}</span><code class="osc-addr">${esc(a)}</code></div>`).join('');
+  const cmdRow = (lbl, val) => `<div class="cmd-row"><span class="cmd-lbl">${lbl}</span><code class="cmd" data-copy>${esc(val)}</code><button class="cmd-copy" data-copycmd>copy</button></div>`;
+  return `
+  <details class="hub-wrap">
+    <summary>Connect a rig / VJ software</summary>
+    <div class="hub-body">
+      <div class="hub-lead">This item's controller is <b>${esc(c)}</b> — point your software at its bus room and map:</div>
+      <div class="osc-list">${addr}</div>
+      ${cmdRow('OSC bridge · Resolume / VDMX / any OSC app', cmd.osc)}
+      ${cmdRow('Raspberry Pi GPIO rig', cmd.pi)}
+      ${cmdRow('TouchDesigner · WebSocket DAT → Network Address', cmd.td)}
+      <div class="note" style="margin-top:.4rem">The Pi <b>--key</b> comes once from the Outputs chain above. TD/OSC subscribe read-only (no key).</div>
+    </div>
+  </details>
+  <details class="hub-wrap mon-wrap" data-mon="${p.item}">
+    <summary>Live output — watch what the controller sends</summary>
+    <div class="mon-body">
+      <div class="mon-hint">Whatever the current holder drives streams here live, with the OSC address it maps to.</div>
+      <div class="mon-log" data-monlog><div class="mon-idle">waiting for input… (someone must hold the slot and drive)</div></div>
+    </div>
+  </details>`;
+}
+
+// A live monitor = one bus socket per OPEN <details>, keyed by item code. The
+// ops page joins the item room as a plain viewer and renders the holder's key
+// traffic (fanned out to the room, sender excepted). Same-origin, no key needed.
+const monitors = new Map();
+function openMonitor(code, logEl){
+  if (monitors.has(code) || !logEl) return;
+  let ws; try { ws = new WebSocket(`${busBase()}?channel=${encodeURIComponent('item:' + code)}`); } catch { return; }
+  monitors.set(code, ws);
+  ws.onmessage = (e) => {
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.type !== 'key' || !m.action) return;
+    const idle = logEl.querySelector('.mon-idle'); if (idle) idle.remove();
+    const { label, osc } = actionToOsc(m);
+    const row = document.createElement('div');
+    row.className = 'mon-row';
+    row.innerHTML = `<span class="mon-act">${esc(label)}</span><code class="mon-osc">${esc(osc)}</code>`;
+    logEl.prepend(row);
+    while (logEl.childElementCount > 40) logEl.lastElementChild.remove();
+  };
+  ws.onclose = () => { if (monitors.get(code) === ws) monitors.delete(code); };
+  ws.onerror = () => {};
+}
+function closeMonitor(code){ const ws = monitors.get(code); if (ws){ try { ws.close(); } catch {} } monitors.delete(code); }
+// Any full list re-render destroys the monitor DOMs — close their sockets first
+// so a direct renderAdmin() (chain edit / jukebox action on another card) can't
+// orphan a live monitor's WebSocket. (refreshAdmin already HOLDS while one is
+// open; this covers the render paths that bypass that guard.)
+function closeAllMonitors(){ for (const code of [...monitors.keys()]) closeMonitor(code); }
+// <details> toggle doesn't bubble — capture it.
+$('adminList').addEventListener('toggle', (e) => {
+  const d = e.target;
+  if (!d.classList || !d.classList.contains('mon-wrap')) return;
+  if (d.open) openMonitor(d.dataset.mon, d.querySelector('[data-monlog]'));
+  else closeMonitor(d.dataset.mon);
+}, true);
+// copy-to-clipboard on the connect commands
+$('adminList').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-copycmd]'); if (!b) return;
+  const code = b.parentElement.querySelector('[data-copy]');
+  if (code && navigator.clipboard) navigator.clipboard.writeText(code.textContent)
+    .then(() => { b.textContent = 'copied ✓'; setTimeout(() => { b.textContent = 'copy'; }, 1200); }, () => {});
+});
+
 function renderAdmin(){
+  closeAllMonitors();                    // the innerHTML swap destroys monitor DOMs — don't leak their sockets
   $('adminList').innerHTML = S.adminItems.map(adminCard).join('')
     || '<div class="card note">no items yet — create one above, print its QR, tape it to the thing.</div>';
 }
@@ -976,6 +1114,7 @@ $('adminList').addEventListener('submit', async (e) => {
       minIncrementCents: Math.round(parseFloat(f.get('step') || '0.5') * 100),
     };
     if (card.dataset.surface === 'jukebox'){ body.surface = 'jukebox'; body.jukebox = gatherJukebox(form); }
+    else if (f.get('controller')) body.controller = f.get('controller');
     await adminApi('PATCH', '/api/items/' + card.dataset.code, body);
     msg.className = 'status-line ok'; msg.textContent = 'saved';
     form.hidden = true;                 // close the form so the guarded refresh can land
@@ -1082,6 +1221,9 @@ window.__createItem = createItem;
 window.__qrEncode = QR.encode;
 window.__adminCard = adminCard;
 window.__renderAdmin = renderAdmin;
+window.__padHub = padHub;
+window.__actionToOsc = actionToOsc;
+window.__connectCmds = connectCmds;
 </script>
 </body>
 </html>

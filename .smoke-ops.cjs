@@ -101,6 +101,7 @@ w.fetch = (url, opts = {}) => {
     if (!admin) return respond(401, { error: 'bad admin key' });
     if (method === 'PATCH'){
       if (body.name) DB[m[1]].name = body.name;
+      if (body.controller) DB[m[1]].controller = body.controller;
       if (body.surface === 'jukebox' && body.jukebox) DB[m[1]].jukeboxConfig = JSON.parse(JSON.stringify(body.jukebox));
       return respond(200, payload(m[1]));
     }
@@ -150,9 +151,11 @@ const $ = (id) => w.document.getElementById(id);
   assert.strictEqual(cards.length, 3, 'all three items listed (pad, auction, jukebox)');
   ok('unlock: dev key → dashboard renders the item list');
 
-  // create → new code + QR modal opens
+  // create → new code + QR modal opens (+ the chosen controller rides the body)
   $('nItemName').value = 'Fog Machine';
+  $('nItemController').value = 'grid';
   await w.__createItem(); await tick();
+  assert.strictEqual(lastCreate.controller, 'grid', 'create body carries the chosen controller');
   assert.ok(!$('qrModal').hidden, 'QR modal opens on create');
   assert.strictEqual($('qrCode').textContent, 'NEW111', 'the new code shows big');
   assert.ok($('qrCanvas').width > 0, 'a QR matrix was drawn');
@@ -267,6 +270,41 @@ const $ = (id) => w.document.getElementById(id);
   assert.strictEqual(lastCreate.jukebox.monetization, 'per_action', 'create body carries the monetization');
   $('qrClose').click();
   ok('create jukebox: surface + monetization ride the create request');
+
+  /* ── controller + the Control hub (pad items) ── */
+  DB.PSDV7H.controller = 'joystick';
+  await w.__refreshAdmin(); await tick();
+  const padCard = () => w.document.querySelector('#adminList .icard[data-code="PSDV7H"]');
+  assert.strictEqual(padCard().dataset.surface, 'pad', 'PSDV7H is a pad surface');
+  assert.match(padCard().querySelector('.meta').textContent, /joystick/, 'controller shown at a glance on the card');
+  assert.match(padCard().querySelector('.osc-addr').textContent, /\/volt\/xy/, 'Connect panel: joystick maps to /volt/xy');
+  assert.match(padCard().querySelector('.cmd').textContent, /bus-to-osc\.mjs.*channel=item:PSDV7H/, 'Connect panel: OSC bridge command pre-fills the item code');
+  assert.ok(padCard().querySelector('details.mon-wrap[data-mon="PSDV7H"]'), 'live output monitor present');
+  ok('control hub: controller at a glance + Connect panel (addresses + pre-filled command) + monitor');
+
+  // action→OSC translation (what the live monitor renders per message)
+  const xy = w.__actionToOsc({ action: 'pad_xy', x: 0.75, y: 0.25 });
+  assert.strictEqual(xy.label, 'pad_xy  x=0.75  y=0.25'); assert.strictEqual(xy.osc, '/volt/xy 0.75 0.25');
+  const fd = w.__actionToOsc({ action: 'fader', i: 2, v: 0.5 });
+  assert.strictEqual(fd.label, 'fader 2  v=0.50'); assert.strictEqual(fd.osc, '/volt/fader/2 0.50');
+  const cl = w.__actionToOsc({ action: 'cell_4' });
+  assert.strictEqual(cl.label, 'cell_4'); assert.strictEqual(cl.osc, '/volt/key/cell_4');
+  ok('control hub: action→OSC mapping (pad_xy→/volt/xy · fader→/volt/fader/i · cell→/volt/key/cell_N)');
+
+  // edit form controller select round-trips to PATCH
+  padCard().querySelector('[data-act="edit"]').click();
+  const pform = padCard().querySelector('form[data-edit]');
+  assert.strictEqual(pform.querySelector('[name="controller"]').value, 'joystick', 'edit form reflects the current controller');
+  pform.querySelector('[name="controller"]').value = 'faders';
+  calls.length = 0;
+  pform.dispatchEvent(new w.Event('submit', { cancelable: true, bubbles: true })); await tick();
+  assert.ok(calls.some(c => c === 'PATCH /api/items/PSDV7H'), 'controller edit → PATCH');
+  assert.strictEqual(DB.PSDV7H.controller, 'faders', 'the changed controller persisted through PATCH');
+  ok('control hub: edit form controller select round-trips through PATCH');
+
+  // de-couple invariant: the Control admin no longer links to the channels admin
+  assert.ok(!/href="\/admin\.html"/.test(html), 'control-ops does not cross-link the audio-reactive admin');
+  ok('de-couple: Control admin stands alone (no link to the channels admin)');
 
   console.log(`\nALL CLEAR — ${passed} ops-page checks passed`);
   w.close();

@@ -156,6 +156,24 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
 }
 .abc button:active, .abc button.lit{ background:var(--accent-soft); border-color:var(--accent); }
 .ctl-note{ text-align:center; font-size:.82rem; color:var(--sub); min-height:1.2em; margin-top:.55rem; }
+/* controller surface holds one of the 4 layouts (fills the space above release) */
+.ctl-surface{ flex:1; display:flex; flex-direction:column; min-height:0; }
+/* grid (3×3 trigger pads) */
+.cgrid{ flex:1; display:grid; gap:.6rem; grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(3,1fr); min-height:0; margin:.5rem 0; }
+.cgrid button{ border:1.5px solid var(--edge); background:var(--card); border-radius:18px; font-size:1.4rem; font-weight:700; color:var(--ink); box-shadow:var(--shadow); touch-action:none; }
+.cgrid button:active, .cgrid button.lit{ background:var(--accent-soft); border-color:var(--accent); transform:scale(.97); }
+/* joystick (drag an XY thumb) */
+.joywrap{ flex:1; display:flex; align-items:center; justify-content:center; min-height:0; margin:.5rem 0; }
+.joypad{ position:relative; width:min(80vw,58vh); aspect-ratio:1; border-radius:28px; border:1.5px solid var(--edge); background:var(--card); box-shadow:var(--shadow); touch-action:none; overflow:hidden; }
+.joypad::before{ content:''; position:absolute; left:50%; top:8%; bottom:8%; width:1px; background:var(--edge); }
+.joypad::after{ content:''; position:absolute; top:50%; left:8%; right:8%; height:1px; background:var(--edge); }
+.joythumb{ position:absolute; width:24%; height:24%; border-radius:50%; background:var(--accent); border:3px solid #fff; box-shadow:0 3px 12px rgba(35,25,10,.25); left:50%; top:50%; transform:translate(-50%,-50%); pointer-events:none; }
+/* faders (drag vertical levels) */
+.faders{ flex:1; display:flex; gap:.7rem; min-height:0; margin:.5rem 0; }
+.fader{ flex:1; position:relative; border:1.5px solid var(--edge); border-radius:18px; background:var(--card); box-shadow:var(--shadow); touch-action:none; overflow:hidden; display:flex; align-items:flex-end; justify-content:center; }
+.fader-fill{ position:absolute; left:0; right:0; bottom:0; height:0; background:var(--accent-soft); pointer-events:none; }
+.fader-knob{ position:absolute; left:0; right:0; height:5px; background:var(--accent); bottom:0; pointer-events:none; }
+.fader span{ position:relative; z-index:1; padding-bottom:.55rem; font-weight:700; color:var(--accent-ink); font-size:.95rem; }
 
 /* output-offline banner + spectator strip (redundancy layer) */
 .offline-banner{ border-color:var(--warn); background:var(--warn-soft); }
@@ -391,19 +409,9 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
       <button class="ctl-info" id="ctlInfo" aria-label="What the controls do" hidden>i</button>
     </div>
     <div class="ctl-name" id="ctlName"></div>
-    <div class="dpad">
-      <button class="pad pad-up"    data-action="pad_up"    aria-label="Up">▲</button>
-      <button class="pad pad-left"  data-action="pad_left"  aria-label="Left">◀</button>
-      <div class="pad-mid" id="ctlMid">you have<br/>the controls</div>
-      <button class="pad pad-right" data-action="pad_right" aria-label="Right">▶</button>
-      <button class="pad pad-down"  data-action="pad_down"  aria-label="Down">▼</button>
-    </div>
-    <div class="abc">
-      <button data-action="btn_a">A</button>
-      <button data-action="btn_b">B</button>
-      <button data-action="btn_c">C</button>
-    </div>
-    <div class="ctl-note" id="ctlNote">arrows + A/B/C keys work too</div>
+    <!-- the controller surface — one of 4 layouts (d-pad / joystick / faders /
+         grid) rendered by renderControllerSurface() from the item's `controller`. -->
+    <div class="ctl-surface" id="ctlSurface"></div>
     <button class="ctl-exit" id="ctlRelease">release the controls</button>
     <div class="freeze" id="ctlFreeze" hidden>
       <span id="freezeMsg">host paused this item</span>
@@ -535,7 +543,9 @@ function liveSync(){
       if (S.item){ S.item.program = m.program; S.item.outputsOnline = m.online || []; renderItem(); }
     }
     else if (m.type === 'key') specFlash(m.action);        // spectator mirror: someone else's live press
-    else if (m.type === 'denied') $('ctlNote').textContent = m.reason || 'not allowed';
+    else if (m.type === 'denied' && !/^(pad_xy|fader)$/.test(m.action || '')){   // a throttled value-stream frame shouldn't flicker the note
+      const n = document.querySelector('#ctlSurface .ctl-note'); if (n) n.textContent = m.reason || 'not allowed';
+    }
   };
 }
 
@@ -589,7 +599,7 @@ function show(view){
   S.view = view;
   for (const [v, id] of Object.entries({ entry: 'viewEntry', item: 'viewItem', controller: 'viewController' }))
     $(id).hidden = v !== view;
-  if (view === 'controller') $('ctlInstr').hidden = true;   // fresh slot, fresh start — (i) reopens it
+  if (view === 'controller'){ $('ctlInstr').hidden = true; renderControllerSurface(); }   // fresh slot, fresh start — (i) reopens it
 }
 
 /* ── entry ── */
@@ -1019,17 +1029,42 @@ function takeToken(){
   return true;
 }
 
-function fire(action){
+// Send a gated key action (optionally with an x/y/v value payload). Discrete
+// presses buzz; continuous streams (haptic=false) don't.
+function fire(action, extra, haptic = true){
   if (!takeToken()) return false;
-  const msg = { type: 'key', action, user: pubUser(), ts: Date.now() };
+  const msg = { type: 'key', action, ...(extra || {}), user: pubUser(), ts: Date.now() };
   if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify(msg));
-  if (navigator.vibrate) navigator.vibrate(10);
+  if (haptic && navigator.vibrate) navigator.vibrate(10);
   return true;
+}
+
+// Continuous value streams (joystick/faders): the UI updates on every move for
+// smoothness, but the WIRE send is coalesced to ~6/s (latest value wins) so a
+// drag never exceeds the bus budget. Continuous actions skip the server duty
+// cooldown, so these never bounce off "cooling down".
+const CONT_MS = 160;
+let contPend = null, contTimer = null, contLast = 0;
+function fireCont(action, extra){
+  contPend = { action, extra };
+  const wait = Math.max(0, CONT_MS - (Date.now() - contLast));
+  if (wait === 0) flushCont();
+  else if (!contTimer) contTimer = setTimeout(flushCont, wait);
+}
+function flushCont(){
+  contTimer = null;
+  if (!contPend) return;
+  if (!fire(contPend.action, contPend.extra, false)){   // bucket momentarily empty — KEEP the value, retry next tick
+    contTimer = setTimeout(flushCont, CONT_MS);          // (so a drag's final position is never silently dropped)
+    return;
+  }
+  contLast = Date.now();
+  contPend = null;
 }
 
 const REPEAT_MS = 150;
 const holds = new Map();     // pointerId -> interval
-function bindPress(el){
+function bindPress(el){       // hold-to-repeat (d-pad arrows, A/B/C, joystick FIRE)
   const action = el.dataset.action;
   el.addEventListener('pointerdown', (e) => {
     e.preventDefault();
@@ -1048,13 +1083,83 @@ function bindPress(el){
   el.addEventListener('pointercancel', stop);
   el.addEventListener('contextmenu', (e) => e.preventDefault());
 }
-document.querySelectorAll('#viewController [data-action]').forEach(bindPress);
+function bindTrigger(el){     // single fire on press (grid cells — a cue trigger)
+  const action = el.dataset.action;
+  el.addEventListener('pointerdown', (e) => { e.preventDefault(); el.classList.add('lit'); fire(action); try { el.setPointerCapture(e.pointerId); } catch {} });
+  const off = () => el.classList.remove('lit');
+  el.addEventListener('pointerup', off);
+  el.addEventListener('pointercancel', off);
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+function bindDrag(el, onMove){   // continuous pointer tracking (joystick pad, a fader)
+  let active = false;
+  const at = (e) => onMove(el.getBoundingClientRect(), e);
+  el.addEventListener('pointerdown', (e) => { e.preventDefault(); active = true; try { el.setPointerCapture(e.pointerId); } catch {} at(e); });
+  el.addEventListener('pointermove', (e) => { if (active) at(e); });
+  const up = () => { active = false; };
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', up);
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+}
 
-// desktop testing fallback — this page has no console KEY_MAP to collide with
+/* ── the 4 controller layouts (chosen per item by admin: item.controller) ── */
+const CONTROLLERS = new Set(['dpad', 'joystick', 'faders', 'grid']);
+const CONTROLLER_HTML = {
+  dpad: `<div class="dpad">
+      <button class="pad pad-up" data-action="pad_up" aria-label="Up">▲</button>
+      <button class="pad pad-left" data-action="pad_left" aria-label="Left">◀</button>
+      <div class="pad-mid">you have<br/>the controls</div>
+      <button class="pad pad-right" data-action="pad_right" aria-label="Right">▶</button>
+      <button class="pad pad-down" data-action="pad_down" aria-label="Down">▼</button>
+    </div>
+    <div class="abc"><button data-action="btn_a">A</button><button data-action="btn_b">B</button><button data-action="btn_c">C</button></div>
+    <div class="ctl-note">arrows + A/B/C keys work too</div>`,
+  grid: `<div class="cgrid">${[0,1,2,3,4,5,6,7,8].map(n => `<button data-action="cell_${n}">${n + 1}</button>`).join('')}</div>
+    <div class="ctl-note">tap a pad to trigger it</div>`,
+  joystick: `<div class="joywrap"><div class="joypad" id="joyPad"><div class="joythumb" id="joyThumb"></div></div></div>
+    <div class="abc"><button data-action="btn_a">FIRE</button></div>
+    <div class="ctl-note">drag to aim · FIRE to trigger</div>`,
+  faders: `<div class="faders">${[0,1,2,3].map(i => `<div class="fader" data-i="${i}"><div class="fader-fill"></div><div class="fader-knob"></div><span>${i + 1}</span></div>`).join('')}</div>
+    <div class="ctl-note">drag the faders</div>`,
+};
+
+function renderControllerSurface(){
+  const type = CONTROLLERS.has(S.item && S.item.controller) ? S.item.controller : 'dpad';
+  const el = $('ctlSurface');
+  if (S.builtController === type && el.childElementCount) return;   // already built for this type
+  S.builtController = type;
+  el.dataset.type = type;
+  el.innerHTML = CONTROLLER_HTML[type];
+  if (type === 'dpad') el.querySelectorAll('[data-action]').forEach(bindPress);
+  else if (type === 'grid') el.querySelectorAll('[data-action]').forEach(bindTrigger);
+  else if (type === 'joystick'){
+    el.querySelectorAll('.abc [data-action]').forEach(bindTrigger);          // FIRE = a tap, not hold-repeat — leaves send budget for the drag
+    const thumb = $('joyThumb');
+    bindDrag($('joyPad'), (r, e) => {
+      const x = clamp01((e.clientX - r.left) / r.width), y = clamp01((e.clientY - r.top) / r.height);
+      thumb.style.left = (x * 100) + '%'; thumb.style.top = (y * 100) + '%';
+      fireCont('pad_xy', { x: round3(x), y: round3(y) });
+    });
+  } else if (type === 'faders'){
+    el.querySelectorAll('.fader').forEach((f) => {
+      const i = +f.dataset.i, fill = f.querySelector('.fader-fill'), knob = f.querySelector('.fader-knob');
+      bindDrag(f, (r, e) => {
+        const v = clamp01(1 - (e.clientY - r.top) / r.height);              // top = 1, bottom = 0
+        fill.style.height = (v * 100) + '%'; knob.style.bottom = (v * 100) + '%';
+        fireCont('fader', { i, v: round3(v) });
+      });
+    });
+  }
+}
+const clamp01 = (n) => Math.min(1, Math.max(0, n));
+const round3 = (n) => Math.round(n * 1000) / 1000;
+
+// desktop testing fallback — arrows/ABC only make sense on the d-pad layout
 const KEYPAD = { ArrowUp: 'pad_up', ArrowDown: 'pad_down', ArrowLeft: 'pad_left', ArrowRight: 'pad_right',
   a: 'btn_a', b: 'btn_b', c: 'btn_c', A: 'btn_a', B: 'btn_b', C: 'btn_c' };
 window.addEventListener('keydown', (e) => {
   if (S.view !== 'controller') return;
+  if (S.item && S.item.controller && S.item.controller !== 'dpad') return;   // keys map to the d-pad only
   const action = KEYPAD[e.key];
   if (!action) return;
   e.preventDefault();
@@ -1064,6 +1169,7 @@ window.addEventListener('keydown', (e) => {
 function renderController(){
   const p = S.item;
   if (!p) return;
+  renderControllerSurface();            // (re)build the surface when the controller type is known
   $('ctlName').textContent = p.name;
   $('ctlInfo').hidden = !p.instructions;
   $('ctlInstrText').textContent = p.instructions || '';
@@ -1103,6 +1209,8 @@ window.__applyItem = applyItem;
 window.__renderTimers = renderTimers;
 window.__fire = fire;
 window.__bucket = BUCKET;
+window.__renderControllerSurface = renderControllerSurface;
+window.__fireCont = fireCont;
 window.__doBuy = doBuy;
 window.__doBid = doBid;
 window.__chosenBidCents = chosenBidCents;

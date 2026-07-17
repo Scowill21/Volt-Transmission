@@ -143,6 +143,18 @@ const ok = (label) => { console.log('OK  ', passed + 1, label); passed++; };
   assert.strictEqual(r.statusCode, 200, 'X-Admin-Key bypasses the item gate');
   ok('gate: non-holder pad_up 403 · holder passes · admin bypasses');
 
+  // 7b. the joystick/faders/grid vocabulary rides the SAME holder gate: the new
+  // actions pass for the holder, are denied for a non-holder, and out-of-vocab
+  // actions are refused even for the holder.
+  for (const action of ['pad_xy', 'fader', 'cell_4']){
+    r = await inject(action, 'u-ada');   assert.strictEqual(r.statusCode, 200, `holder may send ${action}`);
+    r = await inject(action, 'u-bob');   assert.strictEqual(r.statusCode, 403, `non-holder ${action} denied`);
+  }
+  for (const action of ['cell_99', 'hack_all', 'pad_diag']){
+    r = await inject(action, 'u-ada');   assert.strictEqual(r.statusCode, 403, `out-of-vocabulary ${action} refused`);
+  }
+  ok('gate: joystick/faders/grid actions holder-gated · out-of-vocab refused');
+
   // 8. non-pad/btn key actions are denied in item rooms (territory is owned)
   r = await inject('scene_1', 'u-ada');
   assert.strictEqual(r.statusCode, 403, 'scene actions have no business in item rooms');
@@ -500,10 +512,15 @@ const ok = (label) => { console.log('OK  ', passed + 1, label); passed++; };
   r = await fire();
   assert.strictEqual(r.statusCode, 403, '11th action in the minute denied');
   assert.match(r.body.error, /cooling down/);
+  // continuous value streams (joystick/faders) respect maxPerMin too — the
+  // rig-protection floor is NOT bypassed once the budget is spent.
+  r = await call(app, 'POST', '/api/channels/:id/actions', { params: { id: ROOM(dutyItem) },
+    body: { type: 'key', action: 'pad_xy', x: 0.5, y: 0.5, user: { id: 'u-d', name: 'D' } } });
+  assert.strictEqual(r.statusCode, 403, 'continuous pad_xy also bound by maxPerMin (rig protection)');
   r = await call(app, 'POST', '/api/channels/:id/actions', { params: { id: ROOM(dutyItem) },
     headers: ADMIN, body: { type: 'key', action: 'btn_a' } });
   assert.strictEqual(r.statusCode, 200, 'privileged sender bypasses duty limits (owner call)');
-  ok('duty-cycle: maxPerMin enforced on holders, privileged bypass honored');
+  ok('duty-cycle: maxPerMin enforced on holders (discrete + continuous), privileged bypass honored');
 
   // 37. Rig-originated + server-only types are unforgeable via HTTP inject.
   r = await call(app, 'POST', '/api/channels/:id/actions', { params: { id: ROOM(dutyItem) },

@@ -126,8 +126,12 @@ function withOutputDefaults(item){
   if (item.surface !== 'jukebox') item.surface = 'pad';   // back-compat: every legacy item is a pad
   if (item.surface === 'jukebox') item.jukebox = normalizeJukebox(item.jukebox || {});
   else item.jukebox = null;
+  if (!CONTROLLERS.includes(item.controller)) item.controller = 'dpad';   // back-compat: legacy pads are d-pads
   return item;
 }
+// Controller layouts for a PAD-surface item (what input UI the slot holder gets;
+// each emits a distinct gated action vocabulary — see PAD_BTN_RE in items.js).
+export const CONTROLLERS = ['dpad', 'joystick', 'faders', 'grid'];
 
 /* ── Jukebox surface (server/jukebox.js) — audio as a control surface.
    An item with surface:'jukebox' carries this config. All server-authoritative;
@@ -217,6 +221,8 @@ function normalizeNewItem(props = {}){
   // Control surface: 'pad' (default, back-compat) or 'jukebox' (music).
   item.surface = props.surface === 'jukebox' ? 'jukebox' : 'pad';
   item.jukebox = item.surface === 'jukebox' ? normalizeJukebox(props.jukebox || {}) : null;
+  // Which controller UI a pad-surface holder gets (d-pad / joystick / faders / grid).
+  item.controller = CONTROLLERS.includes(props.controller) ? props.controller : 'dpad';
   return item;
 }
 
@@ -245,6 +251,10 @@ function applyItemPatch(item, patch = {}){
     throw httpError(400, 'use the /api/items/:code/outputs endpoints to edit the output chain');
   // Surface flip + jukebox config. items.js guards a flip against live runtime
   // (like the mode-flip guard) before calling this.
+  if (patch.controller !== undefined){
+    if (!CONTROLLERS.includes(patch.controller)) throw httpError(400, `controller must be one of ${CONTROLLERS.join('|')}`);
+    item.controller = patch.controller;
+  }
   if (patch.surface !== undefined){
     if (!['pad', 'jukebox'].includes(patch.surface)) throw httpError(400, 'surface must be pad|jukebox');
     item.surface = patch.surface;
@@ -454,6 +464,7 @@ class PgStore {
     await this.pool.query('ALTER TABLE items ADD COLUMN IF NOT EXISTS limits JSONB');
     // Jukebox surface — additive; default surface 'pad' keeps every legacy item a pad.
     await this.pool.query(`ALTER TABLE items ADD COLUMN IF NOT EXISTS surface TEXT NOT NULL DEFAULT 'pad'`);
+    await this.pool.query(`ALTER TABLE items ADD COLUMN IF NOT EXISTS controller TEXT NOT NULL DEFAULT 'dpad'`);
     await this.pool.query('ALTER TABLE items ADD COLUMN IF NOT EXISTS jukebox JSONB');
     const { rows } = await this.pool.query('SELECT COUNT(*)::int AS n FROM channels');
     if (rows[0].n === 0) for (const c of SEED){
@@ -558,7 +569,7 @@ class PgStore {
       instructions: r.instructions,
       priceCents: r.price_cents, slotSeconds: r.slot_seconds, auctionSeconds: r.auction_seconds,
       minIncrementCents: r.min_increment_cents, status: r.status,
-      outputs: r.outputs, limits: r.limits, surface: r.surface, jukebox: r.jukebox,
+      outputs: r.outputs, limits: r.limits, surface: r.surface, controller: r.controller, jukebox: r.jukebox,
       createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at });
   }
 
@@ -574,12 +585,12 @@ class PgStore {
       try {
         await this.pool.query(
           `INSERT INTO items (code, name, description, instructions, mode, price_cents, slot_seconds,
-             auction_seconds, min_increment_cents, status, outputs, limits, surface, jukebox, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+             auction_seconds, min_increment_cents, status, outputs, limits, surface, controller, jukebox, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
           [item.code, item.name, item.description, item.instructions, item.mode, item.priceCents,
            item.slotSeconds, item.auctionSeconds, item.minIncrementCents, item.status,
            JSON.stringify(item.outputs), JSON.stringify(item.limits),
-           item.surface, item.jukebox ? JSON.stringify(item.jukebox) : null, item.createdAt]);
+           item.surface, item.controller, item.jukebox ? JSON.stringify(item.jukebox) : null, item.createdAt]);
         return item;
       } catch (e){
         if (e.code !== '23505') throw e;        // anything but a code collision is real
@@ -594,10 +605,10 @@ class PgStore {
     await this.pool.query(
       `UPDATE items SET name=$2, description=$3, instructions=$4, mode=$5, price_cents=$6,
          slot_seconds=$7, auction_seconds=$8, min_increment_cents=$9, status=$10, limits=$11,
-         surface=$12, jukebox=$13 WHERE code=$1`,
+         surface=$12, controller=$13, jukebox=$14 WHERE code=$1`,
       [code, item.name, item.description, item.instructions, item.mode, item.priceCents,
        item.slotSeconds, item.auctionSeconds, item.minIncrementCents, item.status,
-       JSON.stringify(item.limits), item.surface, item.jukebox ? JSON.stringify(item.jukebox) : null]);
+       JSON.stringify(item.limits), item.surface, item.controller, item.jukebox ? JSON.stringify(item.jukebox) : null]);
     return item;
   }
 

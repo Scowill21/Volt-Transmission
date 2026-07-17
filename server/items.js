@@ -39,7 +39,15 @@ const MAX_BID_CENTS = 50000;       // hard cap: $500
 const SOFT_CLOSE_MS = 10000;       // a bid in the final 10 s extends the clock 10 s
 const BID_COOLDOWN_MS = 1500;      // per-user bid rate limit
 const OUTPUT_GRACE_MS = 5000;      // program rig drops → this long to come back before failover
-const PAD_BTN_RE = /^(pad_(up|down|left|right)|btn_[abc])$/;
+// The gated controller vocabulary a slot holder may send to an item room, across
+// all four controller layouts (store.js CONTROLLERS): d-pad (pad_up/down/left/
+// right + btn_a/b/c), joystick (pad_xy), faders (fader), grid (cell_0..8).
+const PAD_BTN_RE = /^(pad_(up|down|left|right|xy)|btn_[abc]|fader|cell_[0-8])$/;
+// Continuous VALUE streams (position/level), not discrete triggers. They still
+// respect the operator's maxPerMin (rig protection — dutyAllows honors it below)
+// but skip the per-action cooldownMs, which is meant to space out discrete fires
+// and would only stutter a latest-wins joystick/fader drag.
+const CONTINUOUS_RE = /^(pad_xy|fader)$/;
 
 export const itemRoom = (code) => 'item:' + code;
 const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
@@ -153,14 +161,14 @@ function maybeBroadcastRoster(item, program){
 /* Duty-cycle guard (William's call: privileged senders BYPASS this — the
    gate returns ok for them before duty is consulted). Sliding one-minute
    window + optional per-action cooldown, per item. */
-function dutyAllows(item, action){
+function dutyAllows(item, action, continuous){
   const lim = item.limits || DEFAULT_LIMITS;
   if (!duty.has(item.code)) duty.set(item.code, { times: [], last: new Map() });
   const d = duty.get(item.code);
   const now = Date.now();
   while (d.times.length && d.times[0] <= now - 60000) d.times.shift();
-  if (d.times.length >= lim.maxPerMin) return false;
-  if (lim.cooldownMs && now - (d.last.get(action) || 0) < lim.cooldownMs) return false;
+  if (d.times.length >= lim.maxPerMin) return false;                    // rig-protection floor — applies to ALL actions
+  if (!continuous && lim.cooldownMs && now - (d.last.get(action) || 0) < lim.cooldownMs) return false;   // per-fire spacing — discrete only
   d.times.push(now); d.last.set(action, now);
   return true;
 }
@@ -242,6 +250,7 @@ function publicItem(item, who){
     // Control surface. A jukebox item carries its music state (personalized
     // for `who` on the GET path; room-wide on broadcasts).
     surface: item.surface || 'pad',
+    controller: item.controller || 'dpad',   // which controller UI a pad holder gets
     ...(item.surface === 'jukebox' && jukeboxApi ? { jukebox: jukeboxApi.publicJukebox(item, who, now) } : {}),
     ts: now,
   };
@@ -388,7 +397,7 @@ export async function attachItems(app, requireAdmin, store){
     const holds = (u && u.id === c.active.userId)
       || (devIdentityAllowed() && msg.user && msg.user.id === c.active.userId);
     if (!holds) return { ok: false, reason: `${c.active.name} has the controls` };
-    if (!dutyAllows(item, msg.action))
+    if (!dutyAllows(item, msg.action, CONTINUOUS_RE.test(msg.action)))
       return { ok: false, reason: 'cooling down — this item limits how fast it can be driven' };
     return { ok: true };
   });

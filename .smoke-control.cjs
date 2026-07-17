@@ -395,6 +395,64 @@ const ok = (label) => { console.log('OK  ', passed + 1, label); passed++; };
   assert.match(w.document.getElementById('jbBidTop').textContent, /\$2\.50/, 'top bid reflects the placed bid');
   ok('bid mode: bid-for-next panel bids on the picked song, top updates');
 
+  /* ── controller variations (4 layouts, each fires its own gated action) ── */
+  w.__S.code = 'PSDV7H';   // back to the pad item (applyItem ignores a mismatched code)
+  const ws2 = w.__wsInstances[w.__wsInstances.length - 1];
+  const ctlItem = (controller) => {
+    const p = payload('PSDV7H'); p.controller = controller;
+    p.active = { userId: 'u-test', name: 'Tess', paused: false, outputPaused: false, startedAt: now(), endsAt: now() + 60000, remainingMs: 60000 };
+    return p;
+  };
+  const pdown = (el, extra) => el.dispatchEvent(Object.assign(new w.Event('pointerdown', { bubbles: true }), { pointerId: 1, ...extra }));
+
+  // joystick — drag fires pad_xy {x,y}
+  w.__bucket.tokens = 10;
+  w.__applyItem(ctlItem('joystick')); w.__show('controller');
+  assert.ok(w.document.getElementById('joyPad'), 'joystick XY pad renders');
+  assert.ok(w.document.querySelector('#ctlSurface [data-action="btn_a"]'), 'joystick FIRE button renders');
+  const joy = w.document.getElementById('joyPad');
+  joy.getBoundingClientRect = () => ({ left: 0, top: 0, width: 200, height: 200, right: 200, bottom: 200 });
+  let bx = ws2.sent.length;
+  pdown(joy, { clientX: 150, clientY: 50 });                 // → x .75, y .25
+  const xy = ws2.sent.slice(bx).find(m => m.action === 'pad_xy');
+  assert.ok(xy, 'drag fires pad_xy');
+  assert.ok(Math.abs(xy.x - 0.75) < 0.02 && Math.abs(xy.y - 0.25) < 0.02, `pad_xy carries x/y (got ${xy.x},${xy.y})`);
+  ok('controller joystick: XY pad + FIRE render, drag streams pad_xy {x,y}');
+
+  // faders — drag fires fader {i,v}
+  await new Promise(r => setTimeout(r, 180));               // clear the continuous coalesce window
+  w.__bucket.tokens = 10;
+  w.__applyItem(ctlItem('faders'));
+  assert.strictEqual(w.document.querySelectorAll('#ctlSurface .fader').length, 4, '4 faders render');
+  const f0 = w.document.querySelector('#ctlSurface .fader');
+  f0.getBoundingClientRect = () => ({ left: 0, top: 0, width: 60, height: 200, right: 60, bottom: 200 });
+  bx = ws2.sent.length;
+  pdown(f0, { pointerId: 2, clientX: 30, clientY: 50 });     // near top → v ≈ .75
+  const fd = ws2.sent.slice(bx).find(m => m.action === 'fader');
+  assert.ok(fd && fd.i === 0, 'fader fires with its index');
+  assert.ok(Math.abs(fd.v - 0.75) < 0.02, `fader carries v (got ${fd.v})`);
+  ok('controller faders: 4 sliders render, drag streams fader {i,v}');
+
+  // grid — tap fires cell_N (discrete)
+  w.__bucket.tokens = 10;
+  w.__applyItem(ctlItem('grid'));
+  const cells = w.document.querySelectorAll('#ctlSurface .cgrid button');
+  assert.strictEqual(cells.length, 9, '3×3 grid renders');
+  bx = ws2.sent.length;
+  pdown(cells[4], { pointerId: 3 });
+  assert.ok(ws2.sent.slice(bx).some(m => m.action === 'cell_4'), 'tap fires cell_N');
+  ok('controller grid: 3×3 pads render, tap fires cell_N');
+
+  // default (no controller field) → d-pad, and its pad_up still fires (back-compat)
+  w.__bucket.tokens = 10;
+  const dp = payload('PSDV7H'); dp.active = { userId: 'u-test', name: 'Tess', paused: false, outputPaused: false, startedAt: now(), endsAt: now() + 60000, remainingMs: 60000 };
+  w.__applyItem(dp); w.__show('controller');
+  assert.ok(w.document.querySelector('#ctlSurface .pad-up'), 'undefined controller falls back to the d-pad');
+  bx = ws2.sent.length;
+  pdown(w.document.querySelector('#ctlSurface .pad-up'), { pointerId: 4 });
+  assert.ok(ws2.sent.slice(bx).some(m => m.action === 'pad_up'), 'd-pad still fires pad_up');
+  ok('controller default: undefined → d-pad, pad_up fires (back-compat)');
+
   console.log(`\nALL CLEAR — ${passed} control-page (user) checks passed`);
   w.close();
   process.exit(0);

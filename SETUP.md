@@ -489,8 +489,20 @@ items sell timed slots into a queue (with estimated start times); auction
 items run **soft-close rounds** — the first bid arms the countdown
 (default 60 s), a bid in the final 10 s adds 10 s, the top bid at zero
 takes the slot, and the next round arms on the first bid after that slot
-ends. The winner's phone becomes a **controller**: a d-pad + A/B/C buttons,
-throttled under the bus rate budget, keyboard fallback on desktop.
+ends. The winner's phone becomes a **controller** — one of **four layouts you
+pick per item** (in the item's create/edit form on `/control-ops`), all throttled
+under the bus rate budget:
+
+| Controller | The phone shows | Emits | Good for |
+| --- | --- | --- | --- |
+| **d-pad** (default) | ▲▼◀▶ + A/B/C, hold-to-repeat, keyboard fallback | `pad_up/down/left/right`, `btn_a/b/c` | pan/tilt, stepping, toggles |
+| **joystick** | a draggable XY thumb + a FIRE button | `pad_xy {x,y}` (0..1), `btn_a` | aiming a servo / moving head, crossfades |
+| **faders** | 4 vertical sliders | `fader {i,v}` (i 0–3, v 0..1) | dimmer, speed, colour, volume |
+| **grid** | a 3×3 launchpad | `cell_0` … `cell_8` | cue / sample / scene triggering |
+
+The joystick and faders stream continuous values (coalesced ~6/s); the d-pad and
+grid fire discrete presses. Every layout rides the SAME holder-gated `key` path,
+so the server still only lets the current slot holder drive.
 
 ### Wiring an item to TouchDesigner
 
@@ -507,11 +519,12 @@ wss://<your-site>.onrender.com/api/bus?channel=item:7KP3QX&as=vj
   "user": { "id": "…", "name": "Ada", "role": "listener", "sid": "…" } }
 ```
 
-with actions `pad_up · pad_down · pad_left · pad_right · btn_a · btn_b ·
-btn_c`. **The server only lets the current slot holder's presses through**
-(verified session bound at the WS handshake; vj/radio/admin bypass;
-paused/off items pass nothing) — your TD patch can trust every `key` it
-receives in an item room.
+with actions from the item's controller: d-pad `pad_up · pad_down · pad_left ·
+pad_right · btn_a · btn_b · btn_c`; joystick `pad_xy` (extra fields `x`,`y` 0..1)
+`btn_a`; faders `fader` (extra fields `i` 0–3, `v` 0..1); grid `cell_0` … `cell_8`.
+**The server only lets the current slot holder's presses through** (verified
+session bound at the WS handshake; vj/radio/admin bypass; paused/off items pass
+nothing) — your TD patch can trust every `key` it receives in an item room.
 
 **Item state** arrives as server-originated (unforgeable) messages:
 
@@ -532,9 +545,21 @@ the item's bus URL. Additions to the address table:
 
 | OSC address | Fires when |
 | --- | --- |
-| `/volt/key/pad_up` … `pad_right` | the holder presses the d-pad (arg = name) |
-| `/volt/key/btn_a` … `btn_c` | the holder presses A / B / C |
+| `/volt/key/pad_up` … `pad_right` | d-pad presses (arg = name) |
+| `/volt/key/btn_a` … `btn_c` | A / B / C buttons |
+| `/volt/key/cell_0` … `cell_8` | grid pads |
+| `/volt/xy` `f x` `f y` `s name` | joystick position (0..1 floats) |
+| `/volt/fader/0` … `/volt/fader/3` `f v` `s name` | fader levels (0..1 float) |
 | `/volt/item/slot_start` … | item state changes (arg 1 = name, arg 2 = code) |
+
+**On the Control admin (`/control-ops`)** you don't have to run a terminal to
+see any of this: each item's card has a **"Connect a rig / VJ software"** panel
+(the exact OSC addresses for that controller + ready-to-copy `bus-to-osc` /
+`bus-to-pi` / TouchDesigner commands with the code pre-filled) and a **"Live
+output"** monitor that shows every press/drag in real time with the address it
+maps to — so you can confirm the wiring before doors open. Volt Control is its
+own product with its own admin; the audio-reactive console has a separate one
+(`/admin.html`).
 
 ### Running it (operator)
 

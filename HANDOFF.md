@@ -204,6 +204,25 @@ Everything below is **deployed and working in production** unless marked.
   ⚠️ **Behavior change:** to drive the console's LIVE output (scene/station/
   channel/mode/transport) you must now be **signed in as vj/radio/admin OR hold
   a control slot** — an anonymous console can no longer steer the paid output.
+- **CONTROLLER VARIATIONS + CONTROL HUB + PRODUCT DE-COUPLE (this session)** — a
+  pad item now has a **`controller`** field (enum `dpad` (default, back-compat) /
+  `joystick` / `faders` / `grid`), picked per item in `/control-ops`. The slot
+  holder's `control.html` renders the matching layout: d-pad (`pad_*`/`btn_*`),
+  joystick (drag → `pad_xy {x,y}` + FIRE), faders (`fader {i,v}`), grid (`cell_0`
+  …`cell_8`). All ride the SAME holder-gated `{type:'key'}` path — `PAD_BTN_RE`
+  extended to the new vocabulary; **continuous** actions (`pad_xy`/`fader`) skip
+  the per-item duty cooldown (bus rate limit still bounds them) and stream
+  coalesced ~6/s. `tools/bus-to-osc.mjs` now forwards them as OSC floats
+  (`/volt/xy` f x,y · `/volt/fader/<i>` f v). **The Control admin is now a
+  standalone hub:** each pad card shows the controller at a glance + a **Connect**
+  panel (per-controller OSC address list + copy-paste `bus-to-osc`/`bus-to-pi`/TD
+  commands, code pre-filled) + a **Live output monitor** (opens one WS to the item
+  room, renders each press/drag with its OSC address; `renderAdmin` closes
+  monitor sockets to avoid leaks; `refreshAdmin` holds while one is open).
+  **De-coupled the two products:** removed `admin.html`'s Volt Control section
+  (channels admin is now purely audio-reactive) and `control-ops`'s link to it —
+  Volt Control stands alone (discoverability via docs, not cross-links). Suites:
+  items 42, control 30, ops 18; all nine green. Adversarially reviewed.
 - **⚠️ CABINET DEMO LOOK IS ON** — `CABINET_DEMO = true` in `index.html`
   renders a furnished, NON-functional cabinet preview (3 fake records + 12
   prints; clicks explain). **When William says "remove demo": flip that one

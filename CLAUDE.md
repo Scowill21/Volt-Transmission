@@ -32,13 +32,21 @@ play/pause + volume; detection is `isPhone()` (matchMedia coarse+hover:none
 audio and restores on exit. **VOLT CONTROL** (`control.html` + `server/items.js`,
 same stub-pay tier): pay-to-control physical items driven by TD — each item
 has a 6-char code + QR to `/control?item=<CODE>`; buy-now queue or soft-close
-auction wins a timed slot; the holder gets a d-pad/A-B-C touch controller whose
-presses ride the action bus (room `item:<CODE>`, actions `pad_*`/`btn_*`) with
-server-side gate enforcement (bus.js gate REGISTRY — paid.js gates scene_1..4
-in radio rooms, items.js owns `item:` rooms; `item`/`item_queues` are RESERVED);
-item defs persist via store.js (items table / `server/items.json`), runtime
-queues reset on deploy like paid.js; admin ops live in control.html's gear view
-(same X-Admin-Key), QR encoder is embedded + decoder-verified. `src/` +
+auction wins a timed slot; the holder gets a touch controller — one of FOUR
+layouts per the item's **`controller`** field (`dpad` default / `joystick` /
+`faders` / `grid`) — whose presses ride the action bus (room `item:<CODE>`,
+gated `key` actions `pad_up/down/left/right·xy`, `btn_[abc]`, `fader`,
+`cell_0..15` — `PAD_BTN_RE` in items.js; continuous `pad_xy`/`fader` skip the
+duty cooldown but the holder gate + bus rate still bind) with server-side gate
+enforcement (bus.js gate REGISTRY — paid.js gates scene_1..4 + station/channel/
+mode/transport in radio rooms, items.js owns `item:` rooms; `item`/`item_queues`
+are RESERVED); item defs persist via store.js (items table / `server/items.json`),
+runtime queues reset on deploy like paid.js. Admin = **`control-ops.html`**
+(`/control-ops`, its own standalone product page — the audio-reactive console's
+admin is separately `admin.html`; the two no longer cross-link): per-item
+controller picker, a Connect panel (OSC addresses + copy commands) and a live
+OSC monitor. `tools/bus-to-osc.mjs` forwards joystick/fader values as OSC floats
+(`/volt/xy`, `/volt/fader/<i>`). QR encoder is embedded + decoder-verified. `src/` +
 `react-app.html` is an archived React variant — reference only, don't extend it.
 **VOLT JUKEBOX** (`server/jukebox.js`, same tier): an item's `surface` is `'pad'`
 (default, the d-pad above) or `'jukebox'` — audio as a control surface. A jukebox
