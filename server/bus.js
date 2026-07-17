@@ -19,6 +19,7 @@
    lands with the Tier 4 hardening. */
 import { WebSocketServer } from 'ws';
 import { userFromRequest } from './auth.js';
+import { wsOriginAllowed, safeEqual, adminDisabledInProd } from './security.js';
 
 const rooms = new Map();                       // channelId -> Set<ws>
 const RATE = { burst: 20, perSec: 8 };         // per-socket publish budget
@@ -32,6 +33,12 @@ const RESERVED = new Set(['queues', 'denied', 'item', 'item_queues', 'output', '
 // Types only RIGS (authenticated hardware/renderers) or privileged senders
 // may originate — plain viewers' copies are dropped exactly like RESERVED.
 const RIG_ONLY = new Set(['score', 'telemetry']);
+// Output-routing control types the console sends to drive the LIVE TD/VJ output
+// (which scene/station is up, which channel/VJ, mode, transport). Like the gated
+// scene_1..4 KEY actions these decide what the paid output shows, so they must
+// pass the same permission gate — otherwise a spectator (open subscribe) or an
+// anonymous HTTP inject could steer the paid output without holding a slot.
+export const OUTPUT_CTL = new Set(['station', 'channel', 'mode', 'transport']);
 // Rig → SERVER reports (jukebox player truth). Like RIG_ONLY (rig/admin only),
 // but the SERVER CONSUMES them (rigHooks.message) instead of fanning them out —
 // nowPlaying/skip-window math depends on them, so they must never come from a
@@ -77,7 +84,11 @@ export function publish(channel, msg, exceptWs){
 }
 
 export function attachBus(server, app){
-  const wss = new WebSocketServer({ server, path: '/api/bus' });
+  // Defence in depth atop SameSite=Lax: reject a CROSS-ORIGIN browser handshake
+  // BEFORE it upgrades, so no other site can open an authenticated socket in a
+  // logged-in user's context. verifyClient runs during the handshake (the client
+  // never sees 'open'); Node rigs send no Origin and pass.
+  const wss = new WebSocketServer({ server, path: '/api/bus', verifyClient: (info) => wsOriginAllowed(info.req) });
 
   wss.on('connection', (ws, req) => {
     const q = new URL(req.url, 'http://x').searchParams;
@@ -85,9 +96,13 @@ export function attachBus(server, app){
     if (!channel){ ws.close(4000, 'channel query param required'); return; }
     // Rig identity: validated BEFORE the socket joins the room — a bad key
     // never sees a single message. No rig params → plain viewer, as always.
+    // The key is read from the x-rig-key HEADER first (Node rigs — keeps the
+    // secret out of the URL / access logs) and falls back to the query param
+    // for browser projectors that can't set request headers.
     const rigName = (q.get('rig') || '').slice(0, 24);
     if (rigName && rigHooks){
-      const verdict = rigHooks.auth(channel, rigName, q.get('rigKey') || '');
+      const rigKey = req.headers['x-rig-key'] || q.get('rigKey') || '';
+      const verdict = rigHooks.auth(channel, rigName, rigKey);
       if (!verdict || !verdict.ok){ ws.close(4401, 'bad rig key'); return; }
       ws._rig = { name: rigName };
     }
@@ -118,18 +133,27 @@ export function attachBus(server, app){
       // score/telemetry come from RIGS (or privileged sessions) only — a
       // plain viewer's copy is dropped exactly like a RESERVED forgery.
       if (RIG_ONLY.has(msg.type) && !priv) return;
-      // Rig → server jukebox reports: consume them, don't broadcast. Only an
-      // authenticated rig (or privileged) may report player truth.
+      // Rig → server jukebox reports: consumed server-side (they ARE player
+      // truth — nowPlaying/queue/skip-window math), never broadcast. They must
+      // come from an actual authenticated RIG (ws._rig), NOT merely a privileged
+      // human session: a vj/radio/admin cookie is not a player and must never be
+      // able to forge track_started/ended/position for someone else's jukebox.
+      // (The trusted 'admin' report path is the X-Admin-Key HTTP inject only.)
       if (RIG_REPORT.has(msg.type)){
-        if (priv && rigHooks && rigHooks.message) rigHooks.message(channel, ws._rig ? ws._rig.name : 'admin', msg);
+        if (ws._rig && rigHooks && rigHooks.message) rigHooks.message(channel, ws._rig.name, msg);
         return;
       }
-      // Gating: key actions only pass for whoever holds the relevant controls
-      // (paid.js: scene_1..4 takeover · items.js: pad/btn in item rooms).
-      if (msg.type === 'key'){
+      // Gating: key actions AND the output-routing control types only pass for
+      // whoever holds the relevant controls (paid.js: scene_1..4 + station/
+      // channel/mode/transport in radio rooms · items.js: pad/btn in item rooms).
+      if (msg.type === 'key' || OUTPUT_CTL.has(msg.type)){
         const verdict = gateVerdict(channel, ws, msg);
         if (!verdict.ok){
-          try { ws.send(JSON.stringify({ type: 'denied', action: msg.action, reason: verdict.reason })); } catch {}
+          // Notify on a user-initiated KEY denial (slot contention feedback);
+          // stay SILENT on OUTPUT_CTL — the console auto-emits station/channel/
+          // mode on plain tune-in, so a viewer must not see a spurious "locked".
+          if (msg.type === 'key')
+            try { ws.send(JSON.stringify({ type: 'denied', action: msg.action, reason: verdict.reason })); } catch {}
           return;
         }
       }
@@ -177,7 +201,10 @@ export function attachBus(server, app){
       return res.status(400).json({ error: 'body must be a message with a "type"' });
     if (RESERVED.has(msg.type))
       return res.status(400).json({ error: 'reserved (server-originated) message type' });
-    const admin = req.get('x-admin-key') === ADMIN_KEY;
+    // Constant-time + FAIL-CLOSED: honor the same admin posture as requireAdmin
+    // so this inject path can't be the hole that accepts the insecure 'dev' key
+    // on a misconfigured production deploy (where requireAdmin already 503s).
+    const admin = !adminDisabledInProd() && safeEqual(req.get('x-admin-key') || '', ADMIN_KEY);
     // score/telemetry are rig-originated — over HTTP only X-Admin-Key may inject.
     if (RIG_ONLY.has(msg.type) && !admin)
       return res.status(403).json({ error: 'rig-originated message type — rigs or X-Admin-Key only' });
@@ -187,8 +214,10 @@ export function attachBus(server, app){
       if (rigHooks && rigHooks.message) rigHooks.message(req.params.id, 'admin', msg);
       return res.json({ ok: true, consumed: true });
     }
-    // Same gates as the socket path (X-Admin-Key acts as privileged).
-    if (msg.type === 'key'){
+    // Same gates as the socket path (X-Admin-Key acts as privileged). An
+    // anonymous inject of an output-routing type is denied here — only an admin
+    // or the slot holder may steer the paid output over HTTP.
+    if (msg.type === 'key' || OUTPUT_CTL.has(msg.type)){
       const verdict = gateVerdict(req.params.id, { _user: admin ? { role: 'admin' } : null }, msg);
       if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
     }

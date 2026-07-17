@@ -31,6 +31,7 @@ import { requester } from './paid.js';
 import { attachJukebox } from './jukebox.js';
 import { devIdentityAllowed } from './auth.js';
 import { httpError, ITEM_CODE_RE, STAGE_SCENES, DEFAULT_LIMITS } from './store.js';
+import { safeEqual } from './security.js';
 
 const PRIVILEGED = new Set(['vj', 'radio', 'admin']);
 const MAX_QUEUE = 25;              // waiting buyers per item
@@ -404,7 +405,7 @@ export async function attachItems(app, requireAdmin, store){
       if (!item) return { ok: false };
       const entry = item.outputs.find(o => o.kind === 'rig' && o.name === rigName);
       if (!entry) return { ok: false };
-      return { ok: sha256(rigKey) === entry.keyHash };
+      return { ok: safeEqual(sha256(rigKey), entry.keyHash) };   // constant-time
     },
     connected(channel, rigName, ws){
       const code = String(channel).slice(5);
@@ -704,6 +705,11 @@ export async function attachItems(app, requireAdmin, store){
       const code = normCode(req.params.code);
       const item = findItem(code);
       const { kind, name, priority, scene } = req.body || {};
+      // 'admin' is the reserved sentinel the bus uses to mark trusted X-Admin-Key
+      // HTTP-inject reports; a rig must never be able to claim that name (it would
+      // otherwise be trusted to report player truth even when not the program rig).
+      if (kind === 'rig' && String(name || '').trim().toLowerCase() === 'admin')
+        throw httpError(400, "rig name 'admin' is reserved");
       const entry = { kind, name, priority: priority ?? (item.outputs.length + 1), scene };
       let rigKey;
       if (kind === 'rig'){

@@ -24,7 +24,7 @@
    URL-param escape hatch applies instead: the request body may declare
    { user: { id, name } } — that path switches off automatically the
    moment auth is configured, so production always requires real sessions. */
-import { publish, registerKeyGate } from './bus.js';
+import { publish, registerKeyGate, OUTPUT_CTL } from './bus.js';
 import { userFromRequest, devIdentityAllowed } from './auth.js';
 import { httpError } from './store.js';
 
@@ -133,13 +133,27 @@ export function attachPaid(app, requireAdmin){
      (documented escape hatch). */
   registerKeyGate((channelId, sender, msg) => {
     if (String(channelId).startsWith('item:')) return null;    // items.js territory
-    if (!/^scene_[1-4]$/.test(msg.action || '')) return null;  // overlay/other keys stay open
+    const isScene = /^scene_[1-4]$/.test(msg.action || '');    // pooled-until-purchased overlay
+    const isOutputCtl = OUTPUT_CTL.has(msg.type);              // station/channel/mode/transport — operator grade
+    if (!isScene && !isOutputCtl) return null;                 // other keys stay open
     const c = state.get(channelId);
-    if (!c || !c.active) return { ok: true };
     const u = sender && sender._user;
-    if (u && PRIVILEGED.has(u.role)) return { ok: true };
-    if (u && u.id === c.active.userId) return { ok: true };
-    if (devIdentityAllowed() && msg.user && msg.user.id === c.active.userId) return { ok: true };
+    const priv = !!(u && PRIVILEGED.has(u.role));
+    const holds = !!(c && c.active && (
+      (u && u.id === c.active.userId) ||
+      (devIdentityAllowed() && msg.user && msg.user.id === c.active.userId)));
+    // Output-routing controls (which scene/station/channel is up, mode,
+    // transport) STEER the live paid output, so only the operator (verified vj/
+    // radio/admin) or the current slot holder may originate them — never an
+    // anonymous spectator, and never when nobody holds the slot either.
+    if (isOutputCtl){
+      if (priv || holds) return { ok: true };
+      return { ok: false, reason: c && c.active ? `${c.active.name} has the controls` : 'only the controller can steer the output' };
+    }
+    // scene_1..4 keep the pooled-until-purchased behavior: open with no active
+    // slot, holder/privileged-only once someone buys in.
+    if (!c || !c.active) return { ok: true };
+    if (priv || holds) return { ok: true };
     return { ok: false, reason: `${c.active.name} has the controls` };
   });
 

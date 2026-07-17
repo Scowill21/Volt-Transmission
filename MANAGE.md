@@ -117,9 +117,27 @@ node .smoke-jukebox.cjs     # server: the jukebox rules engine
 node .smoke-control.cjs     # client: the /control USER page (jsdom)
 node .smoke-ops.cjs         # client: the /control-ops admin page (jsdom)
 node .smoke-stage.cjs       # client: the /stage output plane (jsdom)
+node .smoke-security.cjs    # server: the take-control hardening
 ```
-All eight must print `ALL CLEAR`. Extend them when you add features (it's a rule
+All nine must print `ALL CLEAR`. Extend them when you add features (it's a rule
 in `CLAUDE.md`).
+
+### 🔒 Security must-dos (so people can't hack it to take control)
+- **Set a real `ADMIN_KEY` in production.** On a Supabase-configured deploy the
+  server now **refuses** the insecure `dev`/unset default (admin endpoints return
+  503 until a real key is set) — Render's blueprint auto-generates one, so this
+  only bites an off-blueprint deploy. Never paste the prod key into chat.
+- **To drive the console's LIVE output you must be signed in as vj/radio/admin
+  (or hold a control slot).** Steering the output (scene/station/channel/mode/
+  transport) is now gated — an anonymous or plain-listener console can watch and
+  buy a slot but can't change the live scene. Approve your operators' vj/radio
+  applications in `/admin.html`.
+- The player **rig key** now travels in an `x-rig-key` header (out of the URL/
+  logs). Re-copy keys from the ops chain editor if you rotate them; the tools
+  (`tools/volt-jukebox.mjs`, `tools/bus-to-pi.mjs`) send it automatically.
+- If you ever serve the console from a **different origin** than the API, set
+  `ALLOWED_ORIGINS` (comma-separated) — cross-origin WebSockets are otherwise
+  refused.
 
 ### Monitoring & health
 - **Production health:** `curl …/healthz`. Bidding 401s in prod = the DB is

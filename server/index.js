@@ -53,8 +53,9 @@
 */
 import express from 'express';
 import path from 'node:path';
+import http from 'node:http';
+import https from 'node:https';
 import { readdirSync } from 'node:fs';
-import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { createStore, httpError } from './store.js';
 import { initAuth, mountAuth, authConfigured } from './auth.js';
@@ -62,18 +63,32 @@ import { attachBus } from './bus.js';
 import { attachPaid } from './paid.js';
 import { attachShop } from './shop.js';
 import { attachItems } from './items.js';
+import { securityHeaders, makeRequireAdmin, makeRateLimiter, adminDisabledInProd, assertPublicUrl } from './security.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.PORT || 8787;
 
 const ADMIN_KEY = process.env.ADMIN_KEY || 'dev';
 if (!process.env.ADMIN_KEY) console.warn('[admin] ADMIN_KEY not set — using the dev default ("dev"). Set it in production.');
+if (adminDisabledInProd()) console.error('[admin] ⛔ ADMIN_KEY is unset/"dev" on a Supabase-configured deploy — admin endpoints are DISABLED (fail-closed) until you set a real ADMIN_KEY.');
 
 const store = await createStore();
 await initAuth();
 console.log('[auth]', authConfigured() ? 'supabase configured' : 'not configured — accounts disabled, console runs as before');
 const app = express();
+app.set('trust proxy', 1);                 // Render sits in front — trust ONE hop for a correct req.ip (rate-limit / lockout key)
+app.disable('x-powered-by');
+app.use(securityHeaders);                  // anti-clickjacking / nosniff / referrer / HSTS on every response
 app.use(express.json({ limit: '32kb' }));
+
+// Per-IP rate limits on STATE-CHANGING routes (reads are never throttled): a
+// tight budget on auth (password/brute-force) + a generous one on the paid
+// control-plane mutations (buy/bid/jukebox flooding + monopolisation).
+app.use(['/api/auth/login', '/api/auth/signup'], makeRateLimiter({ windowMs: 5 * 60 * 1000, max: 30 }));
+// Generous: a whole VENUE shares one WiFi egress IP, so this is a flood backstop
+// (per-user abuse is already bounded by the bid cooldown, queue caps, skip latch),
+// NOT a per-person cap — keep it high enough for a busy bar.
+app.use(['/api/items', '/api/channels'], makeRateLimiter({ windowMs: 60 * 1000, max: 300 }));
 
 /* ── public ── */
 app.get('/healthz', (req, res) => res.json({ ok: true }));
@@ -117,30 +132,59 @@ app.get('/api/channels/:id/audio', async (req, res, next) => {
     const channel = (await store.list()).find(c => c.id === req.params.id);
     if (!channel || !channel.audioUrl) throw httpError(404, 'channel has no live audio');
 
-    const upstreamAbort = new AbortController();
-    const upstream = await fetch(channel.audioUrl, {
-      headers: { 'user-agent': 'VoltTransmission-relay' },
-      redirect: 'follow',
-      signal: upstreamAbort.signal,
-    }).catch(() => null);
-    if (!upstream || !upstream.ok || !upstream.body) throw httpError(502, 'upstream stream unreachable');
+    // SSRF guard: this relay is PUBLIC and pipes the upstream body back, so an
+    // audioUrl (or a redirect off it) pointed at a metadata / internal host would
+    // exfiltrate internal responses. assertPublicUrl validates the target AND
+    // returns the pinned IP; we connect to THAT exact IP (lookup override), so a
+    // DNS-rebind between validation and connect can't swing us to a private host.
+    // Redirects are followed manually, re-validated per hop; a hung connect times
+    // out. (Live streams are unbounded by design → no byte cap.)
+    let target = channel.audioUrl, upstream = null, gone = false;
+    let liveReq = null;
+    res.on('close', () => { gone = true; if (liveReq) liveReq.destroy(); if (upstream) upstream.destroy(); });
+
+    for (let hop = 0; hop < 4 && !gone; hop++){
+      const { url, ip, family } = await assertPublicUrl(target);   // throws 400/403/502 if non-public
+      const mod = url.protocol === 'https:' ? https : http;
+      upstream = await new Promise((resolve) => {
+        const r = mod.request(url, {
+          method: 'GET',
+          headers: { 'user-agent': 'VoltTransmission-relay' },
+          servername: url.hostname,                                 // TLS SNI stays the hostname (cert still validates)
+          lookup: (h, o, cb) => cb(null, ip, family),               // PIN the validated IP — closes the rebind window
+          timeout: 10000,
+        }, resolve);
+        liveReq = r;
+        r.on('timeout', () => r.destroy(new Error('connect timeout')));
+        r.on('error', () => resolve(null));
+        r.end();
+      });
+      if (!upstream) break;                                         // connect error → 502 below
+      const sc = upstream.statusCode || 0;
+      if (sc >= 300 && sc < 400 && upstream.headers.location){
+        target = new URL(upstream.headers.location, url).href;      // re-validated + re-pinned next loop
+        upstream.resume();                                          // drain the redirect body
+        upstream = null;
+        continue;
+      }
+      break;
+    }
+    if (gone) return;
+    if (!upstream || (upstream.statusCode || 0) >= 400) throw httpError(502, 'upstream stream unreachable');
 
     res.status(200);
-    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'audio/mpeg');
+    res.setHeader('Content-Type', upstream.headers['content-type'] || 'audio/mpeg');
     res.setHeader('Cache-Control', 'no-store');
-
-    const body = Readable.fromWeb(upstream.body);
-    res.on('close', () => { upstreamAbort.abort(); body.destroy(); });  // listener left → drop upstream
-    body.on('error', () => res.end());
-    body.pipe(res);
+    upstream.on('error', () => res.end());
+    upstream.pipe(res);
   } catch (e) { next(e); }
 });
 
-/* ── admin (X-Admin-Key) ── */
-function requireAdmin(req, res, next){
-  if (req.get('x-admin-key') === ADMIN_KEY) return next();
-  res.status(401).json({ error: 'bad admin key' });
-}
+/* ── admin (X-Admin-Key) ──
+   Hardened in security.js: constant-time key compare, per-IP brute-force
+   lockout, and FAIL-CLOSED when a Supabase-configured deploy is left on the
+   insecure 'dev'/unset key. */
+const requireAdmin = makeRequireAdmin(ADMIN_KEY);
 
 app.post('/api/channels', requireAdmin, async (req, res, next) => {
   try { res.status(201).json(await store.createChannel(req.body || {})); } catch (e) { next(e); }

@@ -62,8 +62,10 @@ let MAP = {};
 try { MAP = JSON.parse(fs.readFileSync(mapFile, 'utf8')); }
 catch (e){ console.error(`[pins] could not read ${mapFile}: ${e.message}`); process.exit(1); }
 
-const url = `${base}?channel=${encodeURIComponent('item:' + item)}` +
-  `&rig=${encodeURIComponent(rig)}&rigKey=${encodeURIComponent(key)}`;
+// The key rides an x-rig-key HEADER (not the URL) so it never lands in a proxy /
+// access log; only the rig NAME is in the query string.
+const url = `${base}?channel=${encodeURIComponent('item:' + item)}&rig=${encodeURIComponent(rig)}`;
+const wsOpts = { headers: { 'x-rig-key': key } };
 
 /* ── GPIO backend (sysfs, dependency-free; log-only fallback) ─────────
    /sys/class/gpio is deprecated on newer kernels but still the only backend
@@ -176,7 +178,7 @@ function route(m){
 /* ── connect (reconnect forever, capped backoff) ─────────────────────── */
 let delay = 1000;
 (function connect(){
-  const ws = new WebSocket(url);
+  const ws = new WebSocket(url, wsOpts);
   ws.on('open', () => {
     delay = 1000;
     console.log(`[bus] connected as rig "${rig}" on item ${item}${LOG_ONLY ? ' (LOG-ONLY)' : ''}`);

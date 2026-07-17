@@ -442,6 +442,14 @@ bids queue up. While a slot is active:
   `denied` notice; the console also locks the caps visually). Signed-in
   **vj / radio / admin** roles always bypass. The overlay actions
   (Q/W/E/Space) and everything else stay open.
+- **The output-routing controls — which scene/station is up, the channel/VJ,
+  mode, and transport (play/pause) — are gated the same way.** These steer what
+  the live TD/VJ output shows, so only a signed-in **vj/radio/admin** operator
+  or the current slot holder may originate them (a security fix — an anonymous
+  spectator could previously change the live scene without paying). **To run a
+  show from the console, sign in as vj/radio/admin.** A logged-out viewer can
+  still watch and buy a slot; their local view changes, but it won't reroute the
+  shared output.
 - When the slot expires the next bidder is promoted automatically. The host
   can end a slot early: `/admin.html` → Paid queues → **End control slot**.
 
@@ -759,7 +767,12 @@ together — no expiring Render Postgres).
 3. In the service's **Environment** tab set `DATABASE_URL` (Supabase
    **session-pooler** string), `SUPABASE_URL`, and `SUPABASE_PUBLISHABLE_KEY`
    — same values as your local `.env`. Copy the auto-generated **`ADMIN_KEY`**
-   while you're there — that's your key for `/admin.html`.
+   while you're there — that's your key for `/admin.html`. ⚠️ **`ADMIN_KEY` must
+   be a real value in production:** with Supabase configured, the server now
+   *refuses* the insecure `dev`/unset default and disables admin (503) until a
+   real key is set — the blueprint's auto-generated key satisfies this. (Optional
+   `ALLOWED_ORIGINS`, comma-separated, only if you serve the console from a
+   different origin than the API — cross-origin WebSockets are otherwise refused.)
 4. If the old *static site* service from pre-1b still exists, delete it in
    the dashboard so only the web service serves the site.
 5. Every push redeploys. Songs in `audio/` + `PRESET_TRACKS` ship with it.

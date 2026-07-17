@@ -93,6 +93,7 @@ node .smoke-jukebox.cjs  # server: JUKEBOX rules engine (skip windows, queue cap
 node .smoke-control.cjs  # client: control.html USER page (entry, item, controller, throttle, redundancy UI, jukebox surface)
 node .smoke-ops.cjs      # client: control-ops.html admin dashboard (gate, create/edit/actions, chain, QR, jukebox editor)
 node .smoke-stage.cjs    # client: stage.html browser output plane (scenes, election, attract, jukebox marquee)
+node .smoke-security.cjs # server: take-control hardening (report-forgery, output-gate, SSRF, admin lockout, WS origin, headers)
 ```
 
 `.smoke-test.cjs` evals the whole page script (also catches syntax errors) and
@@ -114,14 +115,24 @@ plus a hard assertion that NO admin code/key/QR-encoder ships to visitors.
 gate, create + QR poster, skip/pause/off, edit PATCH, the chain manager, the
 edit-open refresh guard). `.smoke-stage.cjs` drives stage.html (scenes render +
 react, output election self-mute, attract mode, resync staleness guard, the
-jukebox `?view=marquee` now-playing board). `.smoke-jukebox.cjs` is the JUKEBOX
+jukebox `?view=marquee` now-playing board). `.smoke-security.cjs` locks in the
+take-control hardening (`server/security.js`): a non-rig socket can't forge
+jukebox reports (only `ws._rig` is trusted), the output-routing types
+`station/channel/mode/transport` are gated operator-or-holder like scene_1..4,
+the audio relay is SSRF-guarded, the admin key is constant-time + brute-force-
+locked + FAIL-CLOSED on a misconfigured prod, WS upgrades reject cross-origin,
+and every response ships anti-clickjacking/nosniff headers. **Security rule:**
+driving the console's live output (scene/station/channel/mode/transport) now
+requires a signed-in vj/radio/admin session or a held control slot — keep it
+that way; never re-open a control-plane type to anonymous senders.
+`.smoke-jukebox.cjs` is the JUKEBOX
 rules engine's hermetic matrix — pad↔jukebox back-compat, catalog-only queueing,
 idle-start, queue caps + no-repeat, play-next fairness, the full skip decision
 (minPlaySec floor · onlyBeforeSec window · per-user + global sliding-window caps
 that slide not reset), allowMidSong, stale-songId skips (no window decrement),
 rig `track_started`/`ended`/`position` reports, forged-wire rejection, bid-round
 close, controller_slot vs per_action, and admin force-skip/clear/remove. Keep all
-EIGHT green and extend them when adding features.
+NINE green and extend them when adding features.
 
 ## Deploy
 

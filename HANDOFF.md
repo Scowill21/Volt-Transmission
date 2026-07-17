@@ -173,6 +173,37 @@ Everything below is **deployed and working in production** unless marked.
   clamped, `track_ended` can't double-advance, and `onlyBeforeSec` is floored to
   `minPlaySec` so the skip window is never empty. The `PROMPT-JUKEBOX.md` mission
   is DONE.
+- **SECURITY HARDENING — "can't hack it to take control" (this session)** — an
+  adversarial audit (8 attack surfaces, verified) found real take-control holes;
+  all fixed in a new **`server/security.js`** + wiring. Confirmed fixes: (1) a
+  privileged **vj/radio/admin SESSION** could open a plain WS to `item:<CODE>`
+  and forge jukebox `track_started/ended/position` (laundered to rigName
+  `'admin'`) — now RIG_REPORT is consumed **only from an authenticated rig**
+  (`ws._rig`); `'admin'` reports come solely from the X-Admin-Key HTTP inject.
+  (2) The pay-gate only covered `type:'key'`, so `station/channel/mode/transport`
+  (which steer the live TD output) fanned out **ungated** — any spectator or
+  anonymous HTTP inject could change the scene without paying; now gated
+  operator-or-holder (a new `OUTPUT_CTL` set in bus.js, claimed by paid.js's
+  gate). (3) **SSRF** in the public `/api/channels/:id/audio` relay (followed
+  redirects with no private-IP filter) — now `assertPublicUrl` + manual
+  redirect loop re-validating each hop + connect timeout. (4) Rig key moved out
+  of the WS URL into an `x-rig-key` header (tools updated; browser projectors
+  keep the query fallback). Defense-in-depth added: **constant-time** admin/rig
+  key compare, admin **fails CLOSED** if a Supabase-configured deploy is left on
+  the `dev`/unset key, **per-IP admin brute-force lockout**, **rate limits** on
+  auth + control mutations, **security headers** (X-Frame-Options/CSP
+  frame-ancestors/nosniff/Referrer-Policy/HSTS), and a **WS Origin** check
+  (`verifyClient`). A self-review found + fixed 6 follow-ups: the bus HTTP-inject
+  now also fails closed + constant-time (not just `requireAdmin`); the SSRF guard
+  **pins the validated IP** through the connect (closes DNS-rebind — relay
+  rewritten on node http/https with a `lookup` override); denied output-control
+  actions are **silent** over WS (no spurious "locked" for viewers auto-emitting
+  on tune-in); a rig can't claim the reserved `admin` name; the lockout map is
+  swept; the venue rate limit is 300/min (shared-NAT-friendly). **NEW suite
+  `.smoke-security.cjs` (15)**; all nine green.
+  ⚠️ **Behavior change:** to drive the console's LIVE output (scene/station/
+  channel/mode/transport) you must now be **signed in as vj/radio/admin OR hold
+  a control slot** — an anonymous console can no longer steer the paid output.
 - **⚠️ CABINET DEMO LOOK IS ON** — `CABINET_DEMO = true` in `index.html`
   renders a furnished, NON-functional cabinet preview (3 fake records + 12
   prints; clicks explain). **When William says "remove demo": flip that one
@@ -182,8 +213,20 @@ Everything below is **deployed and working in production** unless marked.
 - Payload/query identity (`{user:{id,name}}` / `?uid=&name=`) works ONLY when
   `devIdentityAllowed()` (= Supabase env ABSENT). Keyed on **intent, not DB
   reachability** — a DB outage on prod fails CLOSED (401s), never open.
-- Clients can't forge control-plane bus types (`queues`, `denied`).
+- Clients can't forge control-plane bus types (`queues`, `denied`, `item`,
+  `item_queues`, `output`, `jukebox`). Player TRUTH (`track_started/ended/
+  position`) is consumed **only from an authenticated rig socket** (`ws._rig`)
+  or the X-Admin-Key HTTP inject — never a privileged human session.
+- Steering the live output — `key` scene_1..4 AND `station/channel/mode/
+  transport` (`OUTPUT_CTL`) — passes the gate: operator (vj/radio/admin) or the
+  slot holder only. Anonymous spectators / HTTP injects are denied.
 - `ws._user` binds before gated keys process (buffered during handshake).
+- Admin: **constant-time** key compare, **per-IP brute-force lockout**, and
+  FAIL-CLOSED (503) if a Supabase-configured deploy is left on the `dev`/unset
+  key. Rig keys constant-time-compared and carried in the `x-rig-key` header.
+- WS upgrades reject cross-origin (`verifyClient`); every response carries
+  anti-clickjacking/nosniff/HSTS headers; the audio relay is SSRF-guarded
+  (no loopback/link-local/private targets, redirects re-validated per hop).
 - Album stream: no traversal, guarded streams (a read error must not crash
   the process — it used to), 416 on bad ranges.
 
@@ -200,6 +243,7 @@ node .smoke-jukebox.cjs     # server: JUKEBOX rules engine — skip windows/queu
 node .smoke-control.cjs     # client: control.html USER page in jsdom (26 checks — incl. jukebox surface)
 node .smoke-ops.cjs         # client: control-ops.html admin dashboard (14 checks — incl. jukebox editor)
 node .smoke-stage.cjs       # client: stage.html browser output plane (10 checks — incl. marquee)
+node .smoke-security.cjs    # security hardening: report-forgery, output-gate, SSRF, admin lockout, WS origin, headers (15)
 ```
 (`.smoke-failclosed.cjs` now also proves jukebox queue/skip/bid 401 during a DB
 outage — 10 checks.)

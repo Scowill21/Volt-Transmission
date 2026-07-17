@@ -75,8 +75,10 @@ if (backend !== 'mpd' && backend !== 'log'){
   console.error(`[jukebox] unknown --backend "${backend}" (use mpd or log)`); process.exit(1);
 }
 
-const url = `${base}?channel=${encodeURIComponent('item:' + item)}` +
-  `&rig=${encodeURIComponent(rig)}&rigKey=${encodeURIComponent(key)}`;
+// The key rides an x-rig-key HEADER (not the URL) so it never lands in a proxy /
+// access log; only the rig NAME is in the query string.
+const url = `${base}?channel=${encodeURIComponent('item:' + item)}&rig=${encodeURIComponent(rig)}`;
+const wsOpts = { headers: { 'x-rig-key': key } };
 
 /* ── report up the bus (server CONSUMES these; they are player TRUTH) ── */
 let sock = null;                               // the live bus WebSocket
@@ -288,7 +290,7 @@ function route(m){
 if (player.setOnDrop) player.setOnDrop(() => console.warn('[mpd] connection dropped — will reconnect on the next command'));
 let delay = 1000;
 (function connect(){
-  const ws = new WebSocket(url);
+  const ws = new WebSocket(url, wsOpts);
   sock = ws;
   ws.on('open', () => {
     delay = 1000;
