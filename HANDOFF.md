@@ -239,6 +239,94 @@ Everything below is **deployed and working in production** unless marked.
   `frame-src 'self' blob:`; code held in memory only). `.smoke-security.cjs` → 17.
   NB: the pre-existing uncommitted `VOLT-PI-PLAYBOOK.md` edit still points at a
   public `VOLT-RECIPE-BOOK.html` — stale now the book is private; left untouched.
+- **THE ADMIN CHAIN — orgs / delegated roles / scoped ops (this session,
+  server core — needs DATABASE_URL)** — `server/orgs.js`: a delegation ladder
+  over Tier-2a accounts. Platform (X-Admin-Key) › org **owner** › **staff** ›
+  **tech** — a NEW axis ORTHOGONAL to platform roles (listener/vj/radio/admin;
+  don't conflate). Items gained a nullable **`orgId`** (null = platform-owned
+  legacy, byte-identical old behavior — a smoke check), platform-set **`bounds`**
+  (priceBandCents / slotSecondsMax / cooldownFloorMs / maxPerMinCap / jukebox
+  minPlaySecFloor), and owner-editable **`hours`** (stored blob; auto on/off
+  enforcement is future). **Owners edit a WHITELIST within bounds, REJECT-not-
+  clamp** (out-of-band → 400, nothing written, no audit); **tighten-only** (rest
+  MORE / drive SLOWER, never loosen a floor); jukebox config PATCH **deep-merges**
+  (the store REPLACES, so orgs.js merges — an un-merged one-knob edit would reset
+  every other knob). **Owners MAY flip their own monetization/mode** (William's
+  call; idle-guarded). **staff** = actions only (pause/resume/skip/force-skip/
+  remove); **tech** = rig keys + output chains — a DISTINCT capability the owner
+  can NEVER touch (`requireOrg('tech',{exact})`); only rung-0 grants tech/owner.
+  Identity = the verified session matched to membership by **email** (`roleOf`,
+  a SYNC in-memory mirror updated on every write → offboarding bites on the very
+  next request, NO session cache); a role/orgRole claimed in a payload is IGNORED.
+  The bus item-room gate passes org members ≥staff of **THE ITEM'S org** (starts
+  from `item.orgId`, never the user's org list → cross-org privilege impossible
+  by construction). **NO new bus types, NO TD/OSC wire-schema change** (SETUP
+  stays true). Every org write → one **append-only audit** row (no delete/update
+  path in code OR schema). **Fail-closed:** no DATABASE_URL → org endpoints 503
+  (`store.orgsEnabled`; FileStore mirrors org data for hermetic tests but
+  `createStore` forces the flag false whenever the file store backs a real app);
+  DB down on a configured deploy → never a write. `attachItems` now returns an
+  **`itemsApi`** seam orgs.js calls (index.js 3-step wire: orgs → items{orgs} →
+  wireItems). NEW **`.smoke-orgs.cjs` (16)** — the full 12-point matrix incl.
+  cross-org isolation at BOTH the HTTP layer and the bus gate, offboard-immediate,
+  tech≠owner, bounds reject, no-DB 503; **failclosed +2 (→12), security +1 (→18,
+  forged-org-claim)**. OPEN QUESTIONS for William (not solved in code): self-serve item
+  creation as a paid "pro" unlock? per-org fleet map page? audit retention
+  window? invite emails (Supabase magic link vs. plain "sign up with this
+  email")? Stripe Connect per-org payouts stays the Tier-2b follow-up.
+- **THE ADMIN CHAIN — OPS UI, BOTH LENSES (this session)** — `control-ops.html`
+  finished PROMPT-ADMIN-CHAIN §7 ("one dashboard, two lenses"); the server core
+  above was picked up UNCOMMITTED from the prior session, verified (all suites
+  re-run green), and shipped together with this UI. **Key lens** grew a
+  **venues panel**: create org · assign/unassign items by code · per-item
+  **bounds editor** (⚖ — price band both-ends-required, slot max, cooldown
+  floor, rate cap, song floor) · grant/remove any rung · suspend/reactivate ·
+  per-venue audit viewer. 503s gracefully without a DB. **Session lens**: "Use
+  my account" on the gate → `/api/org/mine` → the member's venue only, knobs by
+  rung — owner gets band-annotated edit forms (band text + min/max input attrs;
+  a rejected save surfaces the server's message naming the band), crew roster +
+  staff invites + change log; staff gets pause/resume/skip(+jukebox veto) only;
+  tech gets chain cards + add-rig/scene + per-rig **key rotation** (`↻`, new key
+  shown once — §J's offboarding button). Zero admin secrets on the session path
+  (no key prompt, no key-carrying fetch — `.smoke-ops` asserts zero keyed calls
+  across the whole session phase). Server additions this pass: **`plays`**
+  runtime counter (pad slot starts + rig-reported jukebox tracks) on `orgView`
+  and the admin list; admin `GET /api/items` now carries `orgId/bounds/hours/
+  limits/plays` (the LIVE browser pass caught that gap — the jsdom mock had
+  hidden it); `GET /api/org/:id/members` (owner-only roster — you can't remove
+  who you can't see); **suspension now freezes the BUS gate too** (`roleOf` →
+  null for suspended orgs; requireOrg still says "suspended" to members);
+  `store.linkMemberUserId` backfills `org_members.userId` on a verified
+  member's first org request (spec §4 — fills a blank once, never re-links;
+  dev-hatch ids never land). The jukebox knob block hides the `backend`
+  selector in the org lens (the owner PATCH whitelist ignores it — showing a
+  dead knob teaches the wrong model); `gatherJukebox` tolerates its absence.
+  **A 16-finding adversarial review (1 critical / 4 major / 11 minor, all
+  confirmed, 0 refuted) ran on the whole diff and ALL fixes landed before
+  ship** — chief among them: (critical) an org owner could "invite" a
+  platform-granted tech/co-owner's email and, because `addMember` upserts,
+  DEMOTE them to staff then evict them — now the invite route rejects any email
+  already holding a higher rung; (major) owner edits now REJECT-not-clamp
+  against the store's intrinsic ranges (`ITEM_FIELDS`/`LIMIT_FIELDS`/
+  `JUKEBOX_FIELDS`, exported), so the append-only audit can never record a
+  value the store silently clamped; (major) a bad jukebox monetization/mode
+  enum 400s instead of coercing to the default (billing-model flip); (major)
+  the owner Save now ships a jukebox DIFF, not the full config (a stale
+  out-of-band knob no longer 400s unrelated edits, and no phantom audit rows);
+  (major) a blank price field is treated as unchanged, never coerced to $0.
+  Minor fixes: `rotateRigKey` is one atomic store write (no more delete-then-
+  add that could strand a rig), `reloadMirror` swaps atomically (a half-load
+  can't un-freeze a suspended org), houseMode flips now persist AND kick the
+  live player, `PATCH {jukebox:null}` → 400 not 500, and the session/venues UIs
+  got stale-response guards + poll guards + re-issued status messages + the
+  key-stays-visible-on-rotate fix. Verified live via curl + browser.
+  Verified LIVE against the real server (scratch boot with a
+  directly-constructed FileStore so `orgsEnabled` is true + a dev-identity
+  shim): owner band reject/accept round-trip with real audit rows, staff
+  scoping, tech rotate (old key dead), venues panel. Suites: **ops 18→26,
+  orgs 16→19** (staff pause/resume via endpoint, suspension-at-gate, roster
+  authz, userId-linkage, invite-guard, reject-not-clamp, enum-reject,
+  jukebox-null), items 42 still green after the payload change.
 - **⚠️ CABINET DEMO LOOK IS ON** — `CABINET_DEMO = true` in `index.html`
   renders a furnished, NON-functional cabinet preview (3 fake records + 12
   prints; clicks explain). **When William says "remove demo": flip that one
@@ -273,15 +361,16 @@ Everything below is **deployed and working in production** unless marked.
 node .smoke-test.cjs        # client: whole console in jsdom (~20 steps)
 node .smoke-server.cjs      # server: paid gate + shop gates (15 checks, hermetic)
 node .smoke-failclosed.cjs  # boots real server w/ Supabase env set + DB down → 401s (incl. item buy/bid)
-node .smoke-items.cjs       # server: Volt Control items + OUTPUT LAYER (41 checks, hermetic)
+node .smoke-items.cjs       # server: Volt Control items + OUTPUT LAYER (42 checks, hermetic)
 node .smoke-jukebox.cjs     # server: JUKEBOX rules engine — skip windows/queue/bid/reports (20, hermetic)
-node .smoke-control.cjs     # client: control.html USER page in jsdom (26 checks — incl. jukebox surface)
-node .smoke-ops.cjs         # client: control-ops.html admin dashboard (14 checks — incl. jukebox editor)
+node .smoke-control.cjs     # client: control.html USER page in jsdom (30 checks — incl. jukebox surface)
+node .smoke-ops.cjs         # client: control-ops.html admin dashboard (26 checks — incl. venues panel + session lens)
 node .smoke-stage.cjs       # client: stage.html browser output plane (10 checks — incl. marquee)
-node .smoke-security.cjs    # security hardening: report-forgery, output-gate, SSRF, admin lockout, WS origin, headers (15)
+node .smoke-security.cjs    # security hardening: report-forgery, output-gate, SSRF, admin lockout, WS origin, headers, forged-org-claim (18)
+node .smoke-orgs.cjs        # THE ADMIN CHAIN: orgs/roles/bounds/audit + cross-org isolation + the item-gate extension (21)
 ```
-(`.smoke-failclosed.cjs` now also proves jukebox queue/skip/bid 401 during a DB
-outage — 10 checks.)
+(`.smoke-failclosed.cjs` — 12 checks — now also proves jukebox AND org writes
+fail closed during a DB outage.)
 
 Extend them with every feature (CLAUDE.md rule). They are the ONLY gate —
 there is no CI.
@@ -382,6 +471,22 @@ there is no CI.
   boots the server auth-unconfigured (env -u …) on port 8794 — that's the
   one to use for driving buy/bid flows in a browser locally; plain
   `volt-api` loads `.env` and correctly fails closed.
+- **Admin-chain landmines:** org roles are a SEPARATE axis from platform
+  roles — never conflate `orgRole` with `role`. The ladder is NOT linear:
+  owner ⊇ staff for general caps, but **tech is exact** (`requireOrg('tech',
+  {exact})`) — an owner is NOT a tech and must never reach rig keys. Org
+  membership matches on **email** (both the session's and the invite's,
+  lowercased); `roleOf`/gate always start from `item.orgId`. `store.orgsEnabled`
+  is TRUE for a directly-constructed FileStore (so `.smoke-orgs.cjs` runs) but
+  `createStore` forces it FALSE for any FileStore backing a real app → prod
+  without Postgres 503s. The jukebox config PATCH **must** deep-merge (orgs.js
+  `planJukeboxMerge`) — the store's `applyItemPatch` REPLACES. `orgId`/`bounds`
+  are set via dedicated store methods (`setItemOrg`/`setItemBounds`), NOT the
+  general patch (which rejects them) — so an owner can't self-assign or
+  self-widen. Test-harness note: the fake `call()` in `.smoke-orgs.cjs` collects
+  and awaits ALL handler promises, because middleware call `next()` without
+  awaiting — a naive `await next()` lets sequential calls overlap and race the
+  file store.
 
 ---
 

@@ -233,6 +233,44 @@ and everything else runs as before.
   channels — since 2a that Postgres **is Supabase**, so one database serves
   channels, profiles, and (Tier 2b+) song requests.
 
+### The admin chain — orgs & delegated roles (needs the database)
+
+Businesses can run their own Volt Control items — price, slot length, open
+hours, pause/off, controller layout, jukebox rules + catalog — without calling
+you, inside safety/money **bounds you set** that they can never cross. A
+delegation ladder, enforced on the server on every request (the UI hiding a
+button is a courtesy; the gate is the law):
+
+- **Platform (you)** — the `X-Admin-Key`: create orgs, assign items, set bands
+  + floors, grant tech/owner, see every org and its audit trail.
+- **Org owner** — edits whitelisted fields WITHIN the band (price, slot, hours,
+  controller, jukebox rules, cooldown/maxPerMin *tighten-only*), pauses/skips,
+  invites their own staff, reads their audit. Can flip their own monetization
+  model. **Never** touches rig keys or another org.
+- **Org staff** — pause / skip / force-skip only.
+- **Org tech** — the venue's AV person (you grant it): rig keys + output chains.
+  A DISTINCT capability the owner can never touch.
+
+Org roles are a **separate axis** from the `listener/vj/radio/admin` platform
+roles above — a vj is not thereby an org owner. Membership is matched to the
+**verified email**; a role claimed in a request payload is ignored. Bounds
+**reject** an out-of-band edit (400 with the band in the message) — they never
+silently clamp. Every config change writes an **append-only audit** row. The
+operator runbook (install day → offboarding → key rotation) is in `MANAGE.md`.
+
+**Where venue people log in:** the same ops page you use — `/control-ops` —
+via the **"Use my account"** card (their Tier-2a account; the email must match
+their granted membership). They see ONLY their venue, with the knobs their
+rung allows; the platform band is printed right on the owner's edit form, so
+a rejected edit is never a surprise.
+
+> **The TD / bus wire schema did NOT change for the admin chain.** No new
+> message types, no new fields on `key`/`item`/`item_queues`/`jukebox`. A
+> staff/owner "pause" or "skip" arrives over new session-gated `/api/org/:id/…`
+> endpoints that call the SAME internals and emit the SAME server-only
+> `{type:'item'}` announcements the admin key always did. Your TouchDesigner
+> patch needs no changes.
+
 ---
 
 ## Connecting TouchDesigner

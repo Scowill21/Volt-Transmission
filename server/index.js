@@ -63,6 +63,7 @@ import { attachBus } from './bus.js';
 import { attachPaid } from './paid.js';
 import { attachShop } from './shop.js';
 import { attachItems } from './items.js';
+import { attachOrgs } from './orgs.js';
 import { securityHeaders, makeRequireAdmin, makeRateLimiter, adminDisabledInProd, assertPublicUrl, safeEqual } from './security.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -100,6 +101,9 @@ app.use(['/api/auth/login', '/api/auth/signup'], makeRateLimiter({ windowMs: 5 *
 // (per-user abuse is already bounded by the bid cooldown, queue caps, skip latch),
 // NOT a per-person cap — keep it high enough for a busy bar.
 app.use(['/api/items', '/api/channels'], makeRateLimiter({ windowMs: 60 * 1000, max: 300 }));
+// Org config mutations (owner PATCHes, invites, grants) — a modest budget; org
+// members are few and edits are occasional, but this backstops a runaway UI.
+app.use(['/api/org', '/api/admin/orgs'], makeRateLimiter({ windowMs: 60 * 1000, max: 120 }));
 
 /* ── public ── */
 app.get('/healthz', (req, res) => res.json({ ok: true }));
@@ -234,8 +238,14 @@ attachPaid(app, requireAdmin);
 /* ── shop + cabinet: records + art packs (server/shop.js) ── */
 attachShop(app);
 
-/* ── Volt Control: pay-to-control items (server/items.js, /control page) ── */
-await attachItems(app, requireAdmin, store);
+/* ── Volt Control: pay-to-control items + the admin chain (server/orgs.js) ──
+   Three-step wiring breaks the mutual dependency: orgs.js supplies the bus
+   gate its sync org-role resolver; items.js supplies orgs.js the item API it
+   calls after authz. The org routes close over a ref filled in step 3, well
+   before any request arrives. */
+const orgs = await attachOrgs(app, requireAdmin, store);
+const itemsApi = await attachItems(app, requireAdmin, store, { orgs });
+orgs.wireItems(itemsApi);
 
 /* ── the site itself (console + admin + audio/) ── */
 // albums/ holds PURCHASE-GATED records — never serve it statically; tracks

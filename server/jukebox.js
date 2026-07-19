@@ -193,6 +193,7 @@ export function attachJukebox(app, requireAdmin, store, ctx){
       const s = song(item, msg.songId);
       js.nowPlaying = { songId: msg.songId, title: s ? s.title : (msg.title || msg.songId),
         startedAt: Date.now(), durationSec: msg.durationSec || (s && s.durationSec) || 0 };
+      js.plays = (js.plays || 0) + 1;         // the org lens's plays-per-item view (rig-reported truth)
       if (s && msg.durationSec && !s.durationSec) s.durationSec = msg.durationSec;   // backfill real duration
       js.recent.set(msg.songId, Date.now());
       js.queue = js.queue.filter(q => q.songId !== msg.songId || q.byId === '__house');
@@ -337,19 +338,49 @@ export function attachJukebox(app, requireAdmin, store, ctx){
   app.post('/api/items/:code/jukebox/admin', requireAdmin, (req, res, next) => {
     try {
       const item = requireJukebox(req);
-      const js = jchan(item.code);
-      const action = req.body?.action;
-      if (action === 'force_skip'){ if (js.nowPlaying){ js.nowPlaying.skipRequested = true; cmd(item, { action: 'skip' }); } ctx.announce(item.code, 'skip'); }
-      else if (action === 'clear_queue'){ js.queue = []; /* STRIPE: refund cleared per_action buys here */ }
-      else if (action === 'house'){ item.jukebox.houseMode = !!req.body.on; if (!js.nowPlaying) advance(item); }
-      else if (action === 'remove'){                        // remove one queue row (vibe veto)
-        const idx = js.queue.findIndex(q => q.songId === req.body.songId && q.byId === req.body.byId);
-        if (idx >= 0) js.queue.splice(idx, 1);              /* STRIPE: refund that buyer here */
-      } else throw httpError(400, 'action must be force_skip|clear_queue|house|remove');
-      bcast(item);
+      adminAction(item, req.body?.action, req.body || {});
       res.json(ctx.public(item));
     } catch (e){ next(e); }
   });
+
+  // The admin live actions, factored out so the org layer (staff/owner rungs)
+  // can invoke the same internals after its own authz + audit. Throws on a bad
+  // action; broadcasts on success. Returns the item.
+  function adminAction(item, action, body = {}){
+    if (item.surface !== 'jukebox') throw httpError(409, 'this item is not a jukebox');
+    const js = jchan(item.code);
+    if (action === 'force_skip'){ if (js.nowPlaying){ js.nowPlaying.skipRequested = true; cmd(item, { action: 'skip' }); } ctx.announce(item.code, 'skip'); }
+    else if (action === 'clear_queue'){ js.queue = []; /* STRIPE: refund cleared per_action buys here */ }
+    else if (action === 'house'){
+      const on = !!body.on;
+      item.jukebox.houseMode = on;                 // immediate in-memory (bcast reflects it)
+      persistHouse(item, on);                       // durable, so it survives a later config PATCH / restart
+      if (!js.nowPlaying && on) advance(item);      // start house fill now
+    }
+    else if (action === 'remove'){                        // remove one queue row (vibe veto)
+      const idx = js.queue.findIndex(q => q.songId === body.songId && q.byId === body.byId);
+      if (idx >= 0) js.queue.splice(idx, 1);              /* STRIPE: refund that buyer here */
+    } else throw httpError(400, 'action must be force_skip|clear_queue|house|remove');
+    bcast(item);
+    return item;
+  }
+
+  // Persist a houseMode flip so it survives a later store-backed PATCH or a
+  // restart (the in-memory item.jukebox flip alone would revert). Best-effort:
+  // the live effect already happened, so a store hiccup logs rather than throws.
+  function persistHouse(item, on){
+    Promise.resolve(store.updateItem(item.code, { jukebox: { ...item.jukebox, houseMode: on } }))
+      .then(updated => { ctx.items.set(item.code, updated); })
+      .catch(e => console.error('[jukebox] house persist failed:', e.message));
+  }
+  // The org config path (applyOrgPatch) persists houseMode via the store but
+  // doesn't touch the runtime; kick the live player so "house fills silence"
+  // actually starts when the owner enables it on an idle jukebox.
+  function applyHouseRuntime(item){
+    const js = jchan(item.code);
+    if (item.jukebox.houseMode && !js.nowPlaying) advance(item);
+    bcast(item);
+  }
 
   function requireJukebox(req){
     const code = String(req.params.code || '').trim().toUpperCase();
@@ -361,5 +392,11 @@ export function attachJukebox(app, requireAdmin, store, ctx){
   // A jukebox item switched off / deleted: drop its runtime.
   function dropRuntime(code){ rt.delete(code); }
 
-  return { onReport, onRigConnect, publicJukebox, dropRuntime, __test: { rt, jchan, skipEligibility, queueEligibility, advance } };
+  // liveRuntime: is a jukebox item currently mid-play or holding a queue? (the
+  // org layer's idle-guard for monetization/mode flips).
+  function liveRuntime(code){ const js = rt.get(code); return !!(js && (js.nowPlaying || (js.queue && js.queue.length))); }
+
+  return { onReport, onRigConnect, publicJukebox, dropRuntime, adminAction, liveRuntime, applyHouseRuntime,
+    playsOf: (code) => { const js = rt.get(code); return (js && js.plays) || 0; },
+    __test: { rt, jchan, skipEligibility, queueEligibility, advance } };
 }

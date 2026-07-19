@@ -111,6 +111,19 @@ async function waitForBoot(tries){
     if (r.status !== 401) fail(`jukebox bid should 401 during outage, got ${r.status}: ${r.body}`);
     ok('payload-identity jukebox bid → 401 (fail-closed)');
 
+    // The admin chain (server/orgs.js) inherits the same fail-closed posture:
+    // with Supabase env set but Postgres unreachable, createStore falls back to
+    // the JSON store with orgsEnabled=false, so every org endpoint refuses
+    // (503) — never a write, and payload identity is never trusted. A member
+    // write and a read both fail; the item stays untouched.
+    r = await req('PATCH', '/api/org/any-org/items/ZZZZZZ', { user: { id: 'attacker', name: 'Mallory', email: 'a@b.com' }, priceCents: 400 });
+    if (r.status !== 503 && r.status !== 401) fail(`org PATCH should fail closed (503/401) during outage, got ${r.status}: ${r.body}`);
+    ok('org owner PATCH → fail-closed (no write) during outage');
+
+    r = await req('GET', '/api/org/mine');
+    if (r.status !== 503 && r.status !== 401) fail(`org read should fail closed (503/401), got ${r.status}: ${r.body}`);
+    ok('org read → fail-closed during outage');
+
     // Sanity: the public read still works and creates no state.
     r = await req('GET', '/api/channels/volt-fm/queues');
     if (r.status !== 200) fail(`GET /queues should 200, got ${r.status}`);

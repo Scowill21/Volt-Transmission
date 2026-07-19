@@ -120,7 +120,12 @@ const ok = (m) => { console.log('OK  ', passed + 1, m); passed++; };
   app.use(express.json({ limit: '32kb' }));
   const requireAdmin = makeRequireAdmin('dev');
   attachPaid(app, requireAdmin);
-  await itemsMod.attachItems(app, requireAdmin, store);
+  // Wire the admin chain too (directly-constructed FileStore has orgsEnabled
+  // true) so the item-room gate's org branch is live for the forgery check.
+  const { attachOrgs } = await import('./server/orgs.js');
+  const orgs = await attachOrgs(app, requireAdmin, store);
+  const itemsApi = await itemsMod.attachItems(app, requireAdmin, store, { orgs });
+  orgs.wireItems(itemsApi);
   app.use((err, rq, rs, nx) => { rs.status(err.status || 500).json({ error: err.message || 'server error' }); });  // errors → JSON (like index.js)
   const server = http.createServer(app);
   attachBus(server, app);
@@ -230,6 +235,25 @@ const ok = (m) => { console.log('OK  ', passed + 1, m); passed++; };
   const badName = await req('POST', `/api/items/${CODE}/outputs`, { headers: ADMIN, body: { kind: 'rig', name: 'admin' } });
   assert.strictEqual(badName.status, 400, "a rig named 'admin' is refused");
   ok('rig sentinel: a rig cannot claim the reserved "admin" name');
+
+  // ADMIN-CHAIN forgery: a bus key message that FORGES an org/platform role in
+  // its payload must not escalate. The gate reads the verified session
+  // (ws._user) + server-resolved org membership — NEVER the payload's claimed
+  // role/orgRole (the same rule that closed the payload-identity hatch). Build
+  // an org item with a holder, then forge a non-holder inject.
+  const org = (await req('POST', '/api/admin/orgs', { headers: ADMIN, body: { name: 'Sec Bar' } })).body;
+  const padItem = (await req('POST', '/api/items', { headers: ADMIN, body: { name: 'Sec Claw', priceCents: 100, slotSeconds: 300 } })).body.item;
+  await req('POST', `/api/admin/orgs/${org.id}/items`, { headers: ADMIN, body: { code: padItem } });
+  await req('POST', `/api/items/${padItem}/buy`, { body: { user: { id: 'holder-1', name: 'Holder' } } });   // dev-hatch holder
+  // a non-holder inject that forges role:'admin' + orgRole:'owner' → still DENIED
+  const forged = await req('POST', `/api/channels/item:${padItem}/actions`,
+    { body: { type: 'key', action: 'pad_up', user: { id: 'attacker', name: 'M', role: 'admin', orgRole: 'owner' } } });
+  assert.strictEqual(forged.status, 403, 'a forged role/orgRole in the payload does NOT grant item control');
+  // the real holder (dev hatch) still drives — the gate works, it just ignores forged claims
+  const real = await req('POST', `/api/channels/item:${padItem}/actions`,
+    { body: { type: 'key', action: 'pad_up', user: { id: 'holder-1', name: 'Holder' } } });
+  assert.strictEqual(real.status, 200, 'the genuine holder still drives (gate intact)');
+  ok('admin-chain: forged org/platform role in a bus payload is ignored (identity = session + server-resolved membership)');
 
   // Gap 4A: the bus HTTP-inject honors fail-closed too — with Supabase configured
   // + the insecure 'dev' key, a track_started inject must NOT be accepted as admin.

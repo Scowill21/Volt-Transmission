@@ -9,9 +9,10 @@ dist-ssr
 *.key
 *.pem
 
-# Local dev channel + item stores (server falls back to these when DATABASE_URL is unset)
+# Local dev channel + item + org stores (server falls back to these when DATABASE_URL is unset)
 server/channels.json
 server/items.json
+server/orgs.json
 
 # Secrets — env only, never committed
 .env

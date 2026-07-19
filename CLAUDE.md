@@ -62,6 +62,43 @@ Spotify is DEFERRED — the server is backend-blind (see `PROMPT-JUKEBOX.md` §8
 Surface flip is guarded (no stranded slot/queue); jukebox config lives in
 `item.jukebox`, runtime (nowPlaying/queue/skips/bidRound) is in-memory in
 `jukebox.js`'s `rt` map, resets on deploy.
+**THE ADMIN CHAIN** (`server/orgs.js`, needs DATABASE_URL): a delegation
+ladder over the Tier-2a accounts — platform (X-Admin-Key) › org **owner** ›
+**staff** › **tech**, a NEW axis orthogonal to platform roles (listener/vj/
+radio/admin). Items gain a nullable `orgId` (null = platform-owned legacy,
+unchanged) + platform-set `bounds` (price band / slot-max / cooldown-floor /
+maxPerMin-cap / jukebox minPlaySec-floor) + owner-editable `hours`. Owners
+edit a WHITELIST of fields **within bounds — REJECT not clamp** (out-of-band →
+400, nothing written); tighten-only (rest MORE, never less); jukebox config
+PATCH DEEP-MERGES (the store replaces, so orgs.js merges). Owners may flip
+their own monetization/mode (idle-guarded). **staff** = actions only (pause/
+skip/force-skip); **tech** = rig keys / output chains (a DISTINCT capability
+the owner can NEVER touch — `requireOrg('tech',{exact}))`; only the platform
+grants tech/owner. Every org write appends one **append-only audit** row
+(no delete/update path). Identity = the verified session matched to membership
+by **email** (roleOf, a sync in-memory mirror updated on every write so
+offboarding bites on the next request — no session cache); a role/orgRole
+claimed in a payload is ignored. The bus item-room gate passes org members
+≥staff of THE ITEM'S org (starts from `item.orgId`, never the user's org list
+→ cross-org privilege impossible). **No new bus types, no wire-schema change.**
+Fail-closed: no DATABASE_URL → org endpoints 503 (`store.orgsEnabled`); DB down
+on a configured deploy → never a write. `attachItems` returns an `itemsApi`
+seam orgs.js calls (index.js wires orgs → items{orgs} → wireItems). Ops UI is
+`control-ops.html` — BOTH LENSES SHIPPED: the key lens grew a **venues panel**
+(create org · assign items by code · per-item bounds editor · grant/remove
+rungs · suspend · audit viewer), and the **session lens** signs an org member
+in via their account cookie ("Use my account" on the gate; `/api/org/mine` →
+scoped dashboard). Owner sees band-annotated edit forms (the band is RENDERED,
+never hidden — reject messages name it), crew roster (`GET /api/org/:id/members`,
+owner-only) + staff invites + the change log; staff sees actions only; tech
+sees chain cards + per-rig key ROTATION (`↻`, new key shown once). Zero admin
+secrets ship on the session path (no key prompt, no key-carrying fetch — smoke-
+asserted). Items expose a runtime **`plays`** counter (slots started + rig-
+reported jukebox tracks; resets on deploy) on `orgView` AND the key-gated
+`GET /api/items` (which now also carries `orgId/bounds/hours/limits` for the
+panel). Suspension freezes members on the bus gate too (`roleOf` → null), and
+`org_members.userId` backfills on a verified member's first org request
+(`store.linkMemberUserId`, fills a blank once, never re-links).
 
 ## Golden rules
 
@@ -102,6 +139,7 @@ node .smoke-control.cjs  # client: control.html USER page (entry, item, controll
 node .smoke-ops.cjs      # client: control-ops.html admin dashboard (gate, create/edit/actions, chain, QR, jukebox editor)
 node .smoke-stage.cjs    # client: stage.html browser output plane (scenes, election, attract, jukebox marquee)
 node .smoke-security.cjs # server: take-control hardening (report-forgery, output-gate, SSRF, admin lockout, WS origin, headers)
+node .smoke-orgs.cjs     # server: THE ADMIN CHAIN (orgs/rungs/bounds/audit, cross-org isolation, suspension, offboarding)
 ```
 
 `.smoke-test.cjs` evals the whole page script (also catches syntax errors) and
@@ -140,7 +178,16 @@ idle-start, queue caps + no-repeat, play-next fairness, the full skip decision
 that slide not reset), allowMidSong, stale-songId skips (no window decrement),
 rig `track_started`/`ended`/`position` reports, forged-wire rejection, bid-round
 close, controller_slot vs per_action, and admin force-skip/clear/remove. Keep all
-NINE green and extend them when adding features.
+TEN green and extend them when adding features. `.smoke-orgs.cjs` (21) is the
+admin chain's hermetic matrix (fake express + real handlers + FileStore):
+legacy null-org back-compat, bounds reject (incl. reject-not-clamp beyond the
+store's intrinsic ranges), the invite-over-higher-rung guard, enum-coercion
+rejection, staff/tech/owner rung splits, cross-org isolation at HTTP AND bus
+layers, offboard-immediate, suspension freezing the bus gate, roster +
+userId-linkage, audit append-only, no-DB 503. `.smoke-ops.cjs` (27) drives the
+venues panel and the session lens (own-org-only rendering, band on the owner
+form, staff/tech scoping, owner-Save-is-a-diff, blank-price-omitted, the
+key-stays-visible-on-rotate panel, and the zero-admin-key invariant).
 
 ## Deploy
 

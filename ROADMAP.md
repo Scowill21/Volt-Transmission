@@ -181,7 +181,27 @@ postures: `controller_slot` (reuses the slot machinery — sell the *controller*
 not the music) and `per_action`. Rides the whole output-layer chain (election,
 failover, resync). **Spotify is deferred by design** — the server is
 backend-blind, but streaming-service terms + performance-rights reality keep the
-pilot on rights-clean local files (`PROMPT-JUKEBOX.md` §8 / `SETUP.md`). Two modes worth building: **pooled** (everyone's hits spawn effects,
+pilot on rights-clean local files (`PROMPT-JUKEBOX.md` §8 / `SETUP.md`).
+**Sixth slice shipped — THE ADMIN CHAIN, orgs / delegated roles (server core,
+needs a database):** `server/orgs.js` turns the single-operator ops side into a
+delegation ladder — platform › org **owner** › **staff** › **tech**, a new axis
+orthogonal to platform roles. Businesses tune their own items (price, slot,
+hours, controller, jukebox rules, monetization) inside platform-set **bounds**
+they can never cross (REJECT-not-clamp, tighten-only); **staff** get actions,
+**tech** get rig keys/output chains (owner never does). Enforced server-side on
+every request — the item-room bus gate passes org members ≥staff of *the item's
+org* (cross-org privilege impossible by construction), and membership resolves
+from the verified session's email with NO session cache (offboarding bites on
+the next request). Append-only audit per write; fail-closed without a database;
+NO bus/wire-schema change; legacy (org-less) items untouched. The ops UI's
+**both lenses shipped**: the key lens's venues panel (create/assign/bounds/
+grants/suspend/audit) and the **session lens** ("Use my account" on
+`/control-ops` → the member's venue only, knobs by rung, bands rendered on the
+owner's forms, zero admin secrets on the path). **Stripe Connect per-org
+payouts** remain the follow-up (payouts stay Tier-2b; leave the seams, build
+nothing — the org lens already shows plays-per-item; revenue joins it there).
+Spec: `PROMPT-ADMIN-CHAIN.md`; owner design in the private recipe book §J.
+Two modes worth building: **pooled** (everyone's hits spawn effects,
 rate-limited per user) and **takeover** (one paid user holds the controls
 for N minutes — this is a *product*, pairs beautifully with Stripe from
 Tier 2). The console is already staged for it: keys 1–4 are the **live

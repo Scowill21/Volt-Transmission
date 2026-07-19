@@ -371,6 +371,14 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
         <button class="btn slim" id="adminUnlock">Unlock</button>
         <div class="status-line" id="adminGateMsg"></div>
       </div>
+      <!-- The session lens door (admin chain rungs 1/2/2b): venue owners, staff,
+           and techs use their ACCOUNT — the Tier-2a cookie session that already
+           rides every same-origin fetch. No key ever touches this path. -->
+      <div class="card">
+        <p class="note" style="margin-top:0">Run a venue here? Owners, staff, and techs sign in with their <b>account</b> — no key needed.</p>
+        <button class="btn ghost slim" id="sessUnlock">Use my account</button>
+        <div class="status-line" id="sessGateMsg"></div>
+      </div>
     </div>
 
     <div id="adminDash" hidden>
@@ -396,6 +404,41 @@ h1{ font-size:1.7rem; line-height:1.15; margin:1.2rem 0 .4rem; font-weight:700; 
         <div class="status-line" id="createMsg"></div>
       </div>
       <div id="adminList"></div>
+
+      <!-- KEY LENS · the venues panel (admin chain rung 0): create orgs, assign
+           items, set the bounds their owner tunes inside, grant rungs, read the
+           per-venue audit trail. 503s gracefully without a database. -->
+      <div class="card" id="orgsPanel" style="margin-top:.8rem">
+        <b>Venues — the admin chain</b>
+        <p class="note" style="margin:.3rem 0 .6rem">Give a business its own scoped dashboard: create the venue, assign its items, set the bands they tune inside, grant the owner by email. They sign in on this page with their account — your key never leaves this tab.</p>
+        <div class="edit-form">
+          <label class="span2">new venue — name<input id="orgNewName" placeholder="e.g. The Anchor Bar" /></label>
+          <button class="btn ghost slim span2" id="orgCreate">Create venue</button>
+        </div>
+        <div id="orgsList"></div>
+        <div class="status-line" id="orgsMsg"></div>
+      </div>
+    </div>
+
+    <!-- THE SESSION LENS (admin chain rungs 1/2/2b): one dashboard, scoped.
+         Renders ONLY the signed-in member's venue with the knobs their rung
+         allows — owner edits inside the platform band (the band is RENDERED,
+         never hidden), staff gets actions, tech gets rig/chain cards. Zero
+         admin secrets ship on this path: no key prompt, no key-carrying
+         fetch. Everything this lens hides, the server refuses anyway
+         (server/orgs.js) — the UI is a courtesy, the gate is the law. -->
+    <div id="sessDash" hidden>
+      <div class="card" id="sessHead">
+        <div style="display:flex; align-items:center; gap:.6rem">
+          <b id="sessOrgName" style="flex:1"></b>
+          <span class="chip live" id="sessRole"></span>
+        </div>
+        <label id="sessOrgPickWrap" hidden style="display:block; margin-top:.5rem; font-size:.85rem; color:var(--sub)">venue
+          <select id="sessOrgPick" style="width:100%"></select></label>
+        <div class="note" id="sessHint" style="margin:.4rem 0 0"></div>
+      </div>
+      <div id="sessOwnerTools"></div>
+      <div id="sessList"></div>
     </div>
   </section>
 </div>
@@ -678,7 +721,8 @@ function drawQR(canvas, text){
 // Ops-page state: the admin key lives in MEMORY only (never sessionStorage —
 // deliberately stricter than admin.html) and `revealed` holds a just-created
 // rig key so it survives a list re-render (shown once).
-const S = { adminKey: null, adminItems: [] };
+const S = { adminKey: null, adminItems: [], adminOrgs: null,      // key lens
+            lens: null, session: null, orgItems: [], orgMembers: [] };   // session lens (org member)
 
 async function api(method, path, body, headers){
   const res = await fetch(path, {
@@ -722,9 +766,11 @@ async function unlockAdmin(key){
     const items = await api('GET', '/api/items', null, { 'X-Admin-Key': key });
     S.adminKey = key;
     S.adminItems = items;
+    S.lens = 'key';
     $('adminGate').hidden = true;
     $('adminDash').hidden = false;
     renderAdmin();
+    loadOrgs();                         // venues panel; 503s gracefully without a DB
     return true;
   } catch (e){
     msg.className = 'status-line err';
@@ -788,14 +834,24 @@ async function createItem(){
 }
 $('createBtn').addEventListener('click', createItem);
 
-function adminCard(p){
-  const isJb = p.surface === 'jukebox';
+// Shared card fragments — the key lens and the session lens render the same
+// live truth, so the wording lives in one place.
+function liveLine(p){
   const a = p.active;
-  const live = p.status !== 'on' ? '○ off'
+  return p.status !== 'on' ? '○ off'
     : a ? `◉ ${esc(a.name)}${a.paused ? ' · ⏸ paused' : ''} · ${fmtClock(remainingMs(a))} left`
     : p.auction ? `🔨 ${fmt$(p.auction.topCents)} (${esc(p.auction.topName)}) · ${fmtClock(Math.max(0, p.auction.endsAt - Date.now()))}`
     : '· idle';
-  const depth = p.mode === 'buynow' ? `${p.queue.length} in line` : (p.auction ? `${p.auction.bidCount} bids` : 'no round');
+}
+function queueDepth(p){
+  return p.mode === 'buynow' ? `${p.queue.length} in line` : (p.auction ? `${p.auction.bidCount} bids` : 'no round');
+}
+
+function adminCard(p){
+  const isJb = p.surface === 'jukebox';
+  const a = p.active;
+  const live = liveLine(p);
+  const depth = queueDepth(p);
   const cfg = p.jukeboxConfig;                // raw config (admin-only), present for jukebox items
   const meta = isJb && cfg
     ? `jukebox · ${cfg.monetization === 'per_action' ? 'per action' : 'control slot'} · ${cfg.backend} · ${(cfg.catalog || []).length} songs`
@@ -860,7 +916,10 @@ function jukeboxLive(p){
 }
 
 // The jukebox knob block inside the edit form (bound by name; gathered on Save).
-function jukeboxFields(c){
+// opts.orgLens drops the backend selector — the wire/rig plumbing is a platform
+// (or tech) concern the owner PATCH whitelist deliberately ignores; showing a
+// knob the server won't honor would teach owners the wrong mental model.
+function jukeboxFields(c, opts){
   const s = c.skip || {}, pu = s.perUser || {}, g = s.global || {}, qr = c.queueRules || {};
   const opt = (v, cur, label) => `<option value="${v}"${v === cur ? ' selected' : ''}>${label}</option>`;
   return `
@@ -870,8 +929,8 @@ function jukeboxFields(c){
         ${opt('controller_slot', c.monetization, 'control slot')}${opt('per_action', c.monetization, 'per action')}</select></label>
       <label>play mode<select name="jb_mode">
         ${opt('buynow', c.mode, 'queue (flat)')}${opt('bid', c.mode, 'bid to play next')}</select></label>
-      <label>backend<select name="jb_backend">
-        ${opt('mpd', c.backend, 'mpd (local files)')}${opt('log', c.backend, 'log (no audio)')}</select></label>
+      ${opts && opts.orgLens ? '' : `<label>backend<select name="jb_backend">
+        ${opt('mpd', c.backend, 'mpd (local files)')}${opt('log', c.backend, 'log (no audio)')}</select></label>`}
       <div class="jb-checkrow"><label><input type="checkbox" name="jb_house"${c.houseMode ? ' checked' : ''}/> house mode fills silence</label></div>
       <label>queue price ($)<input name="jb_queuePrice" type="number" step="0.25" value="${((c.queuePriceCents || 0) / 100).toFixed(2)}" /></label>
       <label>play-next price ($)<input name="jb_playNextPrice" type="number" step="0.25" value="${c.playNextPriceCents != null ? (c.playNextPriceCents / 100).toFixed(2) : ''}" placeholder="off" /></label>
@@ -933,7 +992,7 @@ function chainBlock(p){
     </li>`;
   }).join('');
   return `
-  <details class="chain-wrap">
+  <details class="chain-wrap"${revealed && revealed.code === p.item ? ' open' : ''}>
     <summary style="cursor:pointer; font-size:.82rem; color:var(--sub); padding:.4rem 0">
       Outputs — failover chain${outs.length ? ` (${outs.length})` : ' · none (always sellable)'}</summary>
     <ul class="chain">${rows || '<li class="okind" style="border:none">no outputs — this item is always sellable (legacy behavior)</li>'}</ul>
@@ -1165,7 +1224,9 @@ function gatherJukebox(form){
   return {
     monetization: g('jb_monetization').value,
     mode: g('jb_mode').value,
-    backend: g('jb_backend').value,
+    // absent in the org lens (owners can't touch the backend — the server's
+    // whitelist ignores it anyway); undefined simply doesn't ride the JSON
+    ...(g('jb_backend') ? { backend: g('jb_backend').value } : {}),
     houseMode: g('jb_house').checked,
     queuePriceCents: cents('jb_queuePrice'),
     playNextPriceCents: pnRaw === '' ? null : Math.round((parseFloat(pnRaw) || 0) * 100),
@@ -1271,7 +1332,619 @@ $('vaultClose').addEventListener('click', closeVault);
 $('vaultCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') unlockVault(); });
 $('vaultModal').addEventListener('click', (e) => { if (e.target === $('vaultModal') && $('vaultView').hidden) closeVault(); });
 
+/* ═══ THE ADMIN CHAIN — key-lens venues panel + the session lens ═══
+   One dashboard, two lenses (recipe book §J / PROMPT-ADMIN-CHAIN §7). The
+   server (server/orgs.js) enforces every rung on every request — both lenses
+   here are presentation only. */
+
+/* ── key lens: the venues panel (rung 0) ── */
+async function loadOrgs(){
+  const msg = $('orgsMsg');
+  try {
+    S.adminOrgs = await adminApi('GET', '/api/admin/orgs');
+    msg.className = 'status-line'; msg.textContent = '';
+    renderOrgs();
+  } catch (e){
+    S.adminOrgs = null;
+    $('orgsList').innerHTML = '';
+    msg.className = 'status-line err';
+    msg.textContent = e.status === 503 ? 'venue features need the database (set DATABASE_URL on the service)' : String(e.message);
+  }
+}
+function renderOrgs(){
+  if (S.adminOrgs == null) return;
+  $('orgsList').innerHTML = S.adminOrgs.map(orgCard).join('')
+    || '<p class="note" style="margin:.4rem 0 0">no venues yet — create one above, then assign items and grant its owner.</p>';
+}
+// Bounds editor for one assigned item — the box the owner tunes inside.
+// Price band needs BOTH ends; any blank field simply isn't part of the bounds.
+function boundsForm(i){
+  const b = i.bounds || {}, band = b.priceBandCents || {}, jb = b.jukebox || {};
+  const v = (x) => x == null ? '' : x;
+  return `
+  <form class="edit-form" data-obounds="${i.item}" hidden style="margin:.2rem 0 .6rem; width:100%">
+    <label>price min ($)<input name="bmin" type="number" step="0.50" value="${band.min != null ? (band.min / 100).toFixed(2) : ''}" /></label>
+    <label>price max ($)<input name="bmax" type="number" step="0.50" value="${band.max != null ? (band.max / 100).toFixed(2) : ''}" /></label>
+    <label>slot max (s)<input name="bslot" type="number" value="${v(b.slotSecondsMax)}" /></label>
+    <label>cooldown floor (ms)<input name="bcool" type="number" value="${v(b.cooldownFloorMs)}" /></label>
+    <label>rate cap (/min)<input name="brate" type="number" value="${v(b.maxPerMinCap)}" /></label>
+    <label>song floor (s)<input name="bsong" type="number" value="${v(jb.minPlaySecFloor)}" /></label>
+    <button class="btn slim span2" type="submit">Save bounds</button>
+  </form>`;
+}
+function orgCard(o){
+  const items = S.adminItems.filter(i => i.orgId === o.id);
+  const rows = items.map(i => `
+    <li><span class="oname">${esc(i.name)} · ${i.item}</span>
+      <span class="okind">▶ ${i.plays || 0}</span>
+      <button class="ox" data-okey="bounds" data-code="${i.item}" title="bounds">⚖</button>
+      <button class="ox" data-okey="unassign" data-code="${i.item}" title="unassign">✕</button></li>
+    <li style="border:none; padding:0">${boundsForm(i)}</li>`).join('');
+  const members = (o.members || []).map(m => `
+    <li><span class="oname">${esc(m.email)}</span><span class="okind">${esc(m.orgRole)}</span>
+      <button class="ox" data-okey="rmmember" data-email="${esc(m.email)}" title="remove">✕</button></li>`).join('');
+  return `
+  <div class="card" data-org="${esc(o.id)}" style="margin-top:.6rem; border:1px solid var(--edge)">
+    <div style="display:flex; align-items:center; gap:.6rem">
+      <b style="flex:1">${esc(o.name)}</b>
+      <span class="chip ${o.status === 'active' ? 'live' : 'off'}">${esc(o.status)}</span>
+    </div>
+    <div class="meta" style="margin:.4rem 0 .1rem">items</div>
+    <ul class="chain">${rows || '<li class="okind" style="border:none">no items assigned yet</li>'}</ul>
+    <div class="edit-form">
+      <label>assign item — code<input data-of="assigncode" maxlength="6" style="text-transform:uppercase" placeholder="ABC123" /></label>
+      <button class="btn ghost slim" data-okey="assign">Assign</button>
+    </div>
+    <div class="meta" style="margin:.5rem 0 .1rem">people</div>
+    <ul class="chain">${members || '<li class="okind" style="border:none">nobody yet — grant the owner below</li>'}</ul>
+    <div class="edit-form">
+      <label>email<input data-of="grantemail" type="email" placeholder="owner@venue.com" /></label>
+      <label>rung<select data-of="grantrole">
+        <option value="owner">owner</option><option value="staff">staff</option><option value="tech">tech</option></select></label>
+      <button class="btn ghost slim span2" data-okey="grant">Grant</button>
+    </div>
+    <div class="acts" style="margin-top:.5rem">
+      <button data-okey="suspend">${o.status === 'active' ? 'Suspend' : 'Reactivate'}</button>
+      <button data-okey="audit">Change log</button>
+    </div>
+    <div data-oaudit hidden class="note" style="margin-top:.4rem"></div>
+    <div class="status-line" data-orgmsg></div>
+  </div>`;
+}
+// Audit rows, shared by both lenses ("the answer is a row, not an argument").
+function auditHtml(rows){
+  if (!rows || !rows.length) return 'no changes recorded yet';
+  return '<ul class="chain">' + rows.slice(0, 50).map(a => `<li style="display:block">
+    <span class="okind">${esc(String(a.at || '').replace('T', ' ').slice(0, 16))} · ${esc(a.actorUserId || '?')}</span><br>
+    ${a.itemCode ? esc(a.itemCode) + ' · ' : ''}<b>${esc(a.field)}</b>: ${esc(a.old ?? '—')} → ${esc(a.new ?? '—')}</li>`).join('') + '</ul>';
+}
+// Direct re-reads after venue actions that change items (assign/unassign/
+// bounds). Refreshes the venues panel always, but SKIPS the item-list re-render
+// while an item edit form is open or focused above — otherwise a half-typed
+// price would be wiped.
+async function reloadItemsNow(){
+  try {
+    S.adminItems = await adminApi('GET', '/api/items');
+    if (!document.querySelector('#adminList form[data-edit]:not([hidden])')
+        && !$('adminList').contains(document.activeElement)) renderAdmin();
+    renderOrgs();
+  } catch {}
+}
+// Re-issue a status message on a venue card AFTER a re-render replaced it (org
+// slugs are [a-z0-9-], safe in an attribute selector).
+function flashOrg(orgId, text, cls){
+  const c = document.querySelector(`#orgsList [data-org="${orgId}"] [data-orgmsg]`);
+  if (c){ c.className = 'status-line ' + (cls || ''); c.textContent = text; }
+}
+$('orgCreate').addEventListener('click', async () => {
+  const msg = $('orgsMsg');
+  try {
+    const name = ($('orgNewName').value || '').trim();
+    if (!name){ msg.className = 'status-line err'; msg.textContent = 'name the venue first'; return; }
+    await adminApi('POST', '/api/admin/orgs', { name });
+    $('orgNewName').value = '';
+    msg.className = 'status-line ok'; msg.textContent = 'venue created — assign items + grant its owner below';
+    await loadOrgs();
+  } catch (e){ msg.className = 'status-line err'; msg.textContent = String(e.message); }
+});
+$('orgsList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-okey]'); if (!btn) return;
+  const card = e.target.closest('[data-org]');
+  const orgId = card.dataset.org;
+  const msg = card.querySelector('[data-orgmsg]');
+  const say = (t, cls) => { msg.className = 'status-line ' + (cls || ''); msg.textContent = t; };
+  const of = (k) => card.querySelector(`[data-of="${k}"]`);
+  const base = '/api/admin/orgs/' + encodeURIComponent(orgId);
+  let done = null, changesItems = false;         // message to flash + whether items moved
+  try {
+    switch (btn.dataset.okey){
+      case 'bounds': {
+        const f = card.querySelector(`form[data-obounds="${btn.dataset.code}"]`);
+        if (f) f.hidden = !f.hidden;
+        return;
+      }
+      case 'assign': {
+        const code = (of('assigncode').value || '').trim().toUpperCase();
+        if (!code) return say('enter an item code', 'err');
+        await adminApi('POST', base + '/items', { code });
+        done = 'assigned'; changesItems = true; break;
+      }
+      case 'unassign':
+        if (!confirm('Unassign this item? It goes back to platform-owned.')) return;
+        await adminApi('DELETE', base + '/items/' + btn.dataset.code);
+        done = 'unassigned'; changesItems = true; break;
+      case 'grant': {
+        const email = (of('grantemail').value || '').trim();
+        if (!email) return say('enter an email', 'err');
+        await adminApi('POST', base + '/grants', { email, orgRole: of('grantrole').value });
+        done = 'granted — they sign in with that email, then "Use my account" here'; break;
+      }
+      case 'rmmember':
+        if (!confirm(`Remove ${btn.dataset.email} from this venue? Their access ends on their next request.`)) return;
+        await adminApi('DELETE', base + '/members/' + encodeURIComponent(btn.dataset.email));
+        done = 'removed'; break;
+      case 'suspend': {
+        const o = S.adminOrgs.find(x => x.id === orgId);
+        const status = o && o.status === 'active' ? 'suspended' : 'active';
+        if (status === 'suspended' && !confirm(`Suspend "${o.name}"? Every member is frozen (dashboard AND bus) until you reactivate.`)) return;
+        await adminApi('PATCH', base, { status });
+        done = status === 'active' ? 'reactivated' : 'suspended'; break;
+      }
+      case 'audit': {
+        const box = card.querySelector('[data-oaudit]');
+        if (!box.hidden){ box.hidden = true; return; }
+        box.innerHTML = auditHtml(await adminApi('GET', '/api/admin/audit?orgId=' + encodeURIComponent(orgId)));
+        box.hidden = false;
+        return;
+      }
+    }
+    await loadOrgs();                              // rebuilds #orgsList — destroys this card's message node
+    if (changesItems) await reloadItemsNow();      // only assign/unassign move items; grants/suspend don't
+    if (done) flashOrg(orgId, done, 'ok');         // re-issue the message on the fresh card
+  } catch (err){ say(String(err.message), 'err'); }
+});
+$('orgsList').addEventListener('submit', async (e) => {
+  const form = e.target.closest('form[data-obounds]'); if (!form) return;
+  e.preventDefault();
+  const card = e.target.closest('[data-org]');
+  const msg = card.querySelector('[data-orgmsg]');
+  const f = new FormData(form);
+  const num = (n) => { const raw = String(f.get(n) ?? '').trim(); if (raw === '') return null; const v = parseFloat(raw); return Number.isFinite(v) ? v : null; };
+  try {
+    const bounds = {};
+    const min = num('bmin'), max = num('bmax');
+    if (min != null && max != null) bounds.priceBandCents = { min: Math.round(min * 100), max: Math.round(max * 100) };
+    else if (min != null || max != null) throw new Error('a price band needs both min and max');
+    if (num('bslot') != null) bounds.slotSecondsMax = Math.round(num('bslot'));
+    if (num('bcool') != null) bounds.cooldownFloorMs = Math.round(num('bcool'));
+    if (num('brate') != null) bounds.maxPerMinCap = Math.round(num('brate'));
+    if (num('bsong') != null) bounds.jukebox = { minPlaySecFloor: Math.round(num('bsong')) };
+    await adminApi('PATCH', '/api/admin/items/' + form.dataset.obounds + '/bounds',
+      { bounds: Object.keys(bounds).length ? bounds : null });
+    await reloadItemsNow();                         // renderOrgs rebuilds the card — re-issue the message after
+    flashOrg(card.dataset.org, 'bounds saved', 'ok');
+  } catch (err){ msg.className = 'status-line err'; msg.textContent = String(err.message); }
+});
+
+/* ── the session lens (rungs 1/2/2b) ──
+   Identity is the Tier-2a httpOnly cookie that already rides every same-origin
+   fetch; the page never sees a token and NEVER carries the admin key here. */
+const sessApi = (method, path, body) => api(method, path, body);   // cookie session only — no key header, ever
+const orgBase = () => '/api/org/' + encodeURIComponent(S.session.org.id);
+let sessRevealed = null;                 // a just-minted rig key (tech) — shown once, survives re-renders
+
+async function unlockSession(){
+  const msg = $('sessGateMsg');
+  msg.className = 'status-line'; msg.textContent = '…';
+  try {
+    const mine = await sessApi('GET', '/api/org/mine');
+    if (!mine.orgs || !mine.orgs.length){
+      msg.className = 'status-line err';
+      msg.textContent = 'your account is not on any venue roster yet — ask your operator';
+      return false;
+    }
+    S.lens = 'session';
+    S.session = { me: mine.me || {}, orgs: mine.orgs, org: mine.orgs[0], role: mine.orgs[0].role };
+    if (S.session.me.email) $('acctChip').textContent = S.session.me.email;
+    $('adminGate').hidden = true;
+    $('sessDash').hidden = false;
+    renderSessHead();
+    await refreshSessionNow();
+    return true;
+  } catch (e){
+    msg.className = 'status-line err';
+    msg.textContent = e.status === 401 ? 'sign in first — tap "account" top-right, then come back'
+      : e.status === 503 ? 'venue features need the database — ask the operator'
+      : String(e.message);
+    return false;
+  }
+}
+$('sessUnlock').addEventListener('click', unlockSession);
+
+function renderSessHead(){
+  const o = S.session.org;
+  $('sessOrgName').textContent = o.name;
+  $('sessRole').textContent = S.session.role;
+  const hint = {
+    owner: 'you can tune prices inside your band, set hours, pick controllers, edit jukebox rules, and manage staff',
+    staff: 'you can pause, resume, and skip — and watch the queues',
+    tech: 'you can rotate rig keys and edit output chains, plus the staff actions',
+  }[S.session.role] || '';
+  $('sessHint').textContent = o.status !== 'active' ? '⚠ this venue is suspended — contact the operator' : hint;
+  if (S.session.orgs.length > 1){
+    $('sessOrgPickWrap').hidden = false;
+    $('sessOrgPick').innerHTML = S.session.orgs.map(g =>
+      `<option value="${esc(g.id)}"${g.id === o.id ? ' selected' : ''}>${esc(g.name)} · ${esc(g.role)}</option>`).join('');
+  }
+}
+$('sessOrgPick').addEventListener('change', async () => {
+  const g = S.session.orgs.find(x => x.id === $('sessOrgPick').value);
+  if (!g) return;
+  S.session.org = g; S.session.role = g.role;
+  sessRevealed = null;
+  // Drop the previous venue's data IMMEDIATELY so a failed/slow load can never
+  // leave org A's items + crew rendered under org B's header (every button
+  // would post to org B and fail).
+  S.orgItems = []; S.orgMembers = [];
+  renderSessHead();
+  renderSession();
+  await refreshSessionNow();
+});
+
+async function refreshSessionNow(){
+  const orgId = S.session.org.id;              // pin the target; discard a late response after a switch
+  try {
+    const items = await sessApi('GET', orgBase() + '/items');
+    if (orgId !== S.session.org.id) return;    // switched venues mid-flight — this response is stale
+    S.orgItems = items;
+    if (S.session.role === 'owner'){
+      try { const mem = await sessApi('GET', orgBase() + '/members'); if (orgId === S.session.org.id) S.orgMembers = mem; } catch {}
+    }
+    renderSession();
+  } catch (e){
+    if (orgId !== S.session.org.id) return;
+    S.orgItems = [];
+    $('sessList').innerHTML = `<div class="card note">couldn't load this venue — ${esc(e.status === 403 ? 'access ended or the venue is suspended' : String(e.message))}. Try again shortly.</div>`;
+  }
+}
+// The 4s poll, with the same never-clobber-work guard as the key lens. Also
+// holds when ANY input in the dash carries typed text (the staff-invite field
+// lives outside a data-sedit form, so the form/focus checks alone would let the
+// poll's re-render wipe a half-typed email the instant the keyboard dismisses).
+async function refreshSession(){
+  if (S.lens !== 'session') return;
+  if (document.querySelector('#sessList form[data-sedit]:not([hidden])')
+      || document.querySelector('#sessDash details[open]')
+      || $('sessDash').contains(document.activeElement)) return;
+  for (const inp of document.querySelectorAll('#sessDash input')) if (inp.value) return;
+  await refreshSessionNow();
+}
+setInterval(refreshSession, 4000);
+
+const findOrgItem = (code) => S.orgItems.find(i => i.item === code);
+function mergeOrgItem(updated){
+  const i = S.orgItems.findIndex(x => x.item === updated.item);
+  if (i >= 0) S.orgItems[i] = updated; else S.orgItems.push(updated);
+  renderSession();
+}
+function renderSession(){
+  $('sessOwnerTools').innerHTML = ownerTools();
+  $('sessList').innerHTML = S.orgItems.map(sessCard).join('')
+    || '<div class="card note">no items assigned to this venue yet — the operator adds them.</div>';
+}
+
+// The platform's box, rendered right on the card (the rule: show the band,
+// don't hide it — a rejected edit should never be a surprise).
+function bandNote(p){
+  const b = p.bounds || {};
+  const bits = [];
+  if (b.priceBandCents) bits.push(`price ${fmt$(b.priceBandCents.min)}–${fmt$(b.priceBandCents.max)}`);
+  if (b.slotSecondsMax) bits.push(`slot ≤ ${b.slotSecondsMax}s`);
+  if (b.cooldownFloorMs) bits.push(`cooldown ≥ ${b.cooldownFloorMs}ms (rest it more, never less)`);
+  if (b.maxPerMinCap) bits.push(`≤ ${b.maxPerMinCap} presses/min`);
+  if (b.jukebox && b.jukebox.minPlaySecFloor) bits.push(`song floor ≥ ${b.jukebox.minPlaySecFloor}s`);
+  return bits.length ? 'your band: ' + bits.join(' · ') : 'no platform band set yet — edits are still checked server-side';
+}
+function sessOwnerForm(p){
+  const isJb = p.surface === 'jukebox';
+  const b = p.bounds || {}, band = b.priceBandCents, lim = p.limits || {};
+  return `
+  <form class="edit-form" data-sedit hidden>
+    <p class="note span2" style="margin:0">${esc(bandNote(p))}</p>
+    <label>price ($)<input name="price" type="number" step="0.50"
+      ${band ? `min="${(band.min / 100).toFixed(2)}" max="${(band.max / 100).toFixed(2)}"` : ''} value="${(p.priceCents / 100).toFixed(2)}" /></label>
+    <label>slot (s)<input name="slot" type="number" min="10"${b.slotSecondsMax ? ` max="${b.slotSecondsMax}"` : ''} value="${p.slotSeconds}" /></label>
+    ${isJb ? '' : `<label>controller<select name="controller">
+      ${['dpad', 'joystick', 'faders', 'grid'].map(c => `<option value="${c}"${(p.controller || 'dpad') === c ? ' selected' : ''}>${c}</option>`).join('')}</select></label>`}
+    <label>cooldown (ms)<input name="cooldown" type="number"${b.cooldownFloorMs ? ` min="${b.cooldownFloorMs}"` : ''} value="${lim.cooldownMs ?? ''}" /></label>
+    <label>max presses / min<input name="maxpermin" type="number"${b.maxPerMinCap ? ` max="${b.maxPerMinCap}"` : ''} value="${lim.maxPerMin ?? ''}" /></label>
+    <label class="span2">open hours (a note for now)<input name="hours" value="${esc((p.hours && p.hours.note) || '')}" placeholder="e.g. Thu–Sat 8pm–1am" /></label>
+    ${isJb && p.jukeboxConfig ? jukeboxFields(p.jukeboxConfig, { orgLens: true }) : ''}
+    <button class="btn slim span2" type="submit">Save</button>
+  </form>`;
+}
+// Tech's chain card — same presence truth as the key lens, driven through the
+// org-scoped endpoints, plus per-rig key rotation (the offboarding one-button).
+function sessTechBlock(p){
+  const outs = p.outputs || [];
+  const prog = p.program;
+  const online = new Set(p.outputsOnline || []);
+  const rows = outs.map(o => {
+    const isProg = prog && prog.name === o.name;
+    const up = o.kind === 'scene' || online.has(o.name);
+    return `<li>
+      <span class="${isProg ? 'dot on prog' : up ? 'dot on' : 'dot'}"></span>
+      <span class="oname">${esc(o.name)}</span>
+      <span class="okind">${o.kind === 'scene' ? 'scene · ' + esc(o.scene) : 'rig · #' + o.priority}</span>
+      ${isProg ? '<span class="oprog">● PROGRAM</span>' : ''}
+      ${o.kind === 'rig' ? `<button class="ox" data-sout="rotate" data-name="${esc(o.name)}" title="rotate key">↻</button>` : ''}
+      <button class="ox" data-sout="del" data-name="${esc(o.name)}" title="remove">✕</button>
+    </li>`;
+  }).join('');
+  return `
+  <details class="chain-wrap"${sessRevealed && sessRevealed.code === p.item ? ' open' : ''}>
+    <summary style="cursor:pointer; font-size:.82rem; color:var(--sub); padding:.4rem 0">
+      Outputs — failover chain${outs.length ? ` (${outs.length})` : ''} · tech</summary>
+    <ul class="chain">${rows || '<li class="okind" style="border:none">no outputs yet</li>'}</ul>
+    <div class="edit-form" style="margin-top:.5rem">
+      <label>add rig — name<input data-sout="rigname" placeholder="td-main" /></label>
+      <button class="btn ghost slim" data-sout="addrig">Add rig + get key</button>
+      <label>add scene<select data-sout="scene">${STAGE_SCENE_OPTS}</select></label>
+      <button class="btn ghost slim" data-sout="addscene">Add scene output</button>
+    </div>
+    ${sessRevealed && sessRevealed.code === p.item ? `<div class="keyReveal">${sessRevealed.html}</div>` : ''}
+  </details>`;
+}
+function sessCard(p){
+  const role = S.session.role;
+  const isOwner = role === 'owner';
+  const isJb = p.surface === 'jukebox';
+  const a = p.active;
+  const meta = `${p.mode === 'buynow' ? 'buy now' : 'auction'} · ${fmt$(p.priceCents)} · ${p.slotSeconds}s`
+    + (isJb ? ' · jukebox' : ` · <b class="ctl-tag">${esc(p.controller || 'dpad')}</b>`)
+    + ` · ${queueDepth(p)} · ▶ ${p.plays || 0} plays`;
+  // jukebox queue watch: every rung ≥staff may veto a song (the bartender's job)
+  const jb = isJb ? (p.jukebox || {}) : null;
+  const jbRows = jb ? (jb.queue || []).slice(0, 8).map(q => `<li>
+      <span class="oname">${esc(q.title)}</span><span class="okind">${q.playNext ? '⏭ next' : esc(q.byName || '')}</span>
+      <button class="ox" data-sact="remove" data-song="${esc(q.songId)}" data-by="${esc(q.byId || '')}" title="veto">✕</button></li>`).join('') : '';
+  const jbPanel = jb ? `
+    <div class="jb-live">
+      <div class="jb-np">${jb.nowPlaying ? `▶ <b>${esc(jb.nowPlaying.title)}</b>` : '· idle'}</div>
+      <ul class="chain jb-q">${jbRows || '<li class="okind" style="border:none; padding:.2rem 0">queue empty</li>'}</ul>
+    </div>` : '';
+  return `
+  <div class="card icard" data-code="${p.item}" data-surface="${p.surface || 'pad'}">
+    <div style="display:flex; align-items:center; gap:.6rem">
+      <b style="flex:1">${esc(p.name)}</b>
+      <button class="code" data-sact="copy" title="copy code">${p.item}</button>
+    </div>
+    <div class="meta">${meta}</div>
+    <div class="live-line">${liveLine(p)}${outputSummary(p)}</div>
+    ${jbPanel}
+    <div class="acts">
+      ${isJb ? '<button data-sact="force_skip">⏭ Skip track</button>' : '<button data-sact="skip">Skip</button>'}
+      <button data-sact="pauseresume">${a && a.paused ? 'Resume' : 'Pause'}</button>
+      ${isJb && isOwner ? '<button data-sact="clear_queue">Clear queue</button>' : ''}
+      ${isOwner ? `<button data-sact="onoff">${p.status === 'on' ? 'Off' : 'On'}</button>
+      <button data-sact="edit">Edit</button>` : ''}
+    </div>
+    ${isOwner ? sessOwnerForm(p) : ''}
+    ${role === 'tech' ? sessTechBlock(p) : ''}
+    <div class="status-line" data-cardmsg></div>
+  </div>`;
+}
+// Owner's crew + change-log card. STRIPE: the revenue view joins here at the
+// Tier-2b swap (per-item takings next to the plays counts).
+function ownerTools(){
+  if (S.session.role !== 'owner') return '';
+  const members = (S.orgMembers || []).map(m => `
+    <li><span class="oname">${esc(m.email)}</span><span class="okind">${esc(m.orgRole)}</span>
+      ${m.orgRole === 'staff' ? `<button class="ox" data-sown="rm" data-email="${esc(m.email)}" title="remove">✕</button>` : ''}</li>`).join('');
+  return `
+  <div class="card">
+    <b>Your crew</b>
+    <ul class="chain" style="margin-top:.4rem">${members || '<li class="okind" style="border:none">just you so far</li>'}</ul>
+    <div class="edit-form">
+      <label>invite staff — email<input data-sown="email" type="email" placeholder="bartender@yourbar.com" /></label>
+      <button class="btn ghost slim" data-sown="invite">Invite staff</button>
+    </div>
+    <p class="note" style="margin:.4rem 0 0">Staff can pause/skip and watch queues. Tech and owner rungs are granted by the platform operator.</p>
+    <details data-sown="audit"><summary style="cursor:pointer; font-size:.82rem; color:var(--sub); padding:.4rem 0">Change log — who changed what</summary>
+      <div data-sown="auditbox" class="note">…</div></details>
+    <div class="status-line" data-ownmsg></div>
+  </div>`;
+}
+$('sessOwnerTools').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-sown]'); if (!btn) return;
+  const say = (t, cls) => {
+    const m = document.querySelector('#sessOwnerTools [data-ownmsg]');
+    if (m){ m.className = 'status-line ' + (cls || ''); m.textContent = t; }
+  };
+  try {
+    if (btn.dataset.sown === 'invite'){
+      const input = document.querySelector('#sessOwnerTools [data-sown="email"]');
+      const email = (input.value || '').trim();
+      if (!email) return say('enter an email', 'err');
+      await sessApi('POST', orgBase() + '/invites', { email });
+      try { S.orgMembers = await sessApi('GET', orgBase() + '/members'); } catch {}
+      renderSession();
+      say(`invited — ${email} signs in at /account, then taps "Use my account" here`, 'ok');
+    } else if (btn.dataset.sown === 'rm'){
+      if (!confirm(`Remove ${btn.dataset.email}? Their access ends on their next request.`)) return;
+      await sessApi('DELETE', orgBase() + '/members/' + encodeURIComponent(btn.dataset.email));
+      try { S.orgMembers = await sessApi('GET', orgBase() + '/members'); } catch {}
+      renderSession();
+      say('removed', 'ok');
+    }
+  } catch (err){ say(String(err.message), 'err'); }
+});
+// The change log loads on open (toggle doesn't bubble — listen in capture).
+$('sessOwnerTools').addEventListener('toggle', async (e) => {
+  const d = e.target;
+  if (!d.matches || !d.matches('details[data-sown="audit"]') || !d.open) return;
+  const box = d.querySelector('[data-sown="auditbox"]');
+  box.textContent = 'loading…';
+  try { box.innerHTML = auditHtml(await sessApi('GET', orgBase() + '/audit')); }
+  catch (err){ box.textContent = String(err.message); }
+}, true);
+
+// Card actions — every rung's buttons post to the SAME org actions endpoint;
+// the server decides what the rung may do (clear_queue/on/off are owner-only
+// there, so the UI hiding them for staff is a courtesy, not the enforcement).
+$('sessList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-sact]'); if (!btn) return;
+  const card = e.target.closest('[data-code]');
+  const code = card.dataset.code;
+  const p = findOrgItem(code);
+  // mergeOrgItem re-renders the list, so the message target must be re-queried
+  // AFTER the action — a captured node would be detached and say() silent.
+  const say = (t, cls) => {
+    const m = document.querySelector(`#sessList [data-code="${code}"] [data-cardmsg]`);
+    if (m){ m.className = 'status-line ' + (cls || ''); m.textContent = t; }
+  };
+  const act = (action, extra) => sessApi('POST', orgBase() + '/items/' + code + '/actions', { action, ...(extra || {}) });
+  try {
+    switch (btn.dataset.sact){
+      case 'copy':
+        if (navigator.clipboard) await navigator.clipboard.writeText(code);
+        say('code copied', 'ok'); return;
+      case 'edit': {
+        const f = card.querySelector('[data-sedit]');
+        f.hidden = !f.hidden; return;
+      }
+      case 'pauseresume': {
+        const action = p.active && p.active.paused ? 'resume' : 'pause';
+        mergeOrgItem(await act(action)); say(action + 'd', 'ok'); break;
+      }
+      case 'onoff': {
+        const action = p.status === 'on' ? 'off' : 'on';
+        mergeOrgItem(await act(action)); say('turned ' + action, 'ok'); break;
+      }
+      case 'skip': mergeOrgItem(await act('skip')); say('slot ended', 'ok'); break;
+      case 'force_skip': mergeOrgItem(await act('force_skip')); say('track skipped', 'ok'); break;
+      case 'clear_queue':
+        if (!confirm('Clear the whole queue?')) return;
+        mergeOrgItem(await act('clear_queue')); say('queue cleared', 'ok'); break;
+      case 'remove':
+        mergeOrgItem(await act('remove', { songId: btn.dataset.song, byId: btn.dataset.by }));
+        say('removed from queue', 'ok'); break;
+    }
+  } catch (err){ say(String(err.message), 'err'); }
+});
+// Tech chain ops (data-sout) — org-scoped endpoints, key shown once.
+$('sessList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-sout]'); if (!btn) return;
+  const card = e.target.closest('[data-code]');
+  const code = card.dataset.code;
+  const say = (t, cls) => {              // fresh query — mergeOrgItem re-renders
+    const m = document.querySelector(`#sessList [data-code="${code}"] [data-cardmsg]`);
+    if (m){ m.className = 'status-line ' + (cls || ''); m.textContent = t; }
+  };
+  const base = orgBase() + '/items/' + code;
+  try {
+    if (btn.dataset.sout === 'addrig'){
+      const name = (card.querySelector('[data-sout="rigname"]').value || '').trim();
+      if (!name) return say('name the rig first', 'err');
+      const res = await sessApi('POST', base + '/outputs', { kind: 'rig', name });
+      sessRevealed = { code, html:
+        `Rig key for <b>${esc(name)}</b> — shown once, save it now:<br><code>${esc(res.rigKey)}</code>` };
+      mergeOrgItem(res.item);
+      say('rig added — copy the key now (shown once)', 'ok');
+    } else if (btn.dataset.sout === 'addscene'){
+      const scene = card.querySelector('[data-sout="scene"]').value;
+      const res = await sessApi('POST', base + '/outputs', { kind: 'scene', name: 'stage-' + scene, scene });
+      mergeOrgItem(res.item);
+      say('scene output added — always online', 'ok');
+    } else if (btn.dataset.sout === 'rotate'){
+      const name = btn.dataset.name;
+      if (!confirm(`Rotate the key for "${name}"? The old key dies immediately.`)) return;
+      const res = await sessApi('POST', base + '/rig-key', { name });
+      sessRevealed = { code, html:
+        `NEW key for <b>${esc(name)}</b> — the old one is dead. Shown once:<br><code>${esc(res.rigKey)}</code>` };
+      mergeOrgItem(res.item);
+      say('key rotated — update the rig now', 'ok');
+    } else if (btn.dataset.sout === 'del'){
+      const name = btn.dataset.name;
+      if (!confirm(`Remove output "${name}"? A rig key is revoked and its connection drops.`)) return;
+      mergeOrgItem(await sessApi('DELETE', base + '/outputs/' + encodeURIComponent(name)));
+      say('output removed', 'ok');
+    }
+  } catch (err){ say(String(err.message), 'err'); }
+});
+// Owner saves — send ONLY what changed (the server audits field-by-field;
+// unchanged values would just be noise in the venue's change log). A rejected
+// edit surfaces the server's message, which names the band.
+$('sessList').addEventListener('submit', async (e) => {
+  const form = e.target.closest('form[data-sedit]'); if (!form) return;
+  e.preventDefault();
+  const card = e.target.closest('[data-code]');
+  const code = card.dataset.code;
+  const p = findOrgItem(code);
+  const msg = card.querySelector('[data-cardmsg]');
+  const f = new FormData(form);
+  try {
+    const body = {};
+    // A BLANK price field must mean "unchanged", never $0.00 — coercing empty to
+    // 0 would submit a real change (free control where no band rejects it).
+    const priceRaw = String(f.get('price') ?? '').trim();
+    if (priceRaw !== ''){
+      const price = Math.round(parseFloat(priceRaw) * 100);
+      if (Number.isFinite(price) && price !== p.priceCents) body.priceCents = price;
+    }
+    const slot = parseInt(f.get('slot'), 10);
+    if (Number.isFinite(slot) && slot !== p.slotSeconds) body.slotSeconds = slot;
+    if (f.get('controller') && f.get('controller') !== (p.controller || 'dpad')) body.controller = f.get('controller');
+    const hoursNote = String(f.get('hours') || '').trim();
+    if (hoursNote !== ((p.hours && p.hours.note) || '')) body.hours = hoursNote ? { note: hoursNote } : null;
+    const lim = p.limits || {};
+    const limits = {};
+    const cd = String(f.get('cooldown') ?? '').trim();
+    if (cd !== '' && parseInt(cd, 10) !== lim.cooldownMs) limits.cooldownMs = parseInt(cd, 10);
+    const mpm = String(f.get('maxpermin') ?? '').trim();
+    if (mpm !== '' && parseInt(mpm, 10) !== lim.maxPerMin) limits.maxPerMin = parseInt(mpm, 10);
+    if (Object.keys(limits).length) body.limits = limits;
+    if (card.dataset.surface === 'jukebox'){
+      // Send ONLY the jukebox knobs that changed. Shipping the whole config
+      // would (a) 400 the entire save if a knob the owner never touched now sits
+      // below a later-tightened platform floor, and (b) append phantom audit
+      // rows for every unchanged knob. Diff at top-level-key granularity — the
+      // server deep-merges each subtree it receives.
+      const jbDiff = jukeboxDiff(gatherJukebox(form), p.jukeboxConfig);
+      if (Object.keys(jbDiff).length) body.jukebox = jbDiff;
+    }
+    if (!Object.keys(body).length){ msg.className = 'status-line'; msg.textContent = 'nothing changed'; return; }
+    mergeOrgItem(await sessApi('PATCH', orgBase() + '/items/' + code, body));
+    const m2 = document.querySelector(`#sessList [data-code="${code}"] [data-cardmsg]`);
+    if (m2){ m2.className = 'status-line ok'; m2.textContent = 'saved'; }
+  } catch (err){ msg.className = 'status-line err'; msg.textContent = String(err.message); }   // form not re-rendered on error — node still live
+});
+// Diff a gathered jukebox config against the current one at top-level-key
+// granularity (the server merges each subtree). Only changed keys ride the
+// PATCH — so an untouched, out-of-band knob can't block the save or pollute
+// the audit log. `backend` is intentionally not compared: the org lens never
+// renders it and the owner whitelist ignores it.
+function jukeboxDiff(next, cur){
+  cur = cur || {};
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const out = {};
+  for (const k of ['monetization', 'mode', 'houseMode', 'queuePriceCents', 'playNextPriceCents', 'catalog', 'queueRules', 'skip'])
+    if (!eq(next[k], cur[k])) out[k] = next[k];
+  return out;
+}
+// The catalog editor's add/remove rows work inside the session lens too (pure
+// DOM edits, gathered on Save) — same namespace as the key lens.
+$('sessList').addEventListener('click', (e) => {
+  const catBtn = e.target.closest('button[data-cat]');
+  if (!catBtn) return;
+  e.preventDefault();
+  if (catBtn.dataset.cat === 'add')
+    e.target.closest('[data-sedit]').querySelector('[data-catalog]').insertAdjacentHTML('beforeend', catalogEditRow({}));
+  else if (catBtn.dataset.cat === 'del') catBtn.closest('li').remove();
+});
+
 /* ── boot ── */
+$('acctChip').href = '/account.html?return=/control-ops';
 $('adminKeyIn').focus?.();
 
 /* ── test shims (jsdom smoke: page-scope const/let are unreachable from
@@ -1288,6 +1961,12 @@ window.__unlockVault = unlockVault;
 window.__padHub = padHub;
 window.__actionToOsc = actionToOsc;
 window.__connectCmds = connectCmds;
+window.__unlockSession = unlockSession;
+window.__refreshSession = refreshSessionNow;
+window.__renderSession = renderSession;
+window.__sessCard = sessCard;
+window.__loadOrgs = loadOrgs;
+window.__renderOrgs = renderOrgs;
 </script>
 </body>
 </html>

@@ -69,7 +69,7 @@ const state = new Map();
 const EMPTY = Object.freeze({ active: null, queue: Object.freeze([]), auction: null });
 const peek = (code) => state.get(code) || EMPTY;                    // read: never creates
 const chan = (code) => {                                            // write: create on demand
-  if (!state.has(code)) state.set(code, { active: null, queue: [], auction: null, lastBidAt: new Map() });
+  if (!state.has(code)) state.set(code, { active: null, queue: [], auction: null, lastBidAt: new Map(), plays: 0 });
   return state.get(code);
 };
 
@@ -271,6 +271,7 @@ function startSlot(item, winner){
   const c = chan(item.code);
   const now = Date.now();
   c.active = { userId: winner.userId, name: winner.name, startedAt: now, endsAt: now + item.slotSeconds * 1000 };
+  c.plays = (c.plays || 0) + 1;                 // the org lens's plays-per-item view
   announce(item.code, 'slot_start', { id: winner.userId, name: winner.name });
   // Never hand a live clock to a slot that STARTS on a dead output (a buy-now
   // promotion or auction win that lands during an ongoing gap) — freeze it at
@@ -371,7 +372,8 @@ function stubPay(kind, cents, user){
   return { ok: true, kind, cents, payer: user.id };
 }
 
-export async function attachItems(app, requireAdmin, store){
+export async function attachItems(app, requireAdmin, store, deps = {}){
+  const orgs = deps.orgs || null;               // the admin chain (server/orgs.js) — null = single-operator
   for (const item of await store.listItems()) items.set(item.code, item);
 
   /* The bus gate for item rooms (bus.js registry). This gate OWNS the
@@ -379,15 +381,19 @@ export async function attachItems(app, requireAdmin, store){
      (paid.js's gate answers null for them). Identity = the verified session
      bound to the socket at the WS upgrade (ws._user) — never the payload,
      except the documented dev escape hatch when auth is unconfigured. */
-  registerKeyGate((channelId, sender, msg) => {
+  const itemKeyGate = (channelId, sender, msg) => {
     if (!String(channelId).startsWith('item:')) return null;      // not our territory
     const u = sender && sender._user;
-    // Verified vj/radio/admin pass first — including past the duty limits
-    // (owner's explicit call: privileged senders bypass the cooldowns).
-    if (u && PRIVILEGED.has(u.role)) return { ok: true };
+    const item = items.get(String(channelId).slice(5));
+    // Privileged senders pass first — including past the duty limits (owner's
+    // explicit call: privileged senders bypass the cooldowns). Privileged =
+    // a verified platform op (vj/radio/admin) OR an org member of ANY rung
+    // (≥staff) of THIS ITEM'S org. The org check starts from item.orgId, never
+    // the user's org list, so cross-org privilege is impossible by construction.
+    if (u && (PRIVILEGED.has(u.role) || (item && item.orgId && orgs && orgs.roleOf(u, item.orgId))))
+      return { ok: true };
     if (!PAD_BTN_RE.test(msg.action || ''))
       return { ok: false, reason: 'item rooms only carry pad/btn controls' };
-    const item = items.get(String(channelId).slice(5));
     if (!item) return { ok: false, reason: 'no such item' };
     if (item.status !== 'on') return { ok: false, reason: 'this item is off' };
     const c = state.get(item.code);
@@ -400,7 +406,9 @@ export async function attachItems(app, requireAdmin, store){
     if (!dutyAllows(item, msg.action, CONTINUOUS_RE.test(msg.action)))
       return { ok: false, reason: 'cooling down — this item limits how fast it can be driven' };
     return { ok: true };
-  });
+  };
+  registerKeyGate(itemKeyGate);
+  __test.keyGate = itemKeyGate;                // suites drive the gate with a synthetic ws._user
 
   /* Rig identity + presence (bus.js hooks). auth() rules at the WS upgrade:
      the code must exist in the DURABLE chain (unknown codes can never grow
@@ -594,9 +602,13 @@ export async function attachItems(app, requireAdmin, store){
     // Admin dashboard needs the RAW jukebox config (rule knobs + catalog files)
     // to edit it — publicItem's jukebox block is the patron shape. jukeboxConfig
     // is admin-only (this route is requireAdmin) and carries no secrets (spotify
-    // tokens, when that backend lands, are stripped before here).
+    // tokens, when that backend lands, are stripped before here). The venues
+    // panel needs the org fields on top of the patron shape — same set the
+    // org lens gets from orgView, safe here because this route is key-gated.
     res.json(Array.from(items.values()).map(i => ({
       ...publicItem(i),
+      orgId: i.orgId, bounds: i.bounds, hours: i.hours, limits: i.limits || null,
+      plays: (peek(i.code).plays || 0) + (jukeboxApi ? jukeboxApi.playsOf(i.code) : 0),
       ...(i.surface === 'jukebox' ? { jukeboxConfig: jukeboxSafeConfig(i.jukebox) } : {}),
     })));
   });
@@ -657,120 +669,213 @@ export async function attachItems(app, requireAdmin, store){
   });
 
   // End the current slot early; buy-now promotes the next buyer.
-  app.post('/api/items/:code/skip', requireAdmin, (req, res, next) => {
-    try {
-      const item = findItem(normCode(req.params.code));
-      // STRIPE: ending a PAID slot early is a partial-refund/credit decision —
-      // 2b refunds the unused seconds (or comps a fresh slot) here, like
-      // paid.js's control/skip.
-      const c = state.get(item.code);
-      if (c && c.active) slotOver(item, 'skip');
-      broadcastState(item);
-      res.json(publicItem(item));
-    } catch (e){ next(e); }
-  });
-
+  // STRIPE: ending a PAID slot early is a partial-refund/credit decision —
+  // 2b refunds the unused seconds (or comps a fresh slot) here.
+  function doSkip(code){
+    const item = findItem(code);
+    const c = state.get(item.code);
+    if (c && c.active) slotOver(item, 'skip');
+    broadcastState(item);
+    return item;
+  }
   // pause/resume freeze the holder's remaining time; on/off flip the durable
   // status (off = not sellable + all controller input gated). Every change is
   // announced to TD (WebSocket DAT natively, OSC via the bridge).
+  async function doState(code, action){
+    let item = findItem(code);
+    if (action === 'pause'){
+      const c = state.get(code);
+      if (!c || !c.active || c.active.paused) throw httpError(409, 'no running slot to pause');
+      freeze(c.active);                        // no-op if already frozen by an output gap
+      c.active.paused = true;
+      announce(code, 'pause');
+    } else if (action === 'resume'){
+      const c = state.get(code);
+      if (!c || !c.active || !c.active.paused) throw httpError(409, 'nothing is paused');
+      c.active.paused = false;
+      thaw(c.active);                          // stays frozen if an output gap still holds it
+      announce(code, 'resume');
+    } else if (action === 'on' || action === 'off'){
+      item = await store.updateItem(code, { status: action });
+      items.set(code, item);
+      announce(code, action);
+      // A jukebox player stops on the 'off' announce; on 'on' it needs the
+      // current track (or house) re-issued so music resumes without waiting
+      // for the next request. onRigConnect does exactly that and no-ops when
+      // the item isn't a jukebox / isn't back on.
+      if (action === 'on' && item.surface === 'jukebox' && jukeboxApi) jukeboxApi.onRigConnect(code);
+    } else throw httpError(400, 'action must be pause|resume|on|off');
+    broadcastState(item);
+    return item;
+  }
+  app.post('/api/items/:code/skip', requireAdmin, (req, res, next) => {
+    try { res.json(publicItem(doSkip(normCode(req.params.code)))); } catch (e){ next(e); }
+  });
   app.post('/api/items/:code/state', requireAdmin, async (req, res, next) => {
-    try {
-      const code = normCode(req.params.code);
-      let item = findItem(code);
-      const action = req.body?.action;
-      const now = Date.now();
-      if (action === 'pause'){
-        const c = state.get(code);
-        if (!c || !c.active || c.active.paused) throw httpError(409, 'no running slot to pause');
-        freeze(c.active);                      // no-op if already frozen by an output gap
-        c.active.paused = true;
-        announce(code, 'pause');
-      } else if (action === 'resume'){
-        const c = state.get(code);
-        if (!c || !c.active || !c.active.paused) throw httpError(409, 'nothing is paused');
-        c.active.paused = false;
-        thaw(c.active);                        // stays frozen if an output gap still holds it
-        announce(code, 'resume');
-      } else if (action === 'on' || action === 'off'){
-        item = await store.updateItem(code, { status: action });
-        items.set(code, item);
-        announce(code, action);
-        // A jukebox player stops on the 'off' announce; on 'on' it needs the
-        // current track (or house) re-issued so music resumes without waiting
-        // for the next request. onRigConnect does exactly that and no-ops when
-        // the item isn't a jukebox / isn't back on.
-        if (action === 'on' && item.surface === 'jukebox' && jukeboxApi) jukeboxApi.onRigConnect(code);
-      } else throw httpError(400, 'action must be pause|resume|on|off');
-      broadcastState(item);
-      res.json(publicItem(item));
-    } catch (e){ next(e); }
+    try { res.json(publicItem(await doState(normCode(req.params.code), req.body?.action))); } catch (e){ next(e); }
   });
 
   /* ── admin: the OUTPUT CHAIN (ordered failover list) ──────────────
      Rig entries get a server-generated key: the PLAINTEXT is returned once
      from create and never again — only its sha256 lands in the store. */
+  async function doAddOutput(code, body){
+    const item = findItem(code);
+    const { kind, name, priority, scene } = body || {};
+    // 'admin' is the reserved sentinel the bus uses to mark trusted X-Admin-Key
+    // HTTP-inject reports; a rig must never be able to claim that name (it would
+    // otherwise be trusted to report player truth even when not the program rig).
+    if (kind === 'rig' && String(name || '').trim().toLowerCase() === 'admin')
+      throw httpError(400, "rig name 'admin' is reserved");
+    const entry = { kind, name, priority: priority ?? (item.outputs.length + 1), scene };
+    let rigKey;
+    if (kind === 'rig'){
+      rigKey = crypto.randomBytes(24).toString('base64url');
+      entry.keyHash = sha256(rigKey);
+    }
+    const updated = await store.updateItemOutputs(code, [...item.outputs, entry]);
+    items.set(code, updated);
+    applyElection(updated);
+    broadcastState(updated);
+    return { rigKey, item: updated };
+  }
+  async function doPatchOutput(code, name, body){
+    const item = findItem(code);
+    const cur = item.outputs.find(o => o.name === name);
+    if (!cur) throw httpError(404, 'no output with that name');
+    const next_ = item.outputs.map(o => o !== cur ? o : {
+      ...o,
+      ...(body?.priority !== undefined ? { priority: body.priority } : {}),
+      ...(o.kind === 'scene' && body?.scene !== undefined ? { scene: body.scene } : {}),
+    });
+    const updated = await store.updateItemOutputs(code, next_);
+    items.set(code, updated);
+    applyElection(updated);
+    broadcastState(updated);
+    return updated;
+  }
+  async function doRemoveOutput(code, name){
+    const item = findItem(code);
+    if (!item.outputs.some(o => o.name === name)) throw httpError(404, 'no output with that name');
+    const updated = await store.updateItemOutputs(code, item.outputs.filter(o => o.name !== name));
+    items.set(code, updated);
+    // Revoke = the rig's socket dies with its key.
+    const rec = rigsOnline.get(code)?.get(name);
+    if (rec){
+      try { rec.ws.close(4401, 'output revoked'); } catch { /* closing */ }
+      rigsOnline.get(code).delete(name);
+      if (!rigsOnline.get(code).size) rigsOnline.delete(code);
+    }
+    applyElection(updated);
+    broadcastState(updated);
+    return updated;
+  }
   app.post('/api/items/:code/outputs', requireAdmin, async (req, res, next) => {
     try {
-      const code = normCode(req.params.code);
-      const item = findItem(code);
-      const { kind, name, priority, scene } = req.body || {};
-      // 'admin' is the reserved sentinel the bus uses to mark trusted X-Admin-Key
-      // HTTP-inject reports; a rig must never be able to claim that name (it would
-      // otherwise be trusted to report player truth even when not the program rig).
-      if (kind === 'rig' && String(name || '').trim().toLowerCase() === 'admin')
-        throw httpError(400, "rig name 'admin' is reserved");
-      const entry = { kind, name, priority: priority ?? (item.outputs.length + 1), scene };
-      let rigKey;
-      if (kind === 'rig'){
-        rigKey = crypto.randomBytes(24).toString('base64url');
-        entry.keyHash = sha256(rigKey);
-      }
-      const updated = await store.updateItemOutputs(code, [...item.outputs, entry]);
-      items.set(code, updated);
-      applyElection(updated);
-      broadcastState(updated);
-      res.status(201).json({ ...(rigKey ? { rigKey } : {}), item: publicItem(updated) });
+      const { rigKey, item } = await doAddOutput(normCode(req.params.code), req.body || {});
+      res.status(201).json({ ...(rigKey ? { rigKey } : {}), item: publicItem(item) });
     } catch (e){ next(e); }
   });
-
   app.patch('/api/items/:code/outputs/:name', requireAdmin, async (req, res, next) => {
-    try {
-      const code = normCode(req.params.code);
-      const item = findItem(code);
-      const cur = item.outputs.find(o => o.name === req.params.name);
-      if (!cur) throw httpError(404, 'no output with that name');
-      const next_ = item.outputs.map(o => o !== cur ? o : {
-        ...o,
-        ...(req.body?.priority !== undefined ? { priority: req.body.priority } : {}),
-        ...(o.kind === 'scene' && req.body?.scene !== undefined ? { scene: req.body.scene } : {}),
-      });
-      const updated = await store.updateItemOutputs(code, next_);
-      items.set(code, updated);
-      applyElection(updated);
-      broadcastState(updated);
-      res.json(publicItem(updated));
-    } catch (e){ next(e); }
+    try { res.json(publicItem(await doPatchOutput(normCode(req.params.code), req.params.name, req.body || {}))); }
+    catch (e){ next(e); }
+  });
+  app.delete('/api/items/:code/outputs/:name', requireAdmin, async (req, res, next) => {
+    try { res.json(publicItem(await doRemoveOutput(normCode(req.params.code), req.params.name))); }
+    catch (e){ next(e); }
   });
 
-  app.delete('/api/items/:code/outputs/:name', requireAdmin, async (req, res, next) => {
-    try {
-      const code = normCode(req.params.code);
-      const item = findItem(code);
-      if (!item.outputs.some(o => o.name === req.params.name)) throw httpError(404, 'no output with that name');
-      const updated = await store.updateItemOutputs(code, item.outputs.filter(o => o.name !== req.params.name));
+  /* ── itemsApi — the seam the admin chain (server/orgs.js) calls after its
+     own authz + audit. Every method reuses the SAME internals the admin routes
+     use (no reimplementation), so org-scoped ops and platform ops can never
+     drift. The org layer is trusted to have already gated + bounded the call. */
+  const itemsApi = {
+    get: (code) => items.get(code),
+    listByOrg: (orgId) => Array.from(items.values()).filter(i => i.orgId === orgId),
+    // The org-member view of an item: the patron shape PLUS the fields org
+    // members legitimately see (bounds — render the band, don't hide it; hours;
+    // and the raw jukebox config so an owner can edit it). keyHash is already
+    // stripped by publicItem; jukebox spotify secret by jukeboxSafeConfig.
+    orgView: (item) => ({ ...publicItem(item), orgId: item.orgId, bounds: item.bounds, hours: item.hours,
+      limits: item.limits || null,            // owner tunes these (tighten-only vs the bounds floor/cap)
+      // plays this deploy (runtime — resets like the queues; pad = slots
+      // started, jukebox = tracks the rig reported). STRIPE: revenue-per-item
+      // joins this view at the Tier-2b swap, keyed off the same counters.
+      plays: (peek(item.code).plays || 0) + (jukeboxApi ? jukeboxApi.playsOf(item.code) : 0),
+      ...(item.surface === 'jukebox' ? { jukeboxConfig: jukeboxSafeConfig(item.jukebox) } : {}) }),
+    hasLiveRuntime: (code) => {
+      const c = state.get(code);
+      if (c && (c.active || c.queue.length || c.auction)) return true;
+      return !!(jukeboxApi && jukeboxApi.liveRuntime(code));
+    },
+    async applyOrgPatch(code, patch){
+      // Owner-whitelisted fields only (orgs.js validated + bounded them). None of
+      // these flip mode/surface/status, so the platform PATCH's clean-slate
+      // guards don't apply; a plain store update + mirror sync + broadcast is
+      // correct and keeps the jukebox config live immediately.
+      const before = items.get(code);
+      const updated = await store.updateItem(code, patch);
       items.set(code, updated);
-      // Revoke = the rig's socket dies with its key.
-      const rec = rigsOnline.get(code)?.get(req.params.name);
+      broadcastState(updated);
+      // A houseMode change persists in the config but needs a runtime kick so
+      // "house fills silence" actually starts (or the live player reflects it).
+      if (updated.surface === 'jukebox' && jukeboxApi &&
+          !!(before?.jukebox?.houseMode) !== !!(updated.jukebox?.houseMode))
+        jukeboxApi.applyHouseRuntime(updated);
+      return updated;
+    },
+    async action(code, action, body = {}){
+      findItem(code);   // 404 if gone
+      if (['pause', 'resume', 'on', 'off'].includes(action)) return doState(code, action);
+      if (action === 'skip') return doSkip(code);
+      // jukebox live actions (force_skip / clear_queue / remove) run through the
+      // jukebox engine's shared adminAction; house is a config edit, not here.
+      if (['force_skip', 'clear_queue', 'remove'].includes(action)){
+        const item = findItem(code);
+        if (!jukeboxApi || item.surface !== 'jukebox') throw httpError(409, 'this item is not a jukebox');
+        jukeboxApi.adminAction(item, action, body);
+        return items.get(code);
+      }
+      throw httpError(400, 'unknown action');
+    },
+    async setOrg(code, orgId){
+      const updated = await store.setItemOrg(code, orgId);
+      items.set(code, updated);
+      broadcastState(updated);
+      return updated;
+    },
+    async setBounds(code, bounds){
+      const updated = await store.setItemBounds(code, bounds);
+      items.set(code, updated);
+      return updated;                 // bounds are invisible to patrons — no broadcast needed
+    },
+    async rotateRigKey(code, name){
+      const item = findItem(code);
+      const cur = item.outputs.find(o => o.kind === 'rig' && o.name === name);
+      if (!cur) throw httpError(404, 'no rig output with that name');
+      // ONE store write (mint the new key, swap the hash in place) so a transient
+      // DB failure can't leave the output deleted with no replacement (the old
+      // remove-then-add did two writes; a crash between them killed the rig for
+      // good). The old socket is closed AFTER the write commits — until then the
+      // old key is still the live one, so a failed write is a clean no-op.
+      const rigKey = crypto.randomBytes(24).toString('base64url');
+      const next = item.outputs.map(o => o === cur ? { ...o, keyHash: sha256(rigKey) } : o);
+      const updated = await store.updateItemOutputs(code, next);
+      items.set(code, updated);
+      const rec = rigsOnline.get(code)?.get(name);                        // drop the old connection (its key is now dead)
       if (rec){
-        try { rec.ws.close(4401, 'output revoked'); } catch { /* closing */ }
-        rigsOnline.get(code).delete(req.params.name);
+        try { rec.ws.close(4401, 'rig key rotated'); } catch { /* closing */ }
+        rigsOnline.get(code).delete(name);
         if (!rigsOnline.get(code).size) rigsOnline.delete(code);
       }
       applyElection(updated);
       broadcastState(updated);
-      res.json(publicItem(updated));
-    } catch (e){ next(e); }
-  });
+      return { rigKey, item: updated };
+    },
+    outputsCreate: (code, body) => doAddOutput(code, body),
+    outputsPatch: (code, name, body) => doPatchOutput(code, name, body),
+    outputsDelete: (code, name) => doRemoveOutput(code, name),
+  };
+  return itemsApi;
 }
 
 // Test hook (.smoke-items.cjs): drive the expiry tick deterministically by

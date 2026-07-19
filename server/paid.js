@@ -106,12 +106,16 @@ function stubPay(kind, cents, user){
    GETs (server/shop.js library/streaming). Shared with the shop. */
 export async function requester(req){
   const u = await userFromRequest(req);
-  if (u) return { id: u.id, name: u.name || u.email, role: u.role, verified: true };
+  // email rides along for the admin chain (org membership matches on it); it is
+  // the verified session's real email in prod, or a dev-hatch-declared one only
+  // where auth is unconfigured (same trust envelope as the id/name below).
+  if (u) return { id: u.id, name: u.name || u.email, role: u.role, verified: true, email: u.email || null };
   if (devIdentityAllowed()){
     const b = (req.body && req.body.user)
-      || (req.query && req.query.uid && { id: req.query.uid, name: req.query.name || req.query.uid });
+      || (req.query && req.query.uid && { id: req.query.uid, name: req.query.name || req.query.uid, email: req.query.email });
     if (b && b.id && b.name)
-      return { id: String(b.id).slice(0, 64), name: String(b.name).slice(0, 40), role: 'listener', verified: false };
+      return { id: String(b.id).slice(0, 64), name: String(b.name).slice(0, 40), role: 'listener', verified: false,
+        email: b.email ? String(b.email).slice(0, 120).toLowerCase() : null };
   }
   return null;
 }

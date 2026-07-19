@@ -46,6 +46,49 @@ export function httpError(status, message){
   const e = new Error(message); e.status = status; return e;
 }
 
+/* ── The admin chain (orgs / delegated roles — server/orgs.js) ──
+   Orgs are businesses; org_members map a person (by email, linked to a
+   Supabase user_id on first match) to an org role. items gain a nullable
+   orgId (null = platform-owned legacy item, unchanged) and platform-set
+   `bounds` (the box an org owner may tune inside). audit_log is append-only.
+   Org data is Postgres-first (prod); the FileStore mirrors it for zero-setup
+   dev + hermetic tests, but `orgsEnabled` gates the endpoints so a real
+   deploy without a database fails to 503 rather than storing org state in a
+   throwaway file. */
+export const ORG_ROLES = ['owner', 'staff', 'tech'];
+export const ORG_ROLE_RANK = { staff: 1, tech: 2, owner: 3 };
+export const ORG_STATUSES = ['active', 'suspended'];
+
+// Platform-set safety/money box for an org item. null = unbounded (an item not
+// yet handed bands). Every field is optional; a missing field = that dimension
+// is unconstrained. Numbers are validated (reject, never clamp — orgs.js owns
+// the reject-on-PATCH policy; this just canonicalizes what the platform stores).
+export function normalizeBounds(raw){
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object') throw httpError(400, 'bounds must be an object or null');
+  const out = {};
+  if (raw.priceBandCents !== undefined && raw.priceBandCents !== null){
+    const b = raw.priceBandCents;
+    const min = itemInt(b.min ?? 0, 0, 50000, 'priceBandCents.min');
+    const max = itemInt(b.max ?? 50000, 0, 50000, 'priceBandCents.max');
+    if (max < min) throw httpError(400, 'priceBandCents.max must be ≥ min');
+    out.priceBandCents = { min, max };
+  }
+  if (raw.slotSecondsMax !== undefined && raw.slotSecondsMax !== null)
+    out.slotSecondsMax = itemInt(raw.slotSecondsMax, 10, 3600, 'slotSecondsMax');
+  if (raw.cooldownFloorMs !== undefined && raw.cooldownFloorMs !== null)
+    out.cooldownFloorMs = itemInt(raw.cooldownFloorMs, 0, 10000, 'cooldownFloorMs');
+  if (raw.maxPerMinCap !== undefined && raw.maxPerMinCap !== null)
+    out.maxPerMinCap = itemInt(raw.maxPerMinCap, 10, 1000, 'maxPerMinCap');
+  if (raw.jukebox !== undefined && raw.jukebox !== null && typeof raw.jukebox === 'object'){
+    const jb = {};
+    if (raw.jukebox.minPlaySecFloor !== undefined && raw.jukebox.minPlaySecFloor !== null)
+      jb.minPlaySecFloor = itemInt(raw.jukebox.minPlaySecFloor, 0, 3600, 'jukebox.minPlaySecFloor');
+    if (Object.keys(jb).length) out.jukebox = jb;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 /* ── Items (Volt Control — pay-to-control objects, server/items.js) ──
    Durable definitions only; runtime queue/auction state lives in items.js.
    Codes are 6 chars from an unambiguous alphabet (no 0/O/1/I) — they get
@@ -66,7 +109,11 @@ function itemInt(v, min, max, name){
   if (!Number.isFinite(n)) throw httpError(400, `${name} must be a number`);
   return Math.min(max, Math.max(min, n));
 }
-const ITEM_FIELDS = {
+// Exported so orgs.js can REJECT out-of-range owner edits rather than let the
+// store silently clamp them (clamp would make the append-only audit record a
+// value that was never stored). These are the platform's intrinsic hard limits;
+// a per-item `bounds` band tightens INSIDE them.
+export const ITEM_FIELDS = {
   priceCents:        [0, 50000],   // buy-now price / auction starting bid — hard cap $500
   slotSeconds:       [10, 3600],
   auctionSeconds:    [15, 600],    // soft-close countdown length
@@ -83,7 +130,7 @@ const ITEM_FIELDS = {
    redundancy layer existed (always sellable, no presence tracking). */
 export const STAGE_SCENES = ['orb', 'grid'];
 const OUTPUT_NAME_RE = /^[a-z0-9][a-z0-9-]{0,23}$/;
-const LIMIT_FIELDS = { maxPerMin: [10, 1000], cooldownMs: [0, 10000] };
+export const LIMIT_FIELDS = { maxPerMin: [10, 1000], cooldownMs: [0, 10000] };
 export const DEFAULT_LIMITS = { maxPerMin: 240, cooldownMs: 0 };
 
 export function normalizeOutputs(arr){
@@ -127,11 +174,26 @@ function withOutputDefaults(item){
   if (item.surface === 'jukebox') item.jukebox = normalizeJukebox(item.jukebox || {});
   else item.jukebox = null;
   if (!CONTROLLERS.includes(item.controller)) item.controller = 'dpad';   // back-compat: legacy pads are d-pads
+  // Admin chain: pre-org rows have no orgId/bounds/hours — null = platform-owned,
+  // unbounded, and every pre-org behavior is identical.
+  if (item.orgId === undefined) item.orgId = null;
+  if (item.bounds === undefined) item.bounds = null;
+  if (item.hours === undefined) item.hours = null;
   return item;
 }
 // Controller layouts for a PAD-surface item (what input UI the slot holder gets;
 // each emits a distinct gated action vocabulary — see PAD_BTN_RE in items.js).
 export const CONTROLLERS = ['dpad', 'joystick', 'faders', 'grid'];
+
+// Open-hours: a small owner-editable blob (e.g. { tz, windows:[…] } or a note).
+// Freeform + size-capped for now — automatic on/off enforcement lands later.
+function normalizeHours(raw){
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object') throw httpError(400, 'hours must be an object or null');
+  const s = JSON.stringify(raw);
+  if (s.length > 2000) throw httpError(400, 'hours is too large');
+  return JSON.parse(s);
+}
 
 /* ── Jukebox surface (server/jukebox.js) — audio as a control surface.
    An item with surface:'jukebox' carries this config. All server-authoritative;
@@ -140,6 +202,17 @@ export const CONTROLLERS = ['dpad', 'joystick', 'faders', 'grid'];
 export const JUKEBOX_BACKENDS = ['mpd', 'log'];          // 'spotify' deferred (see PROMPT-JUKEBOX §7-8)
 export const JUKEBOX_MONETIZATION = ['controller_slot', 'per_action'];
 export const JUKEBOX_MODES = ['buynow', 'bid'];
+// Intrinsic ranges for the jukebox numeric knobs (mirror the numOr calls in
+// normalizeJukebox below — the store CLAMPS to these on the platform admin
+// path; orgs.js imports this map to REJECT out-of-range OWNER edits instead,
+// so an owner's append-only audit never records a clamped value).
+export const JUKEBOX_FIELDS = {
+  queuePriceCents: [0, 50000], playNextPriceCents: [0, 50000], 'skip.priceCents': [0, 50000],
+  'skip.minPlaySec': [0, 3600], 'skip.onlyBeforeSec': [0, 3600],
+  'skip.perUser.max': [0, 100], 'skip.perUser.windowMin': [1, 1440],
+  'skip.global.max': [0, 1000], 'skip.global.windowMin': [1, 1440],
+  'queueRules.maxLen': [1, 200], 'queueRules.maxPerUser': [1, 50], 'queueRules.noRepeatMin': [0, 1440],
+};
 const bool = (v, d) => (v === undefined ? d : !!v);
 const numOr = (v, min, max, d, name) => (v === undefined || v === null ? d : itemInt(v, min, max, name));
 const CATALOG_MAX = 500;
@@ -215,7 +288,9 @@ function normalizeNewItem(props = {}){
     status: 'on', createdAt: new Date().toISOString(),
     // Output chain edits go through the dedicated /outputs endpoints, not
     // create — new items start unconfigured (= legacy behavior).
-    outputs: [], limits: normalizeLimits(props.limits) };
+    outputs: [], limits: normalizeLimits(props.limits),
+    // Admin chain: new items are platform-owned + unbounded until assigned.
+    orgId: null, bounds: null, hours: null };
   for (const [f, [min, max]] of Object.entries(ITEM_FIELDS))
     item[f] = props[f] === undefined ? defaults[f] : itemInt(props[f], min, max, f);
   // Control surface: 'pad' (default, back-compat) or 'jukebox' (music).
@@ -247,8 +322,15 @@ function applyItemPatch(item, patch = {}){
   for (const [f, [min, max]] of Object.entries(ITEM_FIELDS))
     if (patch[f] !== undefined) item[f] = itemInt(patch[f], min, max, f);
   if (patch.limits !== undefined) item.limits = normalizeLimits(patch.limits);
+  if (patch.hours !== undefined) item.hours = normalizeHours(patch.hours);   // open-hours blob (owner-editable; enforcement is future)
   if (patch.outputs !== undefined)   // chain edits use POST/PATCH/DELETE …/outputs
     throw httpError(400, 'use the /api/items/:code/outputs endpoints to edit the output chain');
+  // orgId + bounds are PLATFORM-set only (assign / set-bounds endpoints), never
+  // through the general patch — an org owner must not self-assign or self-widen.
+  if (patch.orgId !== undefined)
+    throw httpError(400, 'use the admin org-assignment endpoint to change orgId');
+  if (patch.bounds !== undefined)
+    throw httpError(400, 'use PATCH /api/admin/items/:code/bounds to set bounds');
   // Surface flip + jukebox config. items.js guards a flip against live runtime
   // (like the mode-flip guard) before calling this.
   if (patch.controller !== undefined){
@@ -273,14 +355,20 @@ export const getPool = () => sharedPool;
 
 /* ── JSON-file backend (local dev) ────────────────────────────────── */
 export class FileStore {
-  constructor(file, itemsFile){
+  constructor(file, itemsFile, orgsFile){
     this.file = file;
     this.itemsFile = itemsFile || path.join(path.dirname(file), 'items.json');
+    this.orgsFile = orgsFile || path.join(path.dirname(file), 'orgs.json');
+    // The FileStore genuinely stores orgs (for zero-setup dev + hermetic tests).
+    // createStore() forces this false whenever the file store backs a real app
+    // process, so "no DATABASE_URL → org endpoints 503" holds in production.
+    this.orgsEnabled = true;
     if (!fs.existsSync(file)){
       fs.mkdirSync(path.dirname(file), { recursive: true });
       this._write(SEED);
     }
     if (!fs.existsSync(this.itemsFile)) this._writeItems([]);
+    if (!fs.existsSync(this.orgsFile)) this._writeOrgs({ orgs: [], members: [], audit: [], auditSeq: 0 });
   }
   _read(){ return JSON.parse(fs.readFileSync(this.file, 'utf8')); }
   _write(data){ fs.writeFileSync(this.file, JSON.stringify(data, null, 2)); }
@@ -303,6 +391,35 @@ export class FileStore {
     const tmp = this.itemsFile + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
     fs.renameSync(tmp, this.itemsFile);
+  }
+  // Org data: same corrupt-set-aside + atomic-write discipline as items.
+  _readOrgs(){
+    let raw;
+    try { raw = fs.readFileSync(this.orgsFile, 'utf8'); }
+    catch (e){
+      // A MISSING file is not corruption — recreate it empty and carry on.
+      // Only genuine parse failures below get set aside for forensics.
+      if (e.code === 'ENOENT'){ const empty = { orgs: [], members: [], audit: [], auditSeq: 0 }; this._writeOrgs(empty); return empty; }
+      throw e;
+    }
+    try {
+      const d = JSON.parse(raw);
+      return { orgs: d.orgs || [], members: d.members || [], audit: d.audit || [], auditSeq: d.auditSeq || 0 };
+    } catch (e){
+      const bak = this.orgsFile + '.corrupt-' + Date.now();
+      try { fs.renameSync(this.orgsFile, bak); } catch { /* already gone */ }
+      console.error(`[store] orgs file unreadable (${e.message}) — set aside as ${bak}, starting empty`);
+      const empty = { orgs: [], members: [], audit: [], auditSeq: 0 };
+      this._writeOrgs(empty);
+      return empty;
+    }
+  }
+  _writeOrgs(data){
+    // Unique tmp per write so two in-flight writes can't consume each other's
+    // temp file (a shared '.tmp' race yields a mid-write ENOENT + lost data).
+    const tmp = this.orgsFile + '.tmp-' + process.pid + '-' + (this._orgWriteSeq = (this._orgWriteSeq || 0) + 1);
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, this.orgsFile);
   }
 
   async listItems(){ return this._readItems().map(withOutputDefaults); }
@@ -339,6 +456,103 @@ export class FileStore {
     const data = this._readItems();
     if (!data.some(i => i.code === code)) throw httpError(404, 'item not found');
     this._writeItems(data.filter(i => i.code !== code));
+  }
+
+  /* ── admin chain: item org assignment + bounds (platform-set) ── */
+  async setItemOrg(code, orgId){
+    const data = this._readItems();
+    const item = data.find(i => i.code === code);
+    if (!item) throw httpError(404, 'item not found');
+    item.orgId = orgId ?? null;
+    this._writeItems(data);
+    return withOutputDefaults(item);
+  }
+  async setItemBounds(code, bounds){
+    const clean = normalizeBounds(bounds);
+    const data = this._readItems();
+    const item = data.find(i => i.code === code);
+    if (!item) throw httpError(404, 'item not found');
+    item.bounds = clean;
+    this._writeItems(data);
+    return withOutputDefaults(item);
+  }
+  async getItem(code){
+    const item = this._readItems().find(i => i.code === code);
+    return item ? withOutputDefaults(item) : null;
+  }
+
+  /* ── admin chain: orgs / members / audit (mirrors PgStore shapes) ── */
+  async listOrgs(){ return this._readOrgs().orgs.map(o => ({ ...o })); }
+  async getOrg(id){ const o = this._readOrgs().orgs.find(o => o.id === id); return o ? { ...o } : null; }
+  async createOrg({ name, slug }){
+    const clean = String(name || '').trim().slice(0, 80);
+    if (!clean) throw httpError(400, 'org name required');
+    let id = slugify(slug || name); if (!id) throw httpError(400, 'org slug required');
+    const d = this._readOrgs();
+    const base = id;
+    for (let n = 2; d.orgs.some(o => o.id === id); n++) id = base + '-' + n;
+    const org = { id, name: clean, slug: id, status: 'active', createdAt: new Date().toISOString() };
+    d.orgs.push(org); this._writeOrgs(d);
+    return { ...org };
+  }
+  async updateOrg(id, patch){
+    const d = this._readOrgs();
+    const org = d.orgs.find(o => o.id === id);
+    if (!org) throw httpError(404, 'org not found');
+    if (patch.name !== undefined) org.name = String(patch.name).trim().slice(0, 80) || org.name;
+    if (patch.status !== undefined){
+      if (!ORG_STATUSES.includes(patch.status)) throw httpError(400, `status must be ${ORG_STATUSES.join('|')}`);
+      org.status = patch.status;
+    }
+    this._writeOrgs(d);
+    return { ...org };
+  }
+  async listAllMembers(){ return this._readOrgs().members.map(m => ({ ...m })); }
+  async listMembers(orgId){ return this._readOrgs().members.filter(m => m.orgId === orgId).map(m => ({ ...m })); }
+  async addMember({ orgId, email, orgRole, invitedBy }){
+    const mail = String(email || '').trim().toLowerCase();
+    if (!mail || !mail.includes('@')) throw httpError(400, 'a valid email is required');
+    if (!ORG_ROLES.includes(orgRole)) throw httpError(400, `org role must be ${ORG_ROLES.join('|')}`);
+    const d = this._readOrgs();
+    const existing = d.members.find(m => m.orgId === orgId && m.email === mail);
+    if (existing){ existing.orgRole = orgRole; existing.invitedBy = invitedBy ?? null; }
+    else d.members.push({ orgId, email: mail, userId: null, orgRole, invitedBy: invitedBy ?? null, createdAt: new Date().toISOString() });
+    this._writeOrgs(d);
+    return { orgId, email: mail, orgRole, invitedBy: invitedBy ?? null };
+  }
+  async removeMember(orgId, email){
+    const mail = String(email || '').trim().toLowerCase();
+    const d = this._readOrgs();
+    const before = d.members.length;
+    d.members = d.members.filter(m => !(m.orgId === orgId && m.email === mail));
+    if (d.members.length === before) throw httpError(404, 'no such member');
+    this._writeOrgs(d);
+  }
+  // Backfill the auth user id onto an email-keyed membership (invites are
+  // email-only rows; the id lands the first time a verified session touches
+  // the org). Only ever fills a blank — never re-links an existing id.
+  async linkMemberUserId(orgId, email, userId){
+    const mail = String(email || '').trim().toLowerCase();
+    const d = this._readOrgs();
+    const m = d.members.find(m => m.orgId === orgId && m.email === mail);
+    if (!m || m.userId) return;
+    m.userId = String(userId);
+    this._writeOrgs(d);
+  }
+  async appendAudit(row){
+    const d = this._readOrgs();
+    d.auditSeq = (d.auditSeq || 0) + 1;
+    d.audit.push({ id: d.auditSeq, orgId: row.orgId ?? null, actorUserId: row.actorUserId ?? null,
+      itemCode: row.itemCode ?? null, field: String(row.field),
+      old: row.old == null ? null : String(row.old), new: row.new == null ? null : String(row.new),
+      at: new Date().toISOString() });
+    // keep the file bounded (append-only in intent; oldest rows age out of the file)
+    if (d.audit.length > 5000) d.audit = d.audit.slice(-5000);
+    this._writeOrgs(d);
+  }
+  async listAudit({ orgId, limit = 200 }){
+    return this._readOrgs().audit.filter(a => a.orgId === orgId)
+      .sort((a, b) => b.id - a.id).slice(0, Math.min(1000, Math.max(1, limit | 0))).map(a => ({ ...a }));
   }
 
   async list(){ return this._read(); }
@@ -407,6 +621,7 @@ class PgStore {
   constructor(url){
     this.url = url;
     this.pool = null;
+    this.orgsEnabled = true;   // real durable Postgres — the admin chain is live
   }
   async init(){
     const { default: pg } = await import('pg');
@@ -466,6 +681,38 @@ class PgStore {
     await this.pool.query(`ALTER TABLE items ADD COLUMN IF NOT EXISTS surface TEXT NOT NULL DEFAULT 'pad'`);
     await this.pool.query(`ALTER TABLE items ADD COLUMN IF NOT EXISTS controller TEXT NOT NULL DEFAULT 'dpad'`);
     await this.pool.query('ALTER TABLE items ADD COLUMN IF NOT EXISTS jukebox JSONB');
+    // Admin chain (server/orgs.js) — additive; null org_id/bounds = platform-owned legacy item.
+    await this.pool.query('ALTER TABLE items ADD COLUMN IF NOT EXISTS org_id TEXT');
+    await this.pool.query('ALTER TABLE items ADD COLUMN IF NOT EXISTS bounds JSONB');
+    await this.pool.query('ALTER TABLE items ADD COLUMN IF NOT EXISTS hours JSONB');
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS orgs (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        slug       TEXT NOT NULL,
+        status     TEXT NOT NULL DEFAULT 'active',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS org_members (
+        org_id     TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        email      TEXT NOT NULL,
+        user_id    UUID,
+        org_role   TEXT NOT NULL,
+        invited_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (org_id, email)
+      );
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id            BIGSERIAL PRIMARY KEY,
+        org_id        TEXT,
+        actor_user_id TEXT,
+        item_code     TEXT,
+        field         TEXT NOT NULL,
+        old_val       TEXT,
+        new_val       TEXT,
+        at            TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `);
     const { rows } = await this.pool.query('SELECT COUNT(*)::int AS n FROM channels');
     if (rows[0].n === 0) for (const c of SEED){
       await this.pool.query('INSERT INTO channels (id, name, default_scene) VALUES ($1,$2,$3)', [c.id, c.name, c.defaultScene]);
@@ -570,6 +817,7 @@ class PgStore {
       priceCents: r.price_cents, slotSeconds: r.slot_seconds, auctionSeconds: r.auction_seconds,
       minIncrementCents: r.min_increment_cents, status: r.status,
       outputs: r.outputs, limits: r.limits, surface: r.surface, controller: r.controller, jukebox: r.jukebox,
+      orgId: r.org_id ?? null, bounds: r.bounds ?? null, hours: r.hours ?? null,
       createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at });
   }
 
@@ -585,12 +833,13 @@ class PgStore {
       try {
         await this.pool.query(
           `INSERT INTO items (code, name, description, instructions, mode, price_cents, slot_seconds,
-             auction_seconds, min_increment_cents, status, outputs, limits, surface, controller, jukebox, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+             auction_seconds, min_increment_cents, status, outputs, limits, surface, controller, jukebox, hours, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
           [item.code, item.name, item.description, item.instructions, item.mode, item.priceCents,
            item.slotSeconds, item.auctionSeconds, item.minIncrementCents, item.status,
            JSON.stringify(item.outputs), JSON.stringify(item.limits),
-           item.surface, item.controller, item.jukebox ? JSON.stringify(item.jukebox) : null, item.createdAt]);
+           item.surface, item.controller, item.jukebox ? JSON.stringify(item.jukebox) : null,
+           item.hours ? JSON.stringify(item.hours) : null, item.createdAt]);
         return item;
       } catch (e){
         if (e.code !== '23505') throw e;        // anything but a code collision is real
@@ -605,10 +854,11 @@ class PgStore {
     await this.pool.query(
       `UPDATE items SET name=$2, description=$3, instructions=$4, mode=$5, price_cents=$6,
          slot_seconds=$7, auction_seconds=$8, min_increment_cents=$9, status=$10, limits=$11,
-         surface=$12, controller=$13, jukebox=$14 WHERE code=$1`,
+         surface=$12, controller=$13, jukebox=$14, hours=$15 WHERE code=$1`,
       [code, item.name, item.description, item.instructions, item.mode, item.priceCents,
        item.slotSeconds, item.auctionSeconds, item.minIncrementCents, item.status,
-       JSON.stringify(item.limits), item.surface, item.controller, item.jukebox ? JSON.stringify(item.jukebox) : null]);
+       JSON.stringify(item.limits), item.surface, item.controller, item.jukebox ? JSON.stringify(item.jukebox) : null,
+       item.hours ? JSON.stringify(item.hours) : null]);
     return item;
   }
 
@@ -625,7 +875,113 @@ class PgStore {
     const { rowCount } = await this.pool.query('DELETE FROM items WHERE code = $1', [code]);
     if (!rowCount) throw httpError(404, 'item not found');
   }
+
+  /* ── admin chain: item org assignment + bounds (platform-set) ── */
+  async setItemOrg(code, orgId){
+    const { rowCount } = await this.pool.query('UPDATE items SET org_id = $2 WHERE code = $1', [code, orgId ?? null]);
+    if (!rowCount) throw httpError(404, 'item not found');
+    return this.getItem(code);
+  }
+  async setItemBounds(code, bounds){
+    const clean = normalizeBounds(bounds);
+    const { rowCount } = await this.pool.query('UPDATE items SET bounds = $2 WHERE code = $1',
+      [code, clean ? JSON.stringify(clean) : null]);
+    if (!rowCount) throw httpError(404, 'item not found');
+    return this.getItem(code);
+  }
+  async getItem(code){
+    const { rows } = await this.pool.query('SELECT * FROM items WHERE code = $1', [code]);
+    return rows.length ? this._itemRow(rows[0]) : null;
+  }
+
+  /* ── admin chain: orgs / members / audit ── */
+  async listOrgs(){
+    const { rows } = await this.pool.query('SELECT * FROM orgs ORDER BY created_at');
+    return rows.map(orgRow);
+  }
+  async getOrg(id){
+    const { rows } = await this.pool.query('SELECT * FROM orgs WHERE id = $1', [id]);
+    return rows.length ? orgRow(rows[0]) : null;
+  }
+  async createOrg({ name, slug }){
+    const clean = String(name || '').trim().slice(0, 80);
+    if (!clean) throw httpError(400, 'org name required');
+    let id = slugify(slug || name); if (!id) throw httpError(400, 'org slug required');
+    // unique id: append -2, -3… on collision
+    for (let n = 2; ; n++){
+      try {
+        await this.pool.query('INSERT INTO orgs (id, name, slug) VALUES ($1,$2,$3)', [id, clean, id]);
+        return { id, name: clean, slug: id, status: 'active', createdAt: new Date().toISOString() };
+      } catch (e){ if (e.code !== '23505') throw e; id = slugify(slug || name) + '-' + n; }
+    }
+  }
+  async updateOrg(id, patch){
+    const cur = await this.getOrg(id);
+    if (!cur) throw httpError(404, 'org not found');
+    const name = patch.name !== undefined ? String(patch.name).trim().slice(0, 80) || cur.name : cur.name;
+    let status = cur.status;
+    if (patch.status !== undefined){
+      if (!ORG_STATUSES.includes(patch.status)) throw httpError(400, `status must be ${ORG_STATUSES.join('|')}`);
+      status = patch.status;
+    }
+    await this.pool.query('UPDATE orgs SET name = $2, status = $3 WHERE id = $1', [id, name, status]);
+    return { ...cur, name, status };
+  }
+  async listAllMembers(){
+    const { rows } = await this.pool.query('SELECT * FROM org_members');
+    return rows.map(memberRow);
+  }
+  async listMembers(orgId){
+    const { rows } = await this.pool.query('SELECT * FROM org_members WHERE org_id = $1 ORDER BY created_at', [orgId]);
+    return rows.map(memberRow);
+  }
+  async addMember({ orgId, email, orgRole, invitedBy }){
+    const mail = String(email || '').trim().toLowerCase();
+    if (!mail || !mail.includes('@')) throw httpError(400, 'a valid email is required');
+    if (!ORG_ROLES.includes(orgRole)) throw httpError(400, `org role must be ${ORG_ROLES.join('|')}`);
+    await this.pool.query(
+      `INSERT INTO org_members (org_id, email, org_role, invited_by) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (org_id, email) DO UPDATE SET org_role = EXCLUDED.org_role, invited_by = EXCLUDED.invited_by`,
+      [orgId, mail, orgRole, invitedBy ?? null]);
+    return { orgId, email: mail, orgRole, invitedBy: invitedBy ?? null };
+  }
+  async removeMember(orgId, email){
+    const mail = String(email || '').trim().toLowerCase();
+    const { rowCount } = await this.pool.query('DELETE FROM org_members WHERE org_id = $1 AND email = $2', [orgId, mail]);
+    if (!rowCount) throw httpError(404, 'no such member');
+  }
+  // Backfill the auth user id onto an email-keyed membership — WHERE user_id
+  // IS NULL means it only ever fills a blank, never re-links an existing id.
+  async linkMemberUserId(orgId, email, userId){
+    const mail = String(email || '').trim().toLowerCase();
+    await this.pool.query(
+      'UPDATE org_members SET user_id = $3 WHERE org_id = $1 AND email = $2 AND user_id IS NULL',
+      [orgId, mail, userId]);
+  }
+  async appendAudit(row){
+    await this.pool.query(
+      `INSERT INTO audit_log (org_id, actor_user_id, item_code, field, old_val, new_val)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [row.orgId ?? null, row.actorUserId ?? null, row.itemCode ?? null,
+       String(row.field), row.old == null ? null : String(row.old), row.new == null ? null : String(row.new)]);
+  }
+  async listAudit({ orgId, limit = 200 }){
+    const { rows } = await this.pool.query(
+      'SELECT * FROM audit_log WHERE org_id = $1 ORDER BY at DESC, id DESC LIMIT $2',
+      [orgId, Math.min(1000, Math.max(1, limit | 0))]);
+    return rows.map(auditRow);
+  }
 }
+
+// row → client shape mappers for the org tables (shared shapes across backends)
+const orgRow = (r) => ({ id: r.id, name: r.name, slug: r.slug, status: r.status,
+  createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at });
+const memberRow = (r) => ({ orgId: r.org_id, email: r.email, userId: r.user_id ?? null,
+  orgRole: r.org_role, invitedBy: r.invited_by ?? null,
+  createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at });
+const auditRow = (r) => ({ id: Number(r.id), orgId: r.org_id, actorUserId: r.actor_user_id,
+  itemCode: r.item_code, field: r.field, old: r.old_val, new: r.new_val,
+  at: r.at instanceof Date ? r.at.toISOString() : r.at });
 
 export async function createStore(){
   if (process.env.DATABASE_URL){
@@ -644,5 +1000,11 @@ export async function createStore(){
   }
   const file = path.join(path.dirname(fileURLToPath(import.meta.url)), 'channels.json');
   console.log('[store] json file:', file);
-  return new FileStore(file);
+  const fileStore = new FileStore(file);
+  // The admin chain needs durable Postgres in production. When the file store
+  // backs a REAL app process (no DATABASE_URL, or a Postgres fallback), org
+  // state would be non-durable / wrong — so the endpoints fail to 503. Hermetic
+  // tests construct a FileStore directly and keep orgsEnabled true.
+  fileStore.orgsEnabled = false;
+  return fileStore;
 }

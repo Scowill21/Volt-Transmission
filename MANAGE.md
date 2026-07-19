@@ -107,19 +107,67 @@ the old `/control` gear is gone.)
   the music-licensing note** (SETUP.md → "Volt Jukebox") before charging the
   public — Spotify is deliberately not wired in; play your own licensed files.
 
+### The admin chain — onboarding a business (needs a database)
+
+The ops dashboard is single-operator by default (your one admin key). The
+**admin chain** lets a venue run its own room without you — a ladder where
+every rung only reaches DOWN and the server enforces it on every request.
+It needs `DATABASE_URL` (real Postgres); without one the org endpoints 503
+and everything else runs as before.
+
+**Install day (you, with the platform admin key):**
+1. Create the org: `POST /api/admin/orgs {name}`.
+2. Create the venue's items, print their QR posters, tape them up (as today).
+3. Assign each item to the org: `POST /api/admin/orgs/:id/items {code}`.
+4. Set the safety + money **bounds** per item:
+   `PATCH /api/admin/items/:code/bounds {bounds:{priceBandCents:{min,max},
+   slotSecondsMax, cooldownFloorMs, maxPerMinCap, jukebox:{minPlaySecFloor}}}`.
+   Owners can tune ONLY inside this box — price in the band, rest the item
+   MORE never less.
+5. Invite the owner by email: `POST /api/admin/orgs/:id/grants {email,
+   orgRole:'owner'}`. They sign in at `/account.html` with that email and
+   immediately see only their venue.
+6. The owner invites their own bartenders as **staff** (pause/skip/force-skip).
+   You grant **tech** (their AV person — rig keys + output chains) only if
+   earned: `POST /api/admin/orgs/:id/grants {email, orgRole:'tech'}` — an
+   owner can NEVER touch rig keys.
+
+**Offboarding is instant + server-side:** `DELETE /api/admin/orgs/:id/members/
+:email` (or the owner removes their own staff). Their next request 403s — no
+chasing shared passwords. When a tech leaves, also rotate that org's rig keys
+(`POST /api/org/:id/items/:code/rig-key {name}` as the tech, or delete+re-add
+the output as the platform) — the old key dies immediately.
+
+**Suspend a whole venue:** `PATCH /api/admin/orgs/:id {status:'suspended'}`
+freezes its members (you keep full access); `'active'` restores them.
+
+**The receipts:** every config change writes an append-only audit row
+(who / what / old→new). `GET /api/admin/audit?orgId=` (you) or
+`GET /api/org/:id/audit` (the owner). When a venue says "we never changed
+that price," the answer is a row, not an argument.
+
+> The ops **session lens is LIVE**: a signed-in owner/staff/tech taps
+> **"Use my account"** on `/control-ops` and sees their venue with rung-scoped
+> knobs (owner: band-annotated edit forms + crew + change log · staff: pause/
+> skip · tech: chains + rig-key rotation). Your key lens grew the matching
+> **venues panel** (create org, assign items, set bounds, grant rungs,
+> suspend, audit) right on the same page. The server
+> already enforces every rung, so the UI is presentation only.
+
 ### Testing — run before every push
 ```bash
 node .smoke-test.cjs        # client: every console path (jsdom)
 node .smoke-server.cjs      # server: the paid permission gate
-node .smoke-failclosed.cjs  # server: fail-closed on a DB outage
+node .smoke-failclosed.cjs  # server: fail-closed on a DB outage (paid + jukebox + org)
 node .smoke-items.cjs       # server: Volt Control items product
 node .smoke-jukebox.cjs     # server: the jukebox rules engine
 node .smoke-control.cjs     # client: the /control USER page (jsdom)
 node .smoke-ops.cjs         # client: the /control-ops admin page (jsdom)
 node .smoke-stage.cjs       # client: the /stage output plane (jsdom)
 node .smoke-security.cjs    # server: the take-control hardening
+node .smoke-orgs.cjs        # server: the admin chain (orgs / roles / bounds / audit)
 ```
-All nine must print `ALL CLEAR`. Extend them when you add features (it's a rule
+All TEN must print `ALL CLEAR`. Extend them when you add features (it's a rule
 in `CLAUDE.md`).
 
 ### 🔒 Security must-dos (so people can't hack it to take control)
