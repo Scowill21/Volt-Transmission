@@ -141,6 +141,27 @@ export async function userFromRequest(req){
   return null;
 }
 
+/* The acting identity for the paid tiers + the admin chain: the VERIFIED
+   session, or the documented dev escape hatch when auth is unconfigured (local
+   JSON-store dev), mirroring the console's IDENTITY layers. Dev identity rides
+   the body ({user:{id,name,email?}}) on POSTs, or ?uid=&name=&email= query
+   params on GETs. Lives here (not in a product module) because it is pure
+   identity — items.js / jukebox.js / orgs.js / paid.js / shop.js all consume
+   it, and it must not tie any of them to another product. `email` rides along
+   for the admin chain (org membership matches on it). */
+export async function requester(req){
+  const u = await userFromRequest(req);
+  if (u) return { id: u.id, name: u.name || u.email, role: u.role, verified: true, email: u.email || null };
+  if (devIdentityAllowed()){
+    const b = (req.body && req.body.user)
+      || (req.query && req.query.uid && { id: req.query.uid, name: req.query.name || req.query.uid, email: req.query.email });
+    if (b && b.id && b.name)
+      return { id: String(b.id).slice(0, 64), name: String(b.name).slice(0, 40), role: 'listener', verified: false,
+        email: b.email ? String(b.email).slice(0, 120).toLowerCase() : null };
+  }
+  return null;
+}
+
 /* ── express wiring ──────────────────────────────────────────────── */
 export function mountAuth(app, requireAdmin){
   const guard = (handler) => async (req, res, next) => {

@@ -33,8 +33,8 @@ services:
         sync: false
       - key: ADMIN_KEY
         generateValue: true
-      # Private operator vault (control-ops 🔑). Set your own passcode in the
-      # dashboard; leave unset and the vault stays OFF (fails closed). Use a long
-      # random value if the reference is sensitive.
-      - key: VAULT_CODE
+      # Volt Control moved to its own service (volt-control.onrender.com). The
+      # old /control, /control-ops, /stage URLs redirect there. Override the
+      # target here only if that service lives at a different URL.
+      - key: VOLT_CONTROL_URL
         sync: false

@@ -39,32 +39,24 @@
      GET    /api/shop/library                     your purchases
      POST   /api/shop/buy                         { itemId }
      GET    /api/shop/records/:albumId/:n         stream a purchased track
-   Volt Control — pay-to-control items (server/items.js, /control page):
-     GET    /api/items/:code                      public — item meta + live state
-     POST   /api/items/:code/buy                  buy-now: take/queue a control slot
-     POST   /api/items/:code/bid                  { cents } soft-close auction bid
-     POST   /api/items/:code/cancel               leave the line / surrender the slot
-     GET    /api/items                            all items + live state       (admin)
-     POST   /api/items                            create (server makes the code) (admin)
-     PATCH  /api/items/:code                      edit price/slot/mode/…        (admin)
-     DELETE /api/items/:code                                                    (admin)
-     POST   /api/items/:code/skip                 end the current slot          (admin)
-     POST   /api/items/:code/state                { action: pause|resume|on|off } (admin)
+
+   Volt Control (pay-to-control items + the admin chain + the operator vault)
+   is now its OWN service — https://volt-control.onrender.com, repo
+   Scowill21/volt-control. The old /control, /control-ops, /stage URLs
+   302-redirect there (below) so printed QR posters keep working.
 */
 import express from 'express';
 import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createStore, httpError } from './store.js';
 import { initAuth, mountAuth, authConfigured } from './auth.js';
 import { attachBus } from './bus.js';
 import { attachPaid } from './paid.js';
 import { attachShop } from './shop.js';
-import { attachItems } from './items.js';
-import { attachOrgs } from './orgs.js';
-import { securityHeaders, makeRequireAdmin, makeRateLimiter, adminDisabledInProd, assertPublicUrl, safeEqual } from './security.js';
+import { securityHeaders, makeRequireAdmin, makeRateLimiter, adminDisabledInProd, assertPublicUrl } from './security.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.PORT || 8787;
@@ -73,16 +65,11 @@ const ADMIN_KEY = process.env.ADMIN_KEY || 'dev';
 if (!process.env.ADMIN_KEY) console.warn('[admin] ADMIN_KEY not set — using the dev default ("dev"). Set it in production.');
 if (adminDisabledInProd()) console.error('[admin] ⛔ ADMIN_KEY is unset/"dev" on a Supabase-configured deploy — admin endpoints are DISABLED (fail-closed) until you set a real ADMIN_KEY.');
 
-// Private vault: operator-only reference (the recipe book), served ONLY when the
-// VAULT_CODE matches. The passcode lives in the env (never in the committed
-// source); the content file sits under a dot-dir (dotfiles:'ignore' keeps static
-// from serving it). Unset code OR missing file → the vault is simply off.
-const VAULT_CODE = process.env.VAULT_CODE || '';
-const VAULT_HTML = (() => {
-  try { return readFileSync(path.join(ROOT, '.vault', 'recipe-book.html'), 'utf8'); }
-  catch { return ''; }
-})();
-if (!VAULT_CODE) console.warn('[vault] VAULT_CODE not set — the operator vault (🔑) is OFF. Set VAULT_CODE to enable it.');
+// Volt Control (pay-to-control items + the admin chain + its operator vault) is
+// now its OWN service — https://volt-control.onrender.com (repo Scowill21/
+// volt-control). The three old control URLs redirect there below so printed QR
+// posters keep working. If that service lives at a different URL, change this.
+const VOLT_CONTROL_URL = process.env.VOLT_CONTROL_URL || 'https://volt-control.onrender.com';
 
 const store = await createStore();
 await initAuth();
@@ -100,25 +87,20 @@ app.use(['/api/auth/login', '/api/auth/signup'], makeRateLimiter({ windowMs: 5 *
 // Generous: a whole VENUE shares one WiFi egress IP, so this is a flood backstop
 // (per-user abuse is already bounded by the bid cooldown, queue caps, skip latch),
 // NOT a per-person cap — keep it high enough for a busy bar.
-app.use(['/api/items', '/api/channels'], makeRateLimiter({ windowMs: 60 * 1000, max: 300 }));
-// Org config mutations (owner PATCHes, invites, grants) — a modest budget; org
-// members are few and edits are occasional, but this backstops a runaway UI.
-app.use(['/api/org', '/api/admin/orgs'], makeRateLimiter({ windowMs: 60 * 1000, max: 120 }));
+app.use(['/api/channels'], makeRateLimiter({ windowMs: 60 * 1000, max: 300 }));
 
 /* ── public ── */
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 
-// Private operator vault (🔑 on the Control admin). Brute-force throttled
-// (counts GETs), constant-time code compare, and FAIL-CLOSED: no VAULT_CODE set
-// → 503, wrong code → 401, right code → the reference HTML. The content never
-// ships in any page source; it exists only behind this check.
-app.use('/api/vault', makeRateLimiter({ windowMs: 5 * 60 * 1000, max: 20, skipSafe: false }));
-app.get('/api/vault', (req, res) => {
-  if (!VAULT_CODE || !VAULT_HTML) return res.status(503).json({ error: 'vault not set up — set VAULT_CODE and add .vault/recipe-book.html' });
-  if (!safeEqual(req.get('x-vault-code') || '', VAULT_CODE)) return res.status(401).json({ error: 'wrong code' });
-  res.setHeader('Cache-Control', 'no-store');
-  res.type('html').send(VAULT_HTML);
+// Volt Control moved to its own service. Redirect the old control URLs there,
+// preserving the query string so printed QR posters (…/control?item=CODE) and
+// stage links (…/stage?item=CODE&rig=…) keep working. 302 (temporary) so the
+// mapping can change without cached permanent redirects getting in the way.
+app.get(['/control', '/control-ops', '/stage'], (req, res) => {
+  const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
+  res.redirect(302, VOLT_CONTROL_URL + req.path + qs);
 });
+
 app.get('/api/channels', async (req, res, next) => {
   try { res.json(await store.list()); } catch (e) { next(e); }
 });
@@ -237,15 +219,6 @@ attachPaid(app, requireAdmin);
 
 /* ── shop + cabinet: records + art packs (server/shop.js) ── */
 attachShop(app);
-
-/* ── Volt Control: pay-to-control items + the admin chain (server/orgs.js) ──
-   Three-step wiring breaks the mutual dependency: orgs.js supplies the bus
-   gate its sync org-role resolver; items.js supplies orgs.js the item API it
-   calls after authz. The org routes close over a ref filled in step 3, well
-   before any request arrives. */
-const orgs = await attachOrgs(app, requireAdmin, store);
-const itemsApi = await attachItems(app, requireAdmin, store, { orgs });
-orgs.wireItems(itemsApi);
 
 /* ── the site itself (console + admin + audio/) ── */
 // albums/ holds PURCHASE-GATED records — never serve it statically; tracks

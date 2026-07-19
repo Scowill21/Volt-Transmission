@@ -25,8 +25,12 @@
    { user: { id, name } } — that path switches off automatically the
    moment auth is configured, so production always requires real sessions. */
 import { publish, registerKeyGate, OUTPUT_CTL } from './bus.js';
-import { userFromRequest, devIdentityAllowed } from './auth.js';
+import { devIdentityAllowed, requester } from './auth.js';
 import { httpError } from './store.js';
+
+// requester() moved to auth.js (pure identity, shared by every paid/control
+// module); re-export so any code still importing it from './paid.js' works.
+export { requester };
 
 // Stub price list — display-only until Stripe lands (STRIPE: real prices).
 export const PAID = {
@@ -98,26 +102,6 @@ setInterval(() => {
    a Checkout session and the enqueue happens in the webhook on `paid`. */
 function stubPay(kind, cents, user){
   return { ok: true, kind, cents, payer: user.id };
-}
-
-/* Who is asking? Verified session first; the escape hatch only exists while
-   auth is unconfigured (local dev), mirroring IDENTITY layers. Dev identity
-   rides the body ({user:{id,name}}) on POSTs, or ?uid=&name= query params on
-   GETs (server/shop.js library/streaming). Shared with the shop. */
-export async function requester(req){
-  const u = await userFromRequest(req);
-  // email rides along for the admin chain (org membership matches on it); it is
-  // the verified session's real email in prod, or a dev-hatch-declared one only
-  // where auth is unconfigured (same trust envelope as the id/name below).
-  if (u) return { id: u.id, name: u.name || u.email, role: u.role, verified: true, email: u.email || null };
-  if (devIdentityAllowed()){
-    const b = (req.body && req.body.user)
-      || (req.query && req.query.uid && { id: req.query.uid, name: req.query.name || req.query.uid, email: req.query.email });
-    if (b && b.id && b.name)
-      return { id: String(b.id).slice(0, 64), name: String(b.name).slice(0, 40), role: 'listener', verified: false,
-        email: b.email ? String(b.email).slice(0, 120).toLowerCase() : null };
-  }
-  return null;
 }
 
 /* Cross-product territory guard: item:-prefixed bus rooms belong to the item

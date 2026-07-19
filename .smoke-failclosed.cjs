@@ -1,6 +1,6 @@
 /* Fail-closed regression test — guards THE headline security fix.
 
-   The dev "declare your own identity" escape hatch (paid.js requester() +
+   The dev "declare your own identity" escape hatch (auth.js requester() +
    keyGate) must key on DEPLOY INTENT (Supabase env vars present), NOT on live
    DB reachability. So on a real deploy whose Postgres is down, payload identity
    must be REJECTED — never silently trusted.
@@ -84,45 +84,9 @@ async function waitForBoot(tries){
     if (r.status !== 401) fail(`minutes-knob bid should 401 during outage, got ${r.status}`);
     ok('minutes-knob bid → 401 (knob unreachable in production intent)');
 
-    // Volt Control items (server/items.js) share the same posture: with
-    // Supabase env set, payload identity on /buy and /bid must be rejected
-    // even while the DB is down — never trusted. (Identity is checked before
-    // the item lookup, so any well-formed code proves it.)
-    r = await req('POST', '/api/items/ZZZZZZ/buy', { user: { id: 'attacker', name: 'Mallory' } });
-    if (r.status !== 401) fail(`item buy should 401 during outage, got ${r.status}: ${r.body}`);
-    ok('payload-identity item buy → 401 (fail-closed)');
-
-    r = await req('POST', '/api/items/ZZZZZZ/bid', { cents: 500, user: { id: 'attacker', name: 'Mallory' } });
-    if (r.status !== 401) fail(`item bid should 401 during outage, got ${r.status}: ${r.body}`);
-    ok('payload-identity item bid → 401 (fail-closed)');
-
-    // Jukebox actions (queue/skip/bid) resolve identity BEFORE the item lookup,
-    // so the same escape-hatch closure applies — a spoofed payload identity must
-    // 401 during the outage, never fall through to 404/409 or be trusted.
-    r = await req('POST', '/api/items/ZZZZZZ/jukebox/queue', { songId: 'x', user: { id: 'attacker', name: 'Mallory' } });
-    if (r.status !== 401) fail(`jukebox queue should 401 during outage, got ${r.status}: ${r.body}`);
-    ok('payload-identity jukebox queue → 401 (fail-closed)');
-
-    r = await req('POST', '/api/items/ZZZZZZ/jukebox/skip', { user: { id: 'attacker', name: 'Mallory' } });
-    if (r.status !== 401) fail(`jukebox skip should 401 during outage, got ${r.status}: ${r.body}`);
-    ok('payload-identity jukebox skip → 401 (fail-closed)');
-
-    r = await req('POST', '/api/items/ZZZZZZ/jukebox/bid', { songId: 'x', cents: 500, user: { id: 'attacker', name: 'Mallory' } });
-    if (r.status !== 401) fail(`jukebox bid should 401 during outage, got ${r.status}: ${r.body}`);
-    ok('payload-identity jukebox bid → 401 (fail-closed)');
-
-    // The admin chain (server/orgs.js) inherits the same fail-closed posture:
-    // with Supabase env set but Postgres unreachable, createStore falls back to
-    // the JSON store with orgsEnabled=false, so every org endpoint refuses
-    // (503) — never a write, and payload identity is never trusted. A member
-    // write and a read both fail; the item stays untouched.
-    r = await req('PATCH', '/api/org/any-org/items/ZZZZZZ', { user: { id: 'attacker', name: 'Mallory', email: 'a@b.com' }, priceCents: 400 });
-    if (r.status !== 503 && r.status !== 401) fail(`org PATCH should fail closed (503/401) during outage, got ${r.status}: ${r.body}`);
-    ok('org owner PATCH → fail-closed (no write) during outage');
-
-    r = await req('GET', '/api/org/mine');
-    if (r.status !== 503 && r.status !== 401) fail(`org read should fail closed (503/401), got ${r.status}: ${r.body}`);
-    ok('org read → fail-closed during outage');
+    // (Volt Control items / jukebox / the admin chain share this exact
+    // fail-closed posture — those checks live in the volt-control repo now that
+    // the product moved to its own service.)
 
     // Sanity: the public read still works and creates no state.
     r = await req('GET', '/api/channels/volt-fm/queues');

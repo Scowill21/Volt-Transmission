@@ -42,9 +42,30 @@ paid features (test tier), and a shop — served by a small Express API
 
 ---
 
-## 2. Current state (verified live, 2026-07-16)
+## 2. Current state
 
-Everything below is **deployed and working in production** unless marked.
+> **⚡ VOLT CONTROL SPLIT OUT (2026-07-19).** Pay-to-control items, the jukebox
+> surface, output chains, the admin chain (orgs/owner/staff/tech), and the
+> operator vault are now their OWN service + repo — **`~/volt-control`**
+> (GitHub `Scowill21/volt-control`, `https://volt-control.onrender.com`,
+> PRIVATE repo). They share this project's Supabase, so nothing migrated. This
+> repo is now the audio-reactive **console** only (index.html + admin.html +
+> channels + paid takeover + shop + drive mode). The old `/control`,
+> `/control-ops`, `/stage` URLs **302-redirect** to the new service (query
+> preserved → printed QR posters keep working; `VOLT_CONTROL_URL` env overrides
+> the target). Removed here: `control*.html`, `stage.html`,
+> `server/{items,jukebox,orgs}.js`, `tools/bus-to-{pi}.mjs` +
+> `tools/volt-jukebox.mjs`, `HARDWARE.md`, `.vault/` + `/api/vault`, and the six
+> VC smoke suites. Shared change kept: **`requester()` moved to `auth.js`** (was
+> paid.js). Suites here are now FOUR (test/server/failclosed/security). For
+> anything Volt Control, read `~/volt-control/HANDOFF.md`.
+>
+> **William TO-DO on Render:** create the `volt-control` web service from the new
+> repo — `~/volt-control/SETUP-RENDER.md` has the exact steps (share the same
+> Supabase env). Until it exists, the redirects point at a URL that 404s.
+
+Everything below is **deployed and working in production** unless marked. The
+Volt Control bullets are historical (that product now lives in its own repo).
 
 - **Tier 1a+1b** — CH/VJ dropdowns ← `GET /api/channels` (static-seed
   fallback); admin.html creates channels/VJs behind `X-Admin-Key`.
@@ -357,20 +378,14 @@ Everything below is **deployed and working in production** unless marked.
 
 ## 3. Tests — run ALL before every push (green = shippable)
 
+FOUR suites now (the six Volt Control suites moved to `~/volt-control`):
+
 ```bash
 node .smoke-test.cjs        # client: whole console in jsdom (~20 steps)
 node .smoke-server.cjs      # server: paid gate + shop gates (15 checks, hermetic)
-node .smoke-failclosed.cjs  # boots real server w/ Supabase env set + DB down → 401s (incl. item buy/bid)
-node .smoke-items.cjs       # server: Volt Control items + OUTPUT LAYER (42 checks, hermetic)
-node .smoke-jukebox.cjs     # server: JUKEBOX rules engine — skip windows/queue/bid/reports (20, hermetic)
-node .smoke-control.cjs     # client: control.html USER page in jsdom (30 checks — incl. jukebox surface)
-node .smoke-ops.cjs         # client: control-ops.html admin dashboard (26 checks — incl. venues panel + session lens)
-node .smoke-stage.cjs       # client: stage.html browser output plane (10 checks — incl. marquee)
-node .smoke-security.cjs    # security hardening: report-forgery, output-gate, SSRF, admin lockout, WS origin, headers, forged-org-claim (18)
-node .smoke-orgs.cjs        # THE ADMIN CHAIN: orgs/roles/bounds/audit + cross-org isolation + the item-gate extension (21)
+node .smoke-failclosed.cjs  # boots real server w/ Supabase env set + DB down → paid bids 401 (5 checks)
+node .smoke-security.cjs    # security hardening: output-gate, SSRF, admin lockout, WS origin, headers (12 checks)
 ```
-(`.smoke-failclosed.cjs` — 12 checks — now also proves jukebox AND org writes
-fail closed during a DB outage.)
 
 Extend them with every feature (CLAUDE.md rule). They are the ONLY gate —
 there is no CI.

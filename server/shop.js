@@ -26,7 +26,7 @@
 import { createReadStream, readdirSync, readFileSync, writeFileSync, renameSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { requester } from './paid.js';
+import { requester } from './auth.js';
 import { httpError } from './store.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

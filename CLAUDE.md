@@ -29,76 +29,25 @@ footer Shop/Cabinet modals play records through the analyser chain. **Drive Mode
 that kills the canvas scenes (battery) and shows only station/track + big
 play/pause + volume; detection is `isPhone()` (matchMedia coarse+hover:none
 + ≤500px short side, `?drive=1|0` override), it never mutates mode/plane/
-audio and restores on exit. **VOLT CONTROL** (`control.html` + `server/items.js`,
-same stub-pay tier): pay-to-control physical items driven by TD — each item
-has a 6-char code + QR to `/control?item=<CODE>`; buy-now queue or soft-close
-auction wins a timed slot; the holder gets a touch controller — one of FOUR
-layouts per the item's **`controller`** field (`dpad` default / `joystick` /
-`faders` / `grid`) — whose presses ride the action bus (room `item:<CODE>`,
-gated `key` actions `pad_up/down/left/right·xy`, `btn_[abc]`, `fader`,
-`cell_0..15` — `PAD_BTN_RE` in items.js; continuous `pad_xy`/`fader` skip the
-duty cooldown but the holder gate + bus rate still bind) with server-side gate
-enforcement (bus.js gate REGISTRY — paid.js gates scene_1..4 + station/channel/
-mode/transport in radio rooms, items.js owns `item:` rooms; `item`/`item_queues`
-are RESERVED); item defs persist via store.js (items table / `server/items.json`),
-runtime queues reset on deploy like paid.js. Admin = **`control-ops.html`**
-(`/control-ops`, its own standalone product page — the audio-reactive console's
-admin is separately `admin.html`; the two no longer cross-link): per-item
-controller picker, a Connect panel (OSC addresses + copy commands) and a live
-OSC monitor. `tools/bus-to-osc.mjs` forwards joystick/fader values as OSC floats
-(`/volt/xy`, `/volt/fader/<i>`). QR encoder is embedded + decoder-verified. `src/` +
-`react-app.html` is an archived React variant — reference only, don't extend it.
-**VOLT JUKEBOX** (`server/jukebox.js`, same tier): an item's `surface` is `'pad'`
-(default, the d-pad above) or `'jukebox'` — audio as a control surface. A jukebox
-room lets paid patrons queue from an admin catalog, skip (bounded by admin
-sliding-window rules), or bid for the next play; the SERVER owns the queue/rules/
-what-plays-next and a Pi rig (`tools/volt-jukebox.mjs`, MPD or `log` backend) is
-a dumb player driven by `{type:'jukebox', action}` bus commands (RESERVED) that
-reports truth back via `track_started`/`track_ended`/`position` (bus RIG_REPORT
-set — server-CONSUMED, never broadcast, rig/admin only). Two postures
-(`jukebox.monetization`): `controller_slot` (reuses the buy-now/auction slot;
-holder drives free but windows still bind) · `per_action` (each action priced).
-Spotify is DEFERRED — the server is backend-blind (see `PROMPT-JUKEBOX.md` §8).
-Surface flip is guarded (no stranded slot/queue); jukebox config lives in
-`item.jukebox`, runtime (nowPlaying/queue/skips/bidRound) is in-memory in
-`jukebox.js`'s `rt` map, resets on deploy.
-**THE ADMIN CHAIN** (`server/orgs.js`, needs DATABASE_URL): a delegation
-ladder over the Tier-2a accounts — platform (X-Admin-Key) › org **owner** ›
-**staff** › **tech**, a NEW axis orthogonal to platform roles (listener/vj/
-radio/admin). Items gain a nullable `orgId` (null = platform-owned legacy,
-unchanged) + platform-set `bounds` (price band / slot-max / cooldown-floor /
-maxPerMin-cap / jukebox minPlaySec-floor) + owner-editable `hours`. Owners
-edit a WHITELIST of fields **within bounds — REJECT not clamp** (out-of-band →
-400, nothing written); tighten-only (rest MORE, never less); jukebox config
-PATCH DEEP-MERGES (the store replaces, so orgs.js merges). Owners may flip
-their own monetization/mode (idle-guarded). **staff** = actions only (pause/
-skip/force-skip); **tech** = rig keys / output chains (a DISTINCT capability
-the owner can NEVER touch — `requireOrg('tech',{exact}))`; only the platform
-grants tech/owner. Every org write appends one **append-only audit** row
-(no delete/update path). Identity = the verified session matched to membership
-by **email** (roleOf, a sync in-memory mirror updated on every write so
-offboarding bites on the next request — no session cache); a role/orgRole
-claimed in a payload is ignored. The bus item-room gate passes org members
-≥staff of THE ITEM'S org (starts from `item.orgId`, never the user's org list
-→ cross-org privilege impossible). **No new bus types, no wire-schema change.**
-Fail-closed: no DATABASE_URL → org endpoints 503 (`store.orgsEnabled`); DB down
-on a configured deploy → never a write. `attachItems` returns an `itemsApi`
-seam orgs.js calls (index.js wires orgs → items{orgs} → wireItems). Ops UI is
-`control-ops.html` — BOTH LENSES SHIPPED: the key lens grew a **venues panel**
-(create org · assign items by code · per-item bounds editor · grant/remove
-rungs · suspend · audit viewer), and the **session lens** signs an org member
-in via their account cookie ("Use my account" on the gate; `/api/org/mine` →
-scoped dashboard). Owner sees band-annotated edit forms (the band is RENDERED,
-never hidden — reject messages name it), crew roster (`GET /api/org/:id/members`,
-owner-only) + staff invites + the change log; staff sees actions only; tech
-sees chain cards + per-rig key ROTATION (`↻`, new key shown once). Zero admin
-secrets ship on the session path (no key prompt, no key-carrying fetch — smoke-
-asserted). Items expose a runtime **`plays`** counter (slots started + rig-
-reported jukebox tracks; resets on deploy) on `orgView` AND the key-gated
-`GET /api/items` (which now also carries `orgId/bounds/hours/limits` for the
-panel). Suspension freezes members on the bus gate too (`roleOf` → null), and
-`org_members.userId` backfills on a verified member's first org request
-(`store.linkMemberUserId`, fills a blank once, never re-links).
+audio and restores on exit.
+`src/` + `react-app.html` is an archived React variant — reference only.
+
+**VOLT CONTROL MOVED OUT (2026-07-19).** Pay-to-control items, the jukebox
+surface, output chains, and the whole admin chain (orgs/owner/staff/tech) are
+now their OWN service + repo — **`~/volt-control`** (GitHub
+`Scowill21/volt-control`, `https://volt-control.onrender.com`). They shared this
+project's Supabase, so nothing migrated. Removed from THIS repo: `control.html`,
+`control-ops.html`, `stage.html`, `server/items.js`, `server/jukebox.js`,
+`server/orgs.js`, `tools/bus-to-pi.mjs`, `tools/volt-jukebox.mjs`, `HARDWARE.md`,
+the operator vault (🔑 + `.vault/` + `/api/vault`), and the six VC smoke suites.
+The old `/control`, `/control-ops`, `/stage` URLs **302-redirect** to the new
+service (query preserved, so printed QR posters keep working) — see
+`server/index.js` (`VOLT_CONTROL_URL`, default `volt-control.onrender.com`).
+The ONE shared change kept here: **`requester()` now lives in `auth.js`** (was
+`paid.js` — pure identity; `paid.js` re-exports it for back-compat). `tools/
+bus-to-osc.mjs` stays (radio VJs use it; volt-control has its own copy for
+joystick/fader OSC). This repo is now the audio-reactive **console** only
+(index.html + admin.html + channels + paid takeover + shop + drive mode).
 
 ## Golden rules
 
@@ -128,66 +77,34 @@ panel). Suspension freezes members on the bus gate too (`roleOf` → null), and
 
 ## Test (run after every change)
 
+The Volt Control suites (items/jukebox/control/ops/stage/orgs) moved to the
+`~/volt-control` repo with the product. This repo's four:
+
 ```bash
 npm i jsdom              # once
 node .smoke-test.cjs     # client: headless run of every console path (jsdom)
-node .smoke-server.cjs   # server: the paid control gate (in-process, auth-unconfigured)
+node .smoke-server.cjs   # server: the paid control gate + shop gates (in-process, auth-unconfigured)
 node .smoke-failclosed.cjs  # server: fail-closed on DB outage (boots a child w/ Supabase env set + DB down)
-node .smoke-items.cjs    # server: Volt Control items + output layer (queue, auction, gate, election, failover)
-node .smoke-jukebox.cjs  # server: JUKEBOX rules engine (skip windows, queue caps, bid rounds, rig reports, forgery)
-node .smoke-control.cjs  # client: control.html USER page (entry, item, controller, throttle, redundancy UI, jukebox surface)
-node .smoke-ops.cjs      # client: control-ops.html admin dashboard (gate, create/edit/actions, chain, QR, jukebox editor)
-node .smoke-stage.cjs    # client: stage.html browser output plane (scenes, election, attract, jukebox marquee)
-node .smoke-security.cjs # server: take-control hardening (report-forgery, output-gate, SSRF, admin lockout, WS origin, headers)
-node .smoke-orgs.cjs     # server: THE ADMIN CHAIN (orgs/rungs/bounds/audit, cross-org isolation, suspension, offboarding)
+node .smoke-security.cjs # server: take-control hardening (output-gate, SSRF, admin lockout, WS origin, headers)
 ```
 
 `.smoke-test.cjs` evals the whole page script (also catches syntax errors) and
 exercises scenes, uploads, transport, modes, action-key FX, message stamping,
 the paid-takeover client mirror, and Drive Mode. `.smoke-server.cjs` proves the
 server-side permission gate (non-holder denied, holder passes, admin bypass,
-forged-type rejected, no create-on-read). `.smoke-failclosed.cjs` guards the
-headline security invariant: with Supabase env set but Postgres down, the
-payload-identity escape hatch stays CLOSED (bids AND item buys/bids 401).
-`.smoke-items.cjs` covers the items product end to end (create → buy/queue →
-expiry/skip/pause/off → auction arm/soft-close/win → gate verdicts → the
-paid-vs-items territory split) PLUS the output layer (chain CRUD, rig auth,
-election, failover grace, preemption, output-gap clock pause, the admin×output
-pause matrix, duty limits, forged-type drops). `.smoke-control.cjs` drives
-control.html — now the USER page only (code entry, both item modes, slot-grant
-→ controller, the ≤8 Hz throttle, the output-offline banner / spectator strip),
-plus a hard assertion that NO admin code/key/QR-encoder ships to visitors.
-`.smoke-ops.cjs` drives the split-out admin dashboard control-ops.html (key
-gate, create + QR poster, skip/pause/off, edit PATCH, the chain manager, the
-edit-open refresh guard). `.smoke-stage.cjs` drives stage.html (scenes render +
-react, output election self-mute, attract mode, resync staleness guard, the
-jukebox `?view=marquee` now-playing board). `.smoke-security.cjs` locks in the
-take-control hardening (`server/security.js`): a non-rig socket can't forge
-jukebox reports (only `ws._rig` is trusted), the output-routing types
-`station/channel/mode/transport` are gated operator-or-holder like scene_1..4,
-the audio relay is SSRF-guarded, the admin key is constant-time + brute-force-
-locked + FAIL-CLOSED on a misconfigured prod, WS upgrades reject cross-origin,
-and every response ships anti-clickjacking/nosniff headers. **Security rule:**
-driving the console's live output (scene/station/channel/mode/transport) now
-requires a signed-in vj/radio/admin session or a held control slot — keep it
-that way; never re-open a control-plane type to anonymous senders.
-`.smoke-jukebox.cjs` is the JUKEBOX
-rules engine's hermetic matrix — pad↔jukebox back-compat, catalog-only queueing,
-idle-start, queue caps + no-repeat, play-next fairness, the full skip decision
-(minPlaySec floor · onlyBeforeSec window · per-user + global sliding-window caps
-that slide not reset), allowMidSong, stale-songId skips (no window decrement),
-rig `track_started`/`ended`/`position` reports, forged-wire rejection, bid-round
-close, controller_slot vs per_action, and admin force-skip/clear/remove. Keep all
-TEN green and extend them when adding features. `.smoke-orgs.cjs` (21) is the
-admin chain's hermetic matrix (fake express + real handlers + FileStore):
-legacy null-org back-compat, bounds reject (incl. reject-not-clamp beyond the
-store's intrinsic ranges), the invite-over-higher-rung guard, enum-coercion
-rejection, staff/tech/owner rung splits, cross-org isolation at HTTP AND bus
-layers, offboard-immediate, suspension freezing the bus gate, roster +
-userId-linkage, audit append-only, no-DB 503. `.smoke-ops.cjs` (27) drives the
-venues panel and the session lens (own-org-only rendering, band on the owner
-form, staff/tech scoping, owner-Save-is-a-diff, blank-price-omitted, the
-key-stays-visible-on-rotate panel, and the zero-admin-key invariant).
+forged-type rejected, no create-on-read) plus the shop gates. `.smoke-failclosed.cjs`
+guards the headline security invariant: with Supabase env set but Postgres down,
+the payload-identity escape hatch stays CLOSED (paid bids 401). `.smoke-security.cjs`
+locks in the take-control hardening (`server/security.js`): the output-routing
+types `station/channel/mode/transport` are gated operator-or-holder like
+scene_1..4, the audio relay is SSRF-guarded, the admin key is constant-time +
+brute-force-locked + FAIL-CLOSED on a misconfigured prod, WS upgrades reject
+cross-origin, and every response ships anti-clickjacking/nosniff headers. Keep
+all FOUR green. **Security rule:** driving the console's live output
+(scene/station/channel/mode/transport) requires a signed-in vj/radio/admin
+session or a held control slot — never re-open a control-plane type to anonymous
+senders. (The item/jukebox/org report-forgery + gate checks moved to the
+volt-control repo with the product.)
 
 ## Deploy
 

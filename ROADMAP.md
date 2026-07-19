@@ -182,6 +182,12 @@ not the music) and `per_action`. Rides the whole output-layer chain (election,
 failover, resync). **Spotify is deferred by design** — the server is
 backend-blind, but streaming-service terms + performance-rights reality keep the
 pilot on rights-clean local files (`PROMPT-JUKEBOX.md` §8 / `SETUP.md`).
+> **Volt Control (items + jukebox + output chains + the admin chain below)
+> SPLIT OUT into its own repo + Render service on 2026-07-19 —
+> `Scowill21/volt-control` / `volt-control.onrender.com`. It shares this Supabase
+> project. This tier plan's Volt Control entries are historical here; the
+> product's roadmap now lives with it.**
+
 **Sixth slice shipped — THE ADMIN CHAIN, orgs / delegated roles (server core,
 needs a database):** `server/orgs.js` turns the single-operator ops side into a
 delegation ladder — platform › org **owner** › **staff** › **tech**, a new axis

@@ -103,11 +103,12 @@ const ok = (m) => { console.log('OK  ', passed + 1, m); passed++; };
   process.env.ADMIN_KEY = 'dev';
   delete process.env.SUPABASE_URL; delete process.env.SUPABASE_PUBLISHABLE_KEY;
 
-  /* ══ Part B — live server: the confirmed take-control holes are closed ══ */
+  /* ══ Part B — live server: the console take-control holes are closed ══
+     (The item/jukebox/admin-chain forgery checks moved to the volt-control repo
+     with the product; what remains here is the RADIO console's output gate,
+     WS-origin, headers, and the bus-inject fail-closed guard.) */
   const express = (await import('express')).default;
   const { WebSocket } = await import('ws');
-  const { createStore } = await import('./server/store.js');
-  const itemsMod = await import('./server/items.js');
   const { attachBus } = await import('./server/bus.js');
   const { attachPaid } = await import('./server/paid.js');
   const { securityHeaders, makeRequireAdmin } = await import('./server/security.js');
@@ -120,18 +121,11 @@ const ok = (m) => { console.log('OK  ', passed + 1, m); passed++; };
   app.use(express.json({ limit: '32kb' }));
   const requireAdmin = makeRequireAdmin('dev');
   attachPaid(app, requireAdmin);
-  // Wire the admin chain too (directly-constructed FileStore has orgsEnabled
-  // true) so the item-room gate's org branch is live for the forgery check.
-  const { attachOrgs } = await import('./server/orgs.js');
-  const orgs = await attachOrgs(app, requireAdmin, store);
-  const itemsApi = await itemsMod.attachItems(app, requireAdmin, store, { orgs });
-  orgs.wireItems(itemsApi);
   app.use((err, rq, rs, nx) => { rs.status(err.status || 500).json({ error: err.message || 'server error' }); });  // errors → JSON (like index.js)
   const server = http.createServer(app);
   attachBus(server, app);
   await new Promise(res => server.listen(0, '127.0.0.1', res));
   const PORT = server.address().port;
-  const jrt = itemsMod.__test.jukebox.rt;
 
   const req = (method, p, { body, headers } = {}) => new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : null;
@@ -151,64 +145,23 @@ const ok = (m) => { console.log('OK  ', passed + 1, m); passed++; };
   });
   const settle = () => new Promise(r => setTimeout(r, 120));
 
-  // security headers on a live response
-  let res = await req('GET', '/api/items/ZZZZZZ');
+  // security headers on a live response (a paid public route that exists in this
+  // mini-app — attachPaid adds GET …/queues)
+  let res = await req('GET', '/api/channels/volt-fm/queues');
   assert.strictEqual(res.headers['x-frame-options'], 'DENY', 'live responses carry X-Frame-Options');
   assert.match(res.headers['content-security-policy'] || '', /frame-ancestors/);
   ok('live: every response ships the anti-clickjacking + nosniff headers');
 
   // cross-origin WS rejected; rig-style (no origin) accepted
-  const cross = await wsConnect('/api/bus?channel=item:AAAAAA', { origin: 'https://evil.example' });
+  const cross = await wsConnect('/api/bus?channel=volt-fm', { origin: 'https://evil.example' });
   assert.strictEqual(cross.rejected, true, 'cross-origin WS handshake refused');
-  const sameless = await wsConnect('/api/bus?channel=item:AAAAAA');
+  const sameless = await wsConnect('/api/bus?channel=volt-fm');
   assert.ok(sameless.ws, 'no-Origin (rig/tool) WS accepted');
   sameless.ws.close();
   ok('live: cross-origin WS refused at the handshake, rig/no-origin accepted');
 
-  // build a jukebox + a rig output
-  const jb = (await req('POST', '/api/items', { headers: ADMIN, body: {
-    name: 'Sec Jukebox', surface: 'jukebox',
-    jukebox: { monetization: 'per_action', backend: 'log', houseMode: false,
-      catalog: [{ id: 'a', title: 'A', durationSec: 200 }, { id: 'b', title: 'B', durationSec: 200 }],
-      skip: { minPlaySec: 0, allowMidSong: true } } } })).body;
-  const CODE = jb.item;
-  const rigAdd = await req('POST', `/api/items/${CODE}/outputs`, { headers: ADMIN, body: { kind: 'rig', name: 'pi-sec' } });
-  const RIGKEY = rigAdd.body.rigKey;
-  assert.ok(RIGKEY, 'rig key minted');
-
-  // connect the program rig FIRST (name in the URL, key via HEADER) so the item
-  // is sellable — this also exercises fix #4 (key out of the query string).
-  const rig = await wsConnect(`/api/bus?channel=item:${CODE}&rig=pi-sec`, { 'x-rig-key': RIGKEY });
-  assert.ok(rig.ws, 'rig socket open (key via header)');
-  await settle();   // election makes it program
-
-  // queue two songs (dev identity) → A plays, B queues
-  await req('POST', `/api/items/${CODE}/jukebox/queue`, { body: { songId: 'a', user: { id: 'u1', name: 'Pat' } } });
-  await req('POST', `/api/items/${CODE}/jukebox/queue`, { body: { songId: 'b', user: { id: 'u2', name: 'Sam' } } });
-  assert.strictEqual(jrt.get(CODE).nowPlaying.songId, 'a', 'song A is playing, B queued');
-
-  // ATTACK: a NON-RIG socket forges track_ended/track_started → must be IGNORED
-  // (fix #1). A plain viewer here stands in for the privileged-session path the
-  // audit found: the fix routes RIG_REPORT only when ws._rig is set, so a socket
-  // that is not an authenticated rig — privileged human session or not — can't.
-  const viewer = await wsConnect(`/api/bus?channel=item:${CODE}`);
-  assert.ok(viewer.ws, 'viewer socket open');
-  viewer.ws.send(JSON.stringify({ type: 'track_ended', songId: 'a' }));
-  viewer.ws.send(JSON.stringify({ type: 'track_started', songId: 'b' }));
-  await settle();
-  assert.strictEqual(jrt.get(CODE).nowPlaying.songId, 'a', 'a non-rig socket CANNOT forge player reports (queue not advanced/hijacked)');
-  viewer.ws.close();
-  ok('fix#1: a non-rig WS cannot forge jukebox reports — player truth stays with the rig');
-
-  // the LEGIT program rig CAN report → advances the queue (legit path intact)
-  rig.ws.send(JSON.stringify({ type: 'track_ended', songId: 'a' }));
-  await settle();
-  assert.strictEqual(jrt.get(CODE).nowPlaying.songId, 'b', 'the elected program rig advances the queue');
-  rig.ws.close();
-  ok('fix#1: the authenticated program rig still reports truth (legit path intact)');
-
   // OUTPUT_CTL gate over the HTTP inject twin: anonymous station change refused,
-  // admin passes (fix #2). Use a radio-channel room (not item:).
+  // admin passes (fix #2). A radio-channel room.
   const ch = (await req('POST', '/api/channels', { headers: ADMIN, body: { name: 'Main' } })).body;
   let anon = await req('POST', `/api/channels/${ch.id}/actions`, { body: { type: 'station', station: 'aurora' } });
   assert.strictEqual(anon.status, 403, 'anonymous station change refused (pay-gate)');
@@ -231,29 +184,8 @@ const ok = (m) => { console.log('OK  ', passed + 1, m); passed++; };
   spy.ws.close();
   ok('fix#2: a denied output-control action is dropped silently over WS');
 
-  // a rig may NOT claim the reserved 'admin' name (sentinel-collision guard)
-  const badName = await req('POST', `/api/items/${CODE}/outputs`, { headers: ADMIN, body: { kind: 'rig', name: 'admin' } });
-  assert.strictEqual(badName.status, 400, "a rig named 'admin' is refused");
-  ok('rig sentinel: a rig cannot claim the reserved "admin" name');
-
-  // ADMIN-CHAIN forgery: a bus key message that FORGES an org/platform role in
-  // its payload must not escalate. The gate reads the verified session
-  // (ws._user) + server-resolved org membership — NEVER the payload's claimed
-  // role/orgRole (the same rule that closed the payload-identity hatch). Build
-  // an org item with a holder, then forge a non-holder inject.
-  const org = (await req('POST', '/api/admin/orgs', { headers: ADMIN, body: { name: 'Sec Bar' } })).body;
-  const padItem = (await req('POST', '/api/items', { headers: ADMIN, body: { name: 'Sec Claw', priceCents: 100, slotSeconds: 300 } })).body.item;
-  await req('POST', `/api/admin/orgs/${org.id}/items`, { headers: ADMIN, body: { code: padItem } });
-  await req('POST', `/api/items/${padItem}/buy`, { body: { user: { id: 'holder-1', name: 'Holder' } } });   // dev-hatch holder
-  // a non-holder inject that forges role:'admin' + orgRole:'owner' → still DENIED
-  const forged = await req('POST', `/api/channels/item:${padItem}/actions`,
-    { body: { type: 'key', action: 'pad_up', user: { id: 'attacker', name: 'M', role: 'admin', orgRole: 'owner' } } });
-  assert.strictEqual(forged.status, 403, 'a forged role/orgRole in the payload does NOT grant item control');
-  // the real holder (dev hatch) still drives — the gate works, it just ignores forged claims
-  const real = await req('POST', `/api/channels/item:${padItem}/actions`,
-    { body: { type: 'key', action: 'pad_up', user: { id: 'holder-1', name: 'Holder' } } });
-  assert.strictEqual(real.status, 200, 'the genuine holder still drives (gate intact)');
-  ok('admin-chain: forged org/platform role in a bus payload is ignored (identity = session + server-resolved membership)');
+  // (The jukebox report-forgery, rig-sentinel, and admin-chain forgery checks
+  // moved to the volt-control repo with the items/jukebox/orgs modules.)
 
   // Gap 4A: the bus HTTP-inject honors fail-closed too — with Supabase configured
   // + the insecure 'dev' key, a track_started inject must NOT be accepted as admin.
@@ -266,30 +198,8 @@ const ok = (m) => { console.log('OK  ', passed + 1, m); passed++; };
   server.close();
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 
-  /* ══ Part C — the private operator vault (real index.js child boot) ══ */
-  const { spawn } = require('node:child_process');
-  const cget = (port, p, headers) => new Promise((resolve) => {
-    const rq = http.get({ host: '127.0.0.1', port, path: p, headers: headers || {} }, (x) => { let b = ''; x.on('data', c => b += c); x.on('end', () => resolve({ status: x.statusCode, body: b })); });
-    rq.on('error', () => resolve({ status: 0, body: '' }));
-  });
-  async function bootIndex(port, extraEnv){
-    const child = spawn('node', ['server/index.js'], { cwd: __dirname, env: { ...process.env, PORT: String(port), ADMIN_KEY: 'dev', ...extraEnv }, stdio: 'ignore' });
-    for (let i = 0; i < 40; i++){ if ((await cget(port, '/healthz')).status === 200) return child; await settle(); }
-    child.kill('SIGKILL'); throw new Error('index.js did not boot on ' + port);
-  }
-  // configured vault: wrong code 401, right code 200 + content, file NOT static-served
-  let vc = await bootIndex(8811, { VAULT_CODE: 'test-secret-123' });
-  assert.strictEqual((await cget(8811, '/api/vault', { 'x-vault-code': 'nope' })).status, 401, 'wrong vault code → 401');
-  const good = await cget(8811, '/api/vault', { 'x-vault-code': 'test-secret-123' });
-  assert.strictEqual(good.status, 200, 'correct vault code → 200'); assert.ok(good.body.length > 100, 'vault serves content');
-  assert.strictEqual((await cget(8811, '/.vault/recipe-book.html')).status, 404, 'the vault file is NOT served statically (no leak)');
-  vc.kill('SIGKILL');
-  ok('vault: correct code serves content · wrong code 401 · file blocked from static');
-  // unconfigured vault (no VAULT_CODE) → fails CLOSED (503), even with a code
-  vc = await bootIndex(8812, { VAULT_CODE: '' });
-  assert.strictEqual((await cget(8812, '/api/vault', { 'x-vault-code': 'anything' })).status, 503, 'no VAULT_CODE → vault off (503)');
-  vc.kill('SIGKILL');
-  ok('vault: fails CLOSED (503) when VAULT_CODE is unset');
+  // (The private operator vault moved to the volt-control service with
+  // control-ops; its child-boot checks live in the volt-control repo.)
 
   Object.assign(process.env, save.A ? { ADMIN_KEY: save.A } : {});
   console.log(`\nALL CLEAR — ${passed} security checks passed`);
