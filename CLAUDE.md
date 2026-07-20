@@ -86,6 +86,7 @@ node .smoke-test.cjs     # client: headless run of every console path (jsdom)
 node .smoke-server.cjs   # server: the paid control gate + shop gates (in-process, auth-unconfigured)
 node .smoke-failclosed.cjs  # server: fail-closed on DB outage (boots a child w/ Supabase env set + DB down)
 node .smoke-security.cjs # server: take-control hardening (output-gate, SSRF, admin lockout, WS origin, headers)
+node .smoke-account.cjs  # client: account.html sign-in/out + forgot-password + recovery-link flows (jsdom)
 ```
 
 `.smoke-test.cjs` evals the whole page script (also catches syntax errors) and

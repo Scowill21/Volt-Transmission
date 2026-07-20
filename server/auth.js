@@ -120,7 +120,11 @@ async function resolveUser(req, res){
       const session = await gotrue('/token?grant_type=refresh_token', { body: { refresh_token: cookies.volt_rt } });
       setSession(req, res, session);
       if (session.user?.id) return publicUser(await ensureProfile(session.user));
-    } catch { setSession(req, res, null); }   // dead refresh token — clear
+    } catch (e) {
+      // Clear cookies ONLY when GoTrue says the token is dead (400/401). A
+      // transient 5xx / network blip must not nuke a valid 30-day session.
+      if (e && (e.status === 400 || e.status === 401)) setSession(req, res, null);
+    }
   }
   return null;
 }
@@ -172,7 +176,12 @@ export function mountAuth(app, requireAdmin){
   app.post('/api/auth/signup', guard(async (req, res) => {
     const { email, password, name } = req.body || {};
     if (!email || !password) throw httpError(400, 'email and password required');
-    const data = await gotrue('/signup', { body: { email, password, data: { name: (name || '').trim() || undefined } } });
+    // redirect_to: the confirmation email should land back on THIS site's
+    // account page (shared Supabase project — without it, the link falls back
+    // to the project Site URL, which points at a different property).
+    const proto = req.get('x-forwarded-proto') || req.protocol;
+    const redirect = encodeURIComponent(`${proto}://${req.get('host')}/account.html`);
+    const data = await gotrue(`/signup?redirect_to=${redirect}`, { body: { email, password, data: { name: (name || '').trim() || undefined } } });
     // Confirmations ON → GoTrue returns a user but no session until the email
     // link is clicked. Confirmations OFF → session arrives immediately.
     if (data.access_token){
@@ -196,6 +205,53 @@ export function mountAuth(app, requireAdmin){
     setSession(req, res, null);
     res.json({ ok: true });
   });
+
+  // Forgot password: GoTrue emails a recovery link. redirect_to points back at
+  // OUR account page (must be in Supabase Auth → URL Configuration → Redirect
+  // URLs, else GoTrue falls back to the project Site URL — the account page on
+  // any of our domains completes the flow either way). Always answers ok — a
+  // "no such account" answer would leak who has an account.
+  app.post('/api/auth/recover', guard(async (req, res) => {
+    const email = String((req.body || {}).email || '').trim();
+    if (!email) throw httpError(400, 'email required');
+    const proto = req.get('x-forwarded-proto') || req.protocol;
+    const redirect = encodeURIComponent(`${proto}://${req.get('host')}/account.html`);
+    await gotrue(`/recover?redirect_to=${redirect}`, { body: { email } }).catch(() => {});
+    res.json({ ok: true });
+  }));
+
+  // The recovery/confirmation link lands with tokens in the URL FRAGMENT
+  // (#access_token=…&type=recovery). The page posts them here; we verify the
+  // access token against GoTrue before trusting it, then move the session into
+  // our httpOnly cookies (the fragment never reaches any server log).
+  app.post('/api/auth/recovered', guard(async (req, res) => {
+    const { access_token, refresh_token } = req.body || {};
+    if (!access_token) throw httpError(400, 'access_token required');
+    const user = await gotrue('/user', { method: 'GET', token: access_token });
+    if (!user?.id) throw httpError(401, 'invalid recovery token');
+    setSession(req, res, { access_token, refresh_token: refresh_token || '', expires_in: 3600 });
+    res.json({ user: publicUser(await ensureProfile(user)) });
+  }));
+
+  // Set a new password for the SIGNED-IN account (the recovery flow signs the
+  // user in via /recovered first, so "reset password" is just this).
+  app.post('/api/auth/password', guard(async (req, res) => {
+    const password = String((req.body || {}).password || '');
+    if (password.length < 8) throw httpError(400, 'password must be at least 8 characters');
+    const { volt_at } = readCookies(req);
+    if (!volt_at) throw httpError(401, 'sign in first');
+    await gotrue('/user', { method: 'PUT', token: volt_at, body: { password } });
+    res.json({ ok: true });
+  }));
+
+  // Resend the signup confirmation email (surfaced when a login fails with
+  // "Email not confirmed"). Always ok — same no-leak rule as /recover.
+  app.post('/api/auth/resend', guard(async (req, res) => {
+    const email = String((req.body || {}).email || '').trim();
+    if (!email) throw httpError(400, 'email required');
+    await gotrue('/resend', { body: { type: 'signup', email } }).catch(() => {});
+    res.json({ ok: true });
+  }));
 
   // Who am I? The console calls this on load to stamp messages with the real
   // account. Never errors — an unconfigured/anonymous answer is { user: null }.

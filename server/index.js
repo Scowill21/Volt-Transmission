@@ -84,6 +84,9 @@ app.use(express.json({ limit: '32kb' }));
 // tight budget on auth (password/brute-force) + a generous one on the paid
 // control-plane mutations (buy/bid/jukebox flooding + monopolisation).
 app.use(['/api/auth/login', '/api/auth/signup'], makeRateLimiter({ windowMs: 5 * 60 * 1000, max: 30 }));
+// The email-sending routes get a tighter budget — each request can fire a
+// real email (password recovery / confirmation resend).
+app.use(['/api/auth/recover', '/api/auth/resend'], makeRateLimiter({ windowMs: 5 * 60 * 1000, max: 8 }));
 // Generous: a whole VENUE shares one WiFi egress IP, so this is a flood backstop
 // (per-user abuse is already bounded by the bid cooldown, queue caps, skip latch),
 // NOT a per-person cap — keep it high enough for a busy bar.

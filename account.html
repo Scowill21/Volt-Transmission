@@ -84,7 +84,20 @@
       <input id="password" type="password" placeholder="password" autocomplete="current-password" />
       <button class="primary" id="go">Sign in</button>
       <div class="status" id="authStatus"></div>
+      <div class="hint"><a href="#" id="forgot">forgot password?</a> — we email you a reset link.
+        <button id="resend" hidden style="margin-top:.4rem">Resend confirmation email</button></div>
       <div class="hint">Listeners sign up freely. Want to broadcast? Sign up, then apply below — an admin approves VJ and radio accounts.</div>
+    </div>
+  </section>
+
+  <!-- recovery link landing: set a new password -->
+  <section id="resetBox" hidden>
+    <div class="eyebrow">Set a new password</div>
+    <div class="card">
+      <div class="hint">You followed a password-reset link — you're signed in. Choose a new password (8+ characters).</div>
+      <input id="newPassword" type="password" placeholder="new password" autocomplete="new-password" />
+      <button class="primary" id="setPassword">Save new password</button>
+      <div class="status" id="resetStatus"></div>
     </div>
   </section>
 
@@ -96,7 +109,10 @@
       <div><span class="role" id="meRole"></span></div>
       <div class="meta" id="meMeta"></div>
       <div class="status" id="meStatus"></div>
-      <button id="logout">Sign out</button>
+      <div class="tabs">
+        <button id="logout">Sign out</button>
+        <a id="returnLink" hidden><button class="primary" type="button" id="returnBtn">Continue →</button></a>
+      </div>
     </div>
 
     <div class="eyebrow" style="margin-top:1.2rem">Broadcast on Volt</div>
@@ -159,6 +175,7 @@ $('tabUp').onclick = () => setTab('up');
 $('go').onclick = async () => {
   try {
     setStatus($('authStatus'), '…');
+    $('resend').hidden = true;
     if (mode === 'up'){
       const r = await api('/api/auth/signup', { email: $('email').value, password: $('password').value, name: $('name').value });
       if (r.pendingConfirmation){
@@ -169,12 +186,69 @@ $('go').onclick = async () => {
     } else {
       await api('/api/auth/login', { email: $('email').value, password: $('password').value });
     }
-    refresh();
-  } catch (e){ setStatus($('authStatus'), String(e.message || e), 'err'); }
+    refresh(true);   // just signed in — NOW the ?return= bounce is welcome
+  } catch (e){
+    const msg = String(e.message || e);
+    setStatus($('authStatus'), msg === 'Invalid login credentials'
+      ? 'wrong email or password — use "forgot password?" below if you lost it' : msg, 'err');
+    // unconfirmed account → offer to resend the confirmation email
+    if (/not confirmed/i.test(msg)) $('resend').hidden = false;
+  }
 };
 $('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('go').click(); });
 
-$('logout').onclick = async () => { await api('/api/auth/logout', {}); refresh(); };
+$('logout').onclick = async () => {
+  try { await api('/api/auth/logout', {}); } catch {}
+  refresh();
+};
+
+$('forgot').onclick = async (e) => {
+  e.preventDefault();
+  const email = $('email').value.trim();
+  if (!email){ setStatus($('authStatus'), 'type your email above first, then tap "forgot password?"', 'err'); return; }
+  try {
+    await api('/api/auth/recover', { email });
+    setStatus($('authStatus'), 'reset link sent — check your email (the link brings you back here)', 'ok');
+  } catch (err){ setStatus($('authStatus'), String(err.message || err), 'err'); }
+};
+
+$('resend').onclick = async () => {
+  try {
+    await api('/api/auth/resend', { email: $('email').value.trim() });
+    setStatus($('authStatus'), 'confirmation email re-sent — check your inbox', 'ok');
+    $('resend').hidden = true;
+  } catch (err){ setStatus($('authStatus'), String(err.message || err), 'err'); }
+};
+
+$('setPassword').onclick = async () => {
+  try {
+    setStatus($('resetStatus'), '…');
+    await api('/api/auth/password', { password: $('newPassword').value });
+    setStatus($('resetStatus'), 'password saved — you are signed in', 'ok');
+    $('resetBox').hidden = true;
+    refresh();
+  } catch (err){ setStatus($('resetStatus'), String(err.message || err), 'err'); }
+};
+
+// A recovery / confirmation link lands with tokens in the URL fragment
+// (#access_token=…&type=recovery|signup). Hand them to the server (it verifies
+// against GoTrue before trusting) so the session moves into httpOnly cookies,
+// then clear the fragment. type=recovery also opens the new-password card.
+async function handleAuthHash(){
+  const h = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const at = h.get('access_token');
+  if (!at) return false;
+  const type = h.get('type');
+  history.replaceState(null, '', location.pathname + location.search);
+  try {
+    await api('/api/auth/recovered', { access_token: at, refresh_token: h.get('refresh_token') || '' });
+    if (type === 'recovery'){ $('resetBox').hidden = false; $('newPassword').focus(); }
+    return true;
+  } catch (e){
+    setStatus($('authStatus'), 'that link expired — request a fresh one below', 'err');
+    return false;
+  }
+}
 
 async function apply(role){
   try {
@@ -186,12 +260,17 @@ async function apply(role){
 $('applyVj').onclick = () => apply('vj');
 $('applyRadio').onclick = () => apply('radio');
 
-async function refresh(){
+async function refresh(justAuthed){
   let user = null;
   try { user = (await api('/api/me')).user; } catch {}
-  if (user && RETURN_TO){ location.href = RETURN_TO; return; }
+  // Bounce to ?return= ONLY right after an explicit sign-in. Bouncing on page
+  // load trapped signed-in users — the instant redirect made Sign out
+  // unreachable from any link that carried ?return=.
+  if (user && RETURN_TO && justAuthed){ location.href = RETURN_TO; return; }
   $('authBox').hidden = !!user;
   $('meBox').hidden = !user;
+  $('returnLink').hidden = !(user && RETURN_TO);
+  if (user && RETURN_TO) $('returnLink').href = RETURN_TO;
   if (!user) return;
   $('meName').textContent = user.name || user.email;
   $('meRole').textContent = user.role;
@@ -203,7 +282,7 @@ async function refresh(){
   } else setStatus($('meStatus'), '');
   $('applyCard').style.display = user.role === 'listener' && !user.appliedRole ? '' : 'none';
 }
-refresh();
+handleAuthHash().then(() => refresh());
 </script>
 </body>
 </html>
